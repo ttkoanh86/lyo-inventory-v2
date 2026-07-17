@@ -70,14 +70,14 @@ if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    proxyUrl =
-        "https://ninee35ef3e539b-inventory-mgmt-proxy.onrender.com/api";
-    baseUrl = "https://ninee35ef3e539b-inventory-mgmt-proxy.onrender.com";
+    // 🔗 Dán đường link Proxy mới tinh chị vừa tạo trên Render vào đây:
+    proxyUrl = "https://lyo-inventory-proxy-9doh.onrender.com/api";
+    baseUrl = "https://lyo-inventory-proxy-9doh.onrender.com";
 }
 
 export function obtain_access_token() {
-    console.log("token in use: ", sessionStorage.getItem("token"))
-    return "Bearer " + sessionStorage.getItem("token");
+    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || "";
+    return "Bearer " + token.replace("Bearer ", "");
 }
 
 
