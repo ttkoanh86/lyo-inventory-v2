@@ -76,9 +76,9 @@ if (import.meta.env.MODE === "development") {
 }
 
 export function obtain_access_token() {
-    // Ưu tiên lấy Token cấu hình từ hệ thống Render (biến VITE_SAPO_ACCESS_TOKEN)
-    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || sessionStorage.getItem("token");
-    return "Bearer " + token;
+    // Tìm mã Token qua tiền tố VITE_ từ Render trước, nếu không thấy mới tìm các nguồn khác
+    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || "";
+    return "Bearer " + token.replace("Bearer ", "");
 }
 
 
