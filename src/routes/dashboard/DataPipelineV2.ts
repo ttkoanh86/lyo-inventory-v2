@@ -118,7 +118,8 @@ export function calculate_restock_data(
                 record.t_unix >=
                 // @ts-ignore
                 time_cutoff_by_sku.get(record.sku) -
-                30 * 24 * 60 * 60 * 1000
+                30 * 24 * 60 * 60 * 1000     // lấy Tổng số lượng bán ra trong vòng 30 ngày gần nhất để làm căn cứ dự báo.
+                                            //đổi 30 ngày ra đơn vị miligiây (milliseconds) trong lập trình
             ) {
                 // @ts-ignore
                 sales_by_sku.set(
