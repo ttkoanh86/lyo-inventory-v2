@@ -70,7 +70,7 @@ if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    // 🔗 Dán đường link Proxy mới tinh của chị vào đây:
+    // 🔗 Dán đường link Proxy mới theo code của ttkoanh86:
     proxyUrl = "https://lyo-inventory-proxy-9doh.onrender.com/api";
     baseUrl = "https://lyo-inventory-proxy-9doh.onrender.com";
 }
