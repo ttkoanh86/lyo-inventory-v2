@@ -70,9 +70,9 @@ if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    proxyUrl =
-        "https://ninee35ef3e539b-inventory-mgmt-proxy.onrender.com/api";
-    baseUrl = "https://ninee35ef3e539b-inventory-mgmt-proxy.onrender.com";
+    // 🔗 Dán đường link Proxy mới tinh của chị vào đây:
+    proxyUrl = "https://lyo-inventory-proxy-9doh.onrender.com/api";
+    baseUrl = "https://lyo-inventory-proxy-9doh.onrender.com";
 }
 
 export function obtain_access_token() {
