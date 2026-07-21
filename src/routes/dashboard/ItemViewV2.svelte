@@ -418,8 +418,8 @@
         baseUrl = "http://localhost:8080";
     } else {
         proxyUrl =
-            "https://ninee35ef3e539b-inventory-mgmt-proxy.onrender.com/api";
-        baseUrl = "https://ninee35ef3e539b-inventory-mgmt-proxy.onrender.com";
+            "https://lyo-inventory-proxy-x79b.onrender.com/api";
+        baseUrl = "https://lyo-inventory-proxy-x79b.onrender.com";
     }
 
     export function obtain_access_token() {
