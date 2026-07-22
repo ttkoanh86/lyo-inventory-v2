@@ -384,6 +384,23 @@
     };
 
     let data: ProductV2[] = $state([]);
+//them moi code de hien thi du lieu kieu nhu khi check ton kho o sapo
+// === CẤU HÌNH PHÂN TRANG CHUẨN ===
+    let currentPage = $state(1);
+    let itemsPerPage = $state(50); // Mặc định 50 dòng/trang
+
+    let totalPages = $derived(Math.ceil(datasource.length / itemsPerPage) || 1);
+
+    function updatePageData() {
+        let start = (currentPage - 1) * itemsPerPage;
+        let end = start + itemsPerPage;
+        data = datasource.slice(start, Math.min(end, datasource.length));
+    }
+
+    function resetPagination() {
+        currentPage = 1;
+        updatePageData();
+    }
     let is_loading = $state(false);
     let is_settings_open = $state(false);
     let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
@@ -437,10 +454,7 @@
     });
 
     async function dataProvider(ev: any) {
-        const { row } = ev;
-        if (row) {
-            data = datasource.slice(row.start, row.end);
-        }
+    updatePageData();
     }
 
     let grid_api = $state();
@@ -523,7 +537,7 @@
         // console.log(c_location_id);
         // console.log(datasource);
         grid_key++;
-
+        updatePageData(); //them moi dong nay de chay lai cach hien thi du lieu tren bang
         is_loading = false;
         // @ts-ignore
         updateKeys.dsource = datasource;
@@ -560,6 +574,7 @@
         // console.log(datasource)
         // updateKeys.dsource = datasource
         rowCount = datasource.length;
+        resetPagination(); // them dong nay
     }
 
     function enforce_sorting(ukey: number) {
@@ -899,7 +914,7 @@
             </div>
         {/if}
 
-        <div style="height: calc(100dvh - 110px);">
+        <div style="height: calc(100dvh - 160px);">
             {#key grid_key}
                 <Grid
                     autoRowHeight
@@ -922,6 +937,44 @@
                     }
                 </style>
             {/key}
+        </div>
+
+        <!-- THANH PHÂN TRANG GIAO DIỆN CHUẨN ĐẶT TRONG KHUNG -->
+        <div class="pagination-container">
+            <div class="page-size">
+                <span>Hiển thị</span>
+                <select bind:value={itemsPerPage} onchange={resetPagination}>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={200}>200</option>
+                </select>
+                <span>kết quả</span>
+            </div>
+
+            <div class="page-info">
+                {#if datasource.length > 0}
+                    Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, datasource.length)}</b> trên tổng <b>{datasource.length}</b> kết quả
+                {:else}
+                    Không có kết quả nào
+                {/if}
+            </div>
+
+            <div class="page-controls">
+                <button disabled={currentPage === 1} onclick={() => { currentPage--; updatePageData(); }}>&lt;</button>
+                
+                {#each Array(totalPages) as _, i}
+                    {#if i + 1 === 1 || i + 1 === totalPages || (i + 1 >= currentPage - 1 && i + 1 <= currentPage + 1)}
+                        <button 
+                            class:active={currentPage === i + 1} 
+                            onclick={() => { currentPage = i + 1; updatePageData(); }}>
+                            {i + 1}
+                        </button>
+                    {/if}
+                {/each}
+
+                <button disabled={currentPage === totalPages} onclick={() => { currentPage++; updatePageData(); }}>&gt;</button>
+            </div>
         </div>
 
         {#if is_loading}
@@ -947,6 +1000,45 @@
         .wx-willow-theme {
             --wx-color-primary: #0520c3;
             --wx-filter-border: 1px solid #c1c1c1;
+        }
+
+        .pagination-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: #ffffff;
+            border-top: 1px solid #e0e0e0;
+            font-family: inherit;
+            font-size: 14px;
+            height: 45px;
+        }
+        .page-size select {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            margin: 0 4px;
+        }
+        .page-controls {
+            display: flex;
+            gap: 4px;
+        }
+        .page-controls button {
+            padding: 4px 10px;
+            border: 1px solid #d9d9d9;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .page-controls button.active {
+            background-color: #0520c3;
+            color: #fff;
+            border-color: #0520c3;
+            font-weight: bold;
+        }
+        .page-controls button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
     </style>
 </Locale>
