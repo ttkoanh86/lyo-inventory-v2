@@ -150,17 +150,19 @@ export function calculate_restock_data(
         }
 
         // @ts-ignore
+        //Sản phẩm chỉ hiện ra nếu Total (Tồn kho + Đang về) <= 1/2 Lượng bán 30 ngày
         if (
             variant.c_available + variant.c_incoming <=
             // @ts-ignore
-            (1 / 3) * sales_by_sku.get(variant.sku) &&
+            (1 / 2) * sales_by_sku.get(variant.sku) &&
             // @ts-ignore
             sales_by_sku.get(variant.sku) > 0
         ) {
             // @ts-ignore
-            variant.c_restock = Math.round(sales_by_sku.get(variant.sku));
-            variant.c_restock_half = Math.round(0.5 * variant.c_restock);
-            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock);
+            //sales_by_sku.get(variant.sku) Đây là biến gốc lưu tổng số lượng đã bán/xuất kho của mã SKU đó trong vòng 30 ngày (1 tháng) được gom từ các đơn hàng
+            variant.c_restock = Math.round(sales_by_sku.get(variant.sku)); //Số lượng bán 1 tháng, 
+            variant.c_restock_half = Math.round(0.5 * variant.c_restock); //Số lượng đặt 1/2 tháng
+            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock); //ố lượng đặt 1/3 tháng
 
             items_need_restocking.push(variant);
         }
