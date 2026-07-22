@@ -1016,6 +1016,12 @@
             font-size: 14px;
             height: 45px;
         }
+        /*them code để phan hien thi sat so trang */
+        .page-right-group {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
         .page-size select {
             padding: 4px 8px;
             border-radius: 4px;
