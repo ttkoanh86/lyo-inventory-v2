@@ -939,7 +939,7 @@
             {/key}
         </div>
 
-        <!-- THANH PHÂN TRANG GIAO DIỆN CHUẨN ĐẶT TRONG KHUNG -->
+        <!-- THANH PHÂN TRANG - ĐÃ GỘP DÒNG THÔNG TIN SÁT NÚT CHUYỂN TRANG -->
         <div class="pagination-container">
             <div class="page-size">
                 <span>Hiển thị</span>
@@ -952,28 +952,31 @@
                 <span>kết quả</span>
             </div>
 
-            <div class="page-info">
-                {#if datasource.length > 0}
-                    Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, datasource.length)}</b> trên tổng <b>{datasource.length}</b> kết quả
-                {:else}
-                    Không có kết quả nào
-                {/if}
-            </div>
-
-            <div class="page-controls">
-                <button disabled={currentPage === 1} onclick={() => { currentPage--; updatePageData(); }}>&lt;</button>
-                
-                {#each Array(totalPages) as _, i}
-                    {#if i + 1 === 1 || i + 1 === totalPages || (i + 1 >= currentPage - 1 && i + 1 <= currentPage + 1)}
-                        <button 
-                            class:active={currentPage === i + 1} 
-                            onclick={() => { currentPage = i + 1; updatePageData(); }}>
-                            {i + 1}
-                        </button>
+            <!-- Cụm bên phải: Gồm Thông tin số lượng + Nút bấm chuyển trang -->
+            <div class="page-right-group">
+                <div class="page-info">
+                    {#if datasource.length > 0}
+                        Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, datasource.length)}</b> trên tổng <b>{datasource.length}</b> kết quả
+                    {:else}
+                        Không có kết quả nào
                     {/if}
-                {/each}
+                </div>
 
-                <button disabled={currentPage === totalPages} onclick={() => { currentPage++; updatePageData(); }}>&gt;</button>
+                <div class="page-controls">
+                    <button disabled={currentPage === 1} onclick={() => { currentPage--; updatePageData(); }}>&lt;</button>
+                    
+                    {#each Array(totalPages) as _, i}
+                        {#if i + 1 === 1 || i + 1 === totalPages || (i + 1 >= currentPage - 1 && i + 1 <= currentPage + 1)}
+                            <button 
+                                class:active={currentPage === i + 1} 
+                                onclick={() => { currentPage = i + 1; updatePageData(); }}>
+                                {i + 1}
+                            </button>
+                        {/if}
+                    {/each}
+
+                    <button disabled={currentPage === totalPages} onclick={() => { currentPage++; updatePageData(); }}>&gt;</button>
+                </div>
             </div>
         </div>
 
