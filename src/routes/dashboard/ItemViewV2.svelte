@@ -1009,7 +1009,7 @@
         .pagination-container {
             display: flex;
             align-items: center;
-            justify-content: flex-start; /* 🟢 Đã đổi thành canh trái */
+            justify-content: flex-end; /* 🟢 Đã đổi thành canh phải */
             gap: 40px;                   /* 🟢 Đã thêm khoảng cách giữa các khối */
             padding: 8px 16px;
             background: #ffffff;
