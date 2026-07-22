@@ -22,19 +22,30 @@
     async function auth() {
         password_shown = false;
         
-        // 🔐 CHỊ CÓ THỂ ĐỔI TÀI KHOẢN VÀ MẬT KHẨU Ở ĐÂY Theo Ý MUỐN
-        const TAI_KHOAN_CHUAN = "admin";
-        const MAT_KHAU_CHUAN = "lyo12345"; 
+        try {
+            // Gọi API thật về Proxy để lấy Token từ Valkey
+            const response = await fetch("https://lyo-inventory-proxy-x79b.onrender.com/auth", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            });
 
-        if (username === TAI_KHOAN_CHUAN && password === MAT_KHAU_CHUAN) {
-            // Đánh dấu đã đăng nhập thành công vào trình duyệt
-            sessionStorage.setItem("isLoggedIn", "true");
-            sessionStorage.setItem("token", "DUMMY_TOKEN"); // Tạo token ảo để mồi hệ thống
-            
-            // Vào thẳng trang số liệu
-            await goto("dashboard", { invalidateAll: false });
-        } else {
-            alert("Tài khoản hoặc Mật khẩu chị gõ chưa chính xác rồi ạ!");
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Lưu Token xịn do Proxy cấp vào LocalStorage và SessionStorage
+                localStorage.setItem("token", data.token);
+                sessionStorage.setItem("token", data.token);
+                sessionStorage.setItem("isLoggedIn", "true");
+                
+                // Vào thẳng dashboard
+                await goto("dashboard", { invalidateAll: false });
+            } else {
+                alert("Tài khoản hoặc Mật khẩu chưa chính xác rồi ạ!");
+            }
+        } catch (error) {
+            console.error("Lỗi đăng nhập:", error);
+            alert("Không thể kết nối đến máy chủ Proxy!");
         }
     }
 </script>
