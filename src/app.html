@@ -10,9 +10,9 @@
 			default-src 'self';
 			script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
 			style-src 'self' 'unsafe-inline' https://cdn.svar.dev https://fonts.googleapis.com https://cdn.jsdelivr.net;
-			font-src *;
+			font-src * data: https://cdn.jsdelivr.net;
 			img-src 'self' data: * blob:;
-			connect-src https://lyo-inventory-mgmt.github.io 'self' https://sapo.dktdcdn.net http://localhost:8080 https://lyo-inventory-proxy-x79b.onrender.com;
+			connect-src 'self' https://cdn.jsdelivr.net https://lyo-inventory-mgmt.github.io https://sapo.dktdcdn.net http://localhost:8080 https://lyo-inventory-proxy-x79b.onrender.com;
 			object-src 'none';
 			frame-ancestors 'none';
 			base-uri 'self';
