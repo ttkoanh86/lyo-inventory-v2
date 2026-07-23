@@ -700,15 +700,13 @@
             </div>
         {/if}
 
-        <div style="height: calc(100dvh - 160px);">
+        <div style="height: calc(100dvh - 160px); overflow: hidden;">
             {#key grid_key}
                 <Grid
-                    autoRowHeight
                     bind:this={grid_api}
                     {columns}
                     {data}
                     responsive={responsive_fields}
-                    dynamic={{ rowCount: data.length }}
                     sizes={{ rowHeight: 165 }}
                     rowStyle={(row: any) =>
                         row.c_restock < 20 && c_location_id === 122671
