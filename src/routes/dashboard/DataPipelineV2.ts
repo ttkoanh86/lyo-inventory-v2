@@ -63,27 +63,22 @@ export interface ProductV2 {
     unit?: string;
     suppliers_last_year?: string[];
     composite_item_quantity_by_variant_id?: Map<number, number>;
-    // TODO: Get a list of suppliers in last year + tags + category + unit
 }
 
 if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    // 🔗 Dán đường link Proxy mới theo code của ttkoanh86:
     proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
     baseUrl = "https://lyo-inventory-proxy-x79b.onrender.com";
 }
 
 export function obtain_access_token() {
-    // Tìm mã Token qua tiền tố VITE_ từ Render trước, nếu không thấy mới tìm các nguồn khác
     const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || "";
     return "Bearer " + token.replace("Bearer ", "");
 }
 
-
 type Record = OrderRecordV2 | TransferRecord;
-
 
 export function calculate_restock_data(
     records: Record[],
@@ -106,7 +101,6 @@ export function calculate_restock_data(
         }
     }
 
-
     for (let record of records) {
         if (!time_cutoff_by_sku.has(record.sku)) {
             time_cutoff_by_sku.set(record.sku, record.t_unix);
@@ -123,7 +117,6 @@ export function calculate_restock_data(
             ) {
                 // @ts-ignore
                 sales_by_sku.set(
-
                     record.sku,
                     // @ts-ignore
                     sales_by_sku.get(record.sku) + record.quantity,
@@ -132,37 +125,35 @@ export function calculate_restock_data(
         }
     }
 
-
-
     variant_by_id.forEach((variant, id) => {
-        const inventory = variant.inventory_level_by_location.get(location_id);
+        // 🟢 Ép location_id về dạng Number chuẩn để tránh lệch kiểu dữ liệu gây lỗi bằng 0
+        const locIdNum = Number(location_id);
+        const inventory = variant.inventory_level_by_location.get(locIdNum) || 
+                          variant.inventory_level_by_location.get(location_id as any);
 
-        variant.c_on_hand = Math.max(0, inventory?.on_hand || 0);
-        variant.c_incoming = Math.max(0, inventory?.incoming || 0)
-        variant.c_available = Math.max(0, inventory?.available || 0);
+        // 🟢 Lấy chuẩn Tồn khả dụng (available)
+        variant.c_available = Math.max(0, inventory?.available ?? 0);
+        variant.c_incoming = Math.max(0, inventory?.incoming ?? 0);
+        
+        // Gán c_on_hand = c_available để Cột "Tồn kho" trên bảng hiển thị đúng Tồn khả dụng
+        variant.c_on_hand = variant.c_available;
+
         variant.lot_no = inventory?.lot_no || undefined;
         variant.lot_mfg = inventory?.lot_mfg || undefined;
         variant.lot_exp = inventory?.lot_exp || undefined;
         variant.serial = inventory?.serial || undefined;
 
-        if (variant.name_normalized.includes("melaxin")) {
-            console.log(variant.name, variant.sku, variant.c_available, variant.c_incoming, sales_by_sku.get(variant.sku) ?? 0)
-        }
-
         // @ts-ignore
-        //Sản phẩm chỉ hiện ra nếu Total (Tồn kho + Đang về) <= 1/2 Lượng bán 30 ngày
+        const sales = sales_by_sku.get(variant.sku) ?? 0;
+
+        // 🟢 Sản phẩm hiện ra nếu Tồn khả dụng + Đang về <= 1/2 Lượng bán 30 ngày (Bao trọn mốc 1/2 và 1/3)
         if (
-            variant.c_available + variant.c_incoming <=
-            // @ts-ignore
-            (1 / 2) * sales_by_sku.get(variant.sku) &&
-            // @ts-ignore
-            sales_by_sku.get(variant.sku) > 0
+            variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
+            sales > 0
         ) {
-            // @ts-ignore
-            //sales_by_sku.get(variant.sku) Đây là biến gốc lưu tổng số lượng đã bán/xuất kho của mã SKU đó trong vòng 30 ngày (1 tháng) được gom từ các đơn hàng
-            variant.c_restock = Math.round(sales_by_sku.get(variant.sku)); //Số lượng bán 1 tháng, 
-            variant.c_restock_half = Math.round(0.5 * variant.c_restock); //Số lượng đặt 1/2 tháng
-            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock); //ố lượng đặt 1/3 tháng
+            variant.c_restock = Math.round(sales);
+            variant.c_restock_half = Math.round(0.5 * variant.c_restock);
+            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock);
 
             items_need_restocking.push(variant);
         }
@@ -181,7 +172,6 @@ export async function get_locations(): Promise<Location[]> {
     });
 
     let resp = await a.get(`${proxyUrl}/admin/locations.json`);
-    // let location_by_id: Map<number, string> = new Map()
     let location_by_id: Location[] = [];
     if (resp.status != 200) {
         return location_by_id;
@@ -234,7 +224,6 @@ export function getLastDataUpdate() {
         now.setMonth(now.getMonth() - 6);
         utcString = now.toISOString();
     }
-    // Strip milliseconds if present (UTC string from Date does not include ms, but just in case)
     return utcString.replace(/\.\d{3}Z$/, "Z");
 }
 
@@ -244,12 +233,9 @@ export function sleep(ms: number) {
 
 export function is_promotional_item(brand: string) {
     if (!brand) {
-        return false
+        return false;
     }
-    const br = brand.toLowerCase()
-    if (!brand) {
-        return false
-    }
+    const br = brand.toLowerCase();
     if (
         br == "tặng" ||
         br == "sale" ||
@@ -263,15 +249,11 @@ export function is_promotional_item(brand: string) {
 }
 
 export function normalizeString(input: string): string {
-    // Remove accents
     let str = input.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    // Lowercase
     str = str.toLowerCase();
-    // Remove special characters, keep a-z, 0-9, and whitespace
     str = str.replace(/[^a-z0-9\s]/g, "");
     return str;
 }
-
 
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
@@ -293,11 +275,9 @@ export async function get_active_products() {
             a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page + 1, status: "active" },
             }),
-
             a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page + 2, status: "active" },
             }),
-
             a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page + 3, status: "active" },
             }),
@@ -330,7 +310,6 @@ export async function get_active_products() {
                                 c_restock: 0,
                                 c_restock_half: 0,
                                 c_restock_third: 0,
-                                // image_path: variant.images[0].full_path || "",
                                 image_path: "",
                                 c_on_hand: 0,
                                 c_incoming: 0,
@@ -343,7 +322,6 @@ export async function get_active_products() {
                                 inventory_level_by_location: new Map(),
                             };
 
-                            // Populate inventory level map
                             variant.inventories.forEach(
                                 (inventory: any) => {
                                     p_variant.inventory_level_by_location.set(
@@ -359,22 +337,16 @@ export async function get_active_products() {
                             );
 
                             if (variant.composite) {
-                                p_variant.composite_item_quantity_by_variant_id = new Map()
+                                p_variant.composite_item_quantity_by_variant_id = new Map();
                                 variant.composite_items.forEach((composite_item: any) => {
-                                    p_variant.composite_item_quantity_by_variant_id?.set(composite_item.sub_variant_id, composite_item.quantity)
-                                })
+                                    p_variant.composite_item_quantity_by_variant_id?.set(composite_item.sub_variant_id, composite_item.quantity);
+                                });
                             }
 
-                            // Get image
                             if (variant.images && variant.images[0]) {
-                                p_variant.image_path =
-                                    variant.images[0].full_path;
-                            } else if (
-                                product.images &&
-                                product.images[0]
-                            ) {
-                                p_variant.image_path =
-                                    product.images[0].full_path;
+                                p_variant.image_path = variant.images[0].full_path;
+                            } else if (product.images && product.images[0]) {
+                                p_variant.image_path = product.images[0].full_path;
                             }
 
                             p_variant_by_ids.set(
@@ -384,12 +356,12 @@ export async function get_active_products() {
 
                             for (let price of variant.variant_prices) {
                                 if (price.price_list.code == "GIANHAP") {
-                                    p_variant.retail_price_ecomm = price.included_tax_price
-                                    break
+                                    p_variant.retail_price_ecomm = price.included_tax_price;
+                                    break;
                                 }
                             }
-                            p_variant.unit = variant.unit || "<Không xác định>"
-                            p_variant.category = product.category
+                            p_variant.unit = variant.unit || "<Không xác định>";
+                            p_variant.category = product.category;
                         }
                     });
                 });
@@ -417,7 +389,6 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
             const store = tx.objectStore("OrderRecordsV2");
             const records: OrderRecordV2[] = [];
 
-            // Always use the "type" index for filtering
             const index = store.index("type");
             const keyRange = IDBKeyRange.only("order");
             const cursorRequest = index.openCursor(keyRange);
@@ -503,16 +474,14 @@ export async function updateIndexedDB(records: OrderRecordV2[]) {
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-
-let a = new Axios({
-    headers: {
-        "Content-Type": "application/json",
-        Authorization: obtain_access_token(),
-    },
-});
+    let a = new Axios({
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: obtain_access_token(),
+        },
+    });
 
     const last_update_utc = getLastDataUpdate();
-    // const today_utc = new Date().toUTCString()
     let existing_order_ids = new Set<number>();
     let page = 1;
     let order_records: OrderRecordV2[] = [];
@@ -585,11 +554,10 @@ let a = new Axios({
                                 (fulfillment: any) => {
                                     fulfillment.fulfillment_line_items.forEach(
                                         (line_item: any) => {
-
                                             if (line_item.is_composite) {
-                                                const it = variant_by_id.get(line_item.variant_id)
+                                                const it = variant_by_id.get(line_item.variant_id);
                                                 it?.composite_item_quantity_by_variant_id?.forEach((id: number, quantity: number) => {
-                                                    const composite_item_sku = variant_by_id.get(id)?.sku
+                                                    const composite_item_sku = variant_by_id.get(id)?.sku;
                                                     if (composite_item_sku) {
                                                         order_records.push({
                                                             order_id: order.id,
@@ -597,33 +565,22 @@ let a = new Axios({
                                                             quantity: line_item.quantity * quantity,
                                                             is_composite: false,
                                                             location_id: fulfillment.stock_location_id,
-                                                            t_unix: new Date(
-                                                                order.modified_on
-                                                            ).getTime(),
+                                                            t_unix: new Date(order.modified_on).getTime(),
                                                             new_record: true
-                                                        })
+                                                        });
                                                     }
-
                                                 });
-
                                             } else {
                                                 order_records.push({
                                                     order_id: order.id,
-                                                    quantity:
-                                                        line_item.quantity,
+                                                    quantity: line_item.quantity,
                                                     sku: line_item.sku,
-                                                    is_composite:
-                                                        line_item.is_composite,
-                                                    location_id:
-                                                        fulfillment.stock_location_id,
-                                                    t_unix: new Date(
-                                                        order.modified_on,
-                                                    ).getTime(),
+                                                    is_composite: line_item.is_composite,
+                                                    location_id: fulfillment.stock_location_id,
+                                                    t_unix: new Date(order.modified_on).getTime(),
                                                     new_record: true,
                                                 });
                                             }
-
-
                                         },
                                     );
                                 },
@@ -639,15 +596,11 @@ let a = new Axios({
         }
     }
 
-    // Update IndexedDB
     updateIndexedDB(order_records.filter((v) => v.new_record));
-
     return order_records;
 }
 
-export async function fetchInventoryTransferFromIndexedDB(): Promise<
-    TransferRecord[]
-> {
+export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB", 3);
         let transfers: TransferRecord[] = [];
@@ -661,7 +614,6 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<
             const tx = db.transaction("OrderRecordsV2", "readonly");
             const store = tx.objectStore("OrderRecordsV2");
 
-            // Use the "type" index to get only "transfer" entries
             const index = store.index("type");
             const keyRange = IDBKeyRange.only("transfer");
             const cursorRequest = index.openCursor(keyRange);
@@ -677,7 +629,6 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<
                 ).result;
                 if (cursor) {
                     const value = cursor.value;
-                    // Iterate through entries as-is, do not save or return yet
                     transfers.push({
                         sku: value.sku,
                         t_unix: value.t_unix,
@@ -690,7 +641,6 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<
                     cursor.continue();
                 } else {
                     db.close();
-                    // Do not resolve or return anything yet
                     resolve(transfers);
                 }
             };
@@ -751,32 +701,23 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-export function get_low_sales_skus(
-    p_variants: ProductV2[]
-) {
-    
+export function get_low_sales_skus(p_variants: ProductV2[]) {
     let _r = new Set<string>();
-    
     p_variants.forEach((v) => {
         if (v.c_restock < 20) {
-            _r.add(v.sku)
+            _r.add(v.sku);
         }
-    })
-
+    });
     return _r;
 }
 
-export async function fetch_inventory_transfer(
-    p_variants: Map<number, ProductV2>,
-) {
-    // received OR shipped
-
+export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
     let a = new Axios({
-    headers: {
-        "Content-Type": "application/json",
-        Authorization: obtain_access_token(),
-    },
-});
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: obtain_access_token(),
+        },
+    });
 
     const last_update_utc = getLastDataUpdate();
 
@@ -849,31 +790,21 @@ export async function fetch_inventory_transfer(
                     j.stock_transfers.forEach((transfer: any) => {
                         if (
                             !existing_transfer_ids.has(transfer.id) &&
-                            (transfer.status == "received" ||
-                                transfer.status == "shipped")
+                            (transfer.status == "received" || transfer.status == "shipped")
                         ) {
-                            transfer.line_items.forEach(
-                                (line_item: any) => {
-                                    if (
-                                        p_variants.has(line_item.variant_id)
-                                    ) {
-                                        transfer_records.push({
-                                            transfer_id: transfer.id,
-                                            location_id:
-                                                transfer.source_location_id,
-                                            // @ts-ignore
-                                            sku: p_variants.get(
-                                                line_item.variant_id,
-                                            ).sku,
-                                            t_unix: new Date(
-                                                transfer.modified_on,
-                                            ).getTime(),
-                                            quantity: line_item.quantity,
-                                            new_record: true,
-                                        });
-                                    }
-                                },
-                            );
+                            transfer.line_items.forEach((line_item: any) => {
+                                if (p_variants.has(line_item.variant_id)) {
+                                    transfer_records.push({
+                                        transfer_id: transfer.id,
+                                        location_id: transfer.source_location_id,
+                                        // @ts-ignore
+                                        sku: p_variants.get(line_item.variant_id).sku,
+                                        t_unix: new Date(transfer.modified_on).getTime(),
+                                        quantity: line_item.quantity,
+                                        new_record: true,
+                                    });
+                                }
+                            });
                             existing_transfer_ids.add(transfer.id);
                         }
                     });
@@ -885,7 +816,6 @@ export async function fetch_inventory_transfer(
         }
     }
 
-    // Update IndexedDB
     saveInventoryTransferToIndexedDB(
         transfer_records.filter((v) => v.new_record),
         p_variants,
@@ -893,4 +823,3 @@ export async function fetch_inventory_transfer(
 
     return transfer_records;
 }
-
