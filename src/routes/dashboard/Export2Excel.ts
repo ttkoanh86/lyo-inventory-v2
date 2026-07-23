@@ -2,7 +2,7 @@ import { calculate_restock_data, normalizeString, type OrderRecordV2, type Produ
 import { imageToArrayBuffer } from "./imageToByteArray";
 import { type Location } from "./Template";
 
-// 🟢 FIX CHÍNH: Import trực tiếp từ gói thư viện nội bộ, KHÔNG dùng CDN cdnjs bị tường lửa chặn
+// 🟢 FIX CHÍNH: Dùng trực tiếp gói ExcelJS và FileSaver cài sẵn trong project
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 
@@ -45,7 +45,7 @@ export async function export_transfer_sheet_to_xlsx(order_records: OrderRecordV2
 
 export async function _actual_export_handler(prods: ProductV2[], location: Location, is_transfer = false) {
     try {
-        // Fetch the template
+        // Tải file mẫu Excel
         const url = "https://lyo-inventory-mgmt.github.io/assets/sapo_mau_file_nhap_don_nhap_hang-1-min.xlsx";
         const resp = await fetch(url);
 
@@ -55,7 +55,7 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
 
         const arrayBuffer = await resp.arrayBuffer();
 
-        // Load workbook chuẩn từ gói ExcelJS nội bộ
+        // Nạp workbook bằng ExcelJS nội bộ
         const wb = new ExcelJS.Workbook();
         await wb.xlsx.load(arrayBuffer);
         const ws = wb.getWorksheet('Sheet1');
@@ -66,13 +66,11 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
         const img_col = 'C';
 
         for (let v of prods) {
-            // Add textual data
             const rowdata = [v.sku, v.barcode, "", v.c_restock_third, v.c_restock_half, v.c_restock, v.c_on_hand, v.c_incoming, v.name];
             for (let c = 0; c < rowdata.length; c++) {
                 ws.getCell(String.fromCharCode(65 + c) + row).value = rowdata[c];
             }
 
-            // Load image (nếu có)
             if (v.image_path) {
                 const im = await imageToArrayBuffer(v.image_path, 141);
                 let ext = v.image_path.split(".").at(-1) || "png";
@@ -92,14 +90,11 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
             row += 1;
         }
 
-        // Save to XLSX
         const wb_buffer = await wb.xlsx.writeBuffer();
         const blob = new Blob([wb_buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 
         const normalized_branch = normalizeString(location?.label || "Kho");
         const t = new Date();
-        
-        // 🟢 FIX THỜI GIAN: getMonth() + 1 để định dạng Tháng đúng thực tế
         const month = String(t.getMonth() + 1).padStart(2, '0');
         const day = String(t.getDate()).padStart(2, '0');
         const timeStr = `${t.getFullYear()}${month}${day}_${t.getHours()}${t.getMinutes()}${t.getSeconds()}`;
