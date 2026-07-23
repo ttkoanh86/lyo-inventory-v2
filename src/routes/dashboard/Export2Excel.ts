@@ -1,10 +1,10 @@
 import { calculate_restock_data, normalizeString, type OrderRecordV2, type ProductV2, type TransferRecord } from "./DataPipelineV2";
 import { imageToArrayBuffer } from "./imageToByteArray";
+import { lazyLoadScript } from "./lazyLoadScript";
 import { type Location } from "./Template";
 
-// 🟢 FIX CHÍNH: Dùng trực tiếp gói ExcelJS và FileSaver cài sẵn trong project
-import ExcelJS from "exceljs";
-import { saveAs } from "file-saver";
+declare var ExcelJS: any;
+declare var saveAs: any;
 
 export async function export_all_to_xlsx(order_records: OrderRecordV2[], transfer_records: TransferRecord[], variant_by_id: Map<number, ProductV2>, c_location_id: number, location: Location) {
     const success = await _actual_export_handler(calculate_restock_data(
@@ -45,7 +45,9 @@ export async function export_transfer_sheet_to_xlsx(order_records: OrderRecordV2
 
 export async function _actual_export_handler(prods: ProductV2[], location: Location, is_transfer = false) {
     try {
-        // Tải file mẫu Excel
+        await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js", "sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==");
+        await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js", "sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ==");
+
         const url = "https://lyo-inventory-mgmt.github.io/assets/sapo_mau_file_nhap_don_nhap_hang-1-min.xlsx";
         const resp = await fetch(url);
 
@@ -55,7 +57,6 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
 
         const arrayBuffer = await resp.arrayBuffer();
 
-        // Nạp workbook bằng ExcelJS nội bộ
         const wb = new ExcelJS.Workbook();
         await wb.xlsx.load(arrayBuffer);
         const ws = wb.getWorksheet('Sheet1');
@@ -80,7 +81,7 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
                 if (im && im.b) {
                     const img_id = wb.addImage({
                         buffer: im.b,
-                        extension: ext as any
+                        extension: ext
                     });
                     ws.addImage(img_id, `${img_col}${row}:${img_col}${row}`);
                     ws.getRow(row).height = im.h * 0.75;
@@ -106,7 +107,7 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
         }
         return true;
     } catch (err) {
-        console.error("Lỗi khi xuất file Excel:", err);
+        console.error("Lỗi xuất Excel:", err);
         return false;
     }
 }
