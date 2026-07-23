@@ -3,7 +3,6 @@
     import { Grid, Willow } from "wx-svelte-grid";
     // @ts-ignore
     import { Button, Select, Portal, Modal, Popup } from "wx-svelte-core";
-    // import {ContextMenu} from "wx-svelte-menu"
     // @ts-ignore
     import { Locale } from "wx-svelte-core";
     import {
@@ -58,7 +57,7 @@
         {
             id: "sku",
             resize: true,
-            width: 130, // 90 + 40
+            width: 130,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -69,7 +68,7 @@
         {
             id: "name",
             resize: true,
-            width: 240, // 200 + 40
+            width: 240,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -89,7 +88,7 @@
         {
             id: "c_restock_third",
             resize: true,
-            width: 140, // 100 + 40
+            width: 140,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -100,7 +99,7 @@
         {
             id: "c_restock_half",
             resize: true,
-            width: 140, // 100 + 40
+            width: 140,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -111,7 +110,7 @@
         {
             id: "c_restock",
             resize: true,
-            width: 140, // 100 + 40
+            width: 140,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -119,21 +118,10 @@
                 },
             ],
         },
-        // {
-        //     id: "suppliers",
-        //     resize: true,
-        //     width: 160, // Add width for consistency (if needed)
-        //     header: [
-        //         {
-        //             cell: HeaderWithSortUi,
-        //             text: "NCC",
-        //         },
-        //     ],
-        // },
         {
             id: "c_on_hand",
             resize: true,
-            width: 140, // 100 + 40
+            width: 140,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -144,7 +132,7 @@
         {
             id: "c_incoming",
             resize: true,
-            width: 140, // 100 + 40
+            width: 140,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -155,7 +143,7 @@
         {
             id: "brand",
             resize: true,
-            width: 180, // 140 + 40
+            width: 180,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -166,7 +154,7 @@
         {
             id: "unit",
             resize: true,
-            width: 180, // 140 + 40
+            width: 180,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -177,7 +165,7 @@
         {
             id: "import_price",
             resize: true,
-            width: 180, // 140 + 40
+            width: 180,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -188,7 +176,7 @@
         {
             id: "retail_price",
             resize: true,
-            width: 180, // 140 + 40
+            width: 180,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -199,7 +187,7 @@
         {
             id: "retail_price_ecomm",
             resize: true,
-            width: 180, // 140 + 40
+            width: 180,
             header: [
                 {
                     cell: HeaderWithSortUi,
@@ -217,175 +205,13 @@
 
     const responsive_fields = {
         800: {
-            columns: [
-                {
-                    id: "id",
-                    hidden: true,
-                },
-                {
-                    id: "selected",
-                    cell: SelectionCheckboxCell,
-                    width: 36,
-                },
-                {
-                    id: "sku",
-                    resize: true,
-                    width: 130, // 90 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "SKU",
-                        },
-                    ],
-                },
-                {
-                    id: "name",
-                    resize: true,
-                    width: 240, // 200 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Tên sản phẩm",
-                        },
-                    ],
-                },
-                {
-                    id: "image",
-                    header: "Ảnh",
-                    cell: ImageCell,
-                },
-                {
-                    id: "image_path",
-                    hidden: true,
-                },
-                {
-                    id: "c_restock_third",
-                    resize: true,
-                    width: 140, // 100 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "SL đặt\n(1/3 tháng)",
-                        },
-                    ],
-                },
-                {
-                    id: "c_restock_half",
-                    resize: true,
-                    width: 140, // 100 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "SL đặt\n(1/2 tháng)",
-                        },
-                    ],
-                },
-                {
-                    id: "c_restock",
-                    resize: true,
-                    width: 140, // 100 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "SL bán\n(1 tháng)",
-                        },
-                    ],
-                },
-                // {
-                //     id: "suppliers",
-                //     resize: true,
-                //     width: 140, // Add width for consistency (if needed)
-                //     header: [
-                //         {
-                //             cell: HeaderWithSortUi,
-                //             text: "NCC",
-                //         },
-                //     ],
-                // },
-                {
-                    id: "c_on_hand",
-                    resize: true,
-                    width: 140, // 100 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Tồn kho",
-                        },
-                    ],
-                },
-                {
-                    id: "c_incoming",
-                    resize: true,
-                    width: 140, // 100 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Đang về",
-                        },
-                    ],
-                },
-                {
-                    id: "brand",
-                    resize: true,
-                    width: 180, // 140 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Nhãn hiệu",
-                        },
-                    ],
-                },
-                {
-                    id: "unit",
-                    resize: true,
-                    width: 180, // 140 + 40
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Đơn vị tính",
-                        },
-                    ],
-                },
-                {
-                    id: "import_price",
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Giá nhập",
-                        },
-                    ],
-                    resize: true,
-                    width: 180, // 140 + 40
-                },
-                {
-                    id: "retail_price",
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Thành tiền (Shop)",
-                        },
-                    ],
-                    resize: true,
-                    width: 180, // 140 + 40
-                },
-                {
-                    id: "retail_price_ecomm",
-                    header: [
-                        {
-                            cell: HeaderWithSortUi,
-                            text: "Thành tiền (TMĐT)",
-                        },
-                    ],
-                    resize: true,
-                    width: 180, // 140 + 40
-                },
-            ],
+            columns: columns,
         },
     };
 
     let data: ProductV2[] = $state([]);
-//them moi code de hien thi du lieu kieu nhu khi check ton kho o sapo
-// === CẤU HÌNH PHÂN TRANG CHUẨN ===
+
+    // === CẤU HÌNH PHÂN TRANG CHUẨN MƯỢT MÀ ===
     let currentPage = $state(1);
     let itemsPerPage = $state(50); // Mặc định 50 dòng/trang
 
@@ -401,13 +227,13 @@
         currentPage = 1;
         updatePageData();
     }
+
     let is_loading = $state(false);
     let is_settings_open = $state(false);
     let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
     setContext("updatekeys", updateKeys);
 
     let datasource: ProductV2[] = $state([]);
-    // setContext("datasource", datasource);
 
     let variant_by_id = new Map<number, ProductV2>();
     let order_records: OrderRecordV2[] = [];
@@ -434,8 +260,7 @@
         proxyUrl = "http://localhost:8080/api";
         baseUrl = "http://localhost:8080";
     } else {
-        proxyUrl =
-            "https://lyo-inventory-proxy-x79b.onrender.com/api";
+        proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
         baseUrl = "https://lyo-inventory-proxy-x79b.onrender.com";
     }
 
@@ -453,20 +278,13 @@
         },
     });
 
-    async function dataProvider(ev: any) {
-    updatePageData();
-    }
-
     let grid_api = $state();
 
-    const revoke_broadcast_channel = new BroadcastChannel("revoke")
+    const revoke_broadcast_channel = new BroadcastChannel("revoke");
     async function logout() {
         await a.delete(`${baseUrl}/revoke`);
         sessionStorage.clear();
-        
-        // Sign out of other tabs as well since the token is valid now
-        revoke_broadcast_channel.postMessage("revoke")
-
+        revoke_broadcast_channel.postMessage("revoke");
         goto("/authentication");
     }
 
@@ -481,18 +299,16 @@
             c_location_id,
         );
         low_sales_skus = get_low_sales_skus(datasource);
-        selected_skus.clear()
-        filter_by_id.clear()
-        sort_by_id.clear()
+        selected_skus.clear();
+        filter_by_id.clear();
+        sort_by_id.clear();
 
         rowCount = datasource.length;
+        resetPagination(); // 🟢 FIX LỖI: Cập nhật lại phân trang khi chọn kho mới
 
         is_loading = false;
-        c_location = locations.find((v) => {return v.id == c_location_id}) as Location
-    
+        c_location = locations.find((v) => v.id == c_location_id) as Location;
         grid_key++;
-
-    
     }
 
     function select_all() {
@@ -531,25 +347,21 @@
         setLastDataUpdate();
 
         low_sales_skus = get_low_sales_skus(datasource);
-        // console.log("low", low_sales_skus)
         rowCount = datasource.length;
         c_location_id = locations[0].id;
-        // console.log(c_location_id);
-        // console.log(datasource);
+        
+        resetPagination(); // 🟢 FIX LỖI: Load phân trang chuẩn 50 dòng ngay khi khởi động
         grid_key++;
-        updatePageData(); //them moi dong nay de chay lai cach hien thi du lieu tren bang
         is_loading = false;
+        
         // @ts-ignore
         updateKeys.dsource = datasource;
         updateKeys.headerSorterKey++;
 
-        c_location = locations[0]
+        c_location = locations[0];
     }
 
-    let last_filter;
-
     function enforce_filter(ukey: number) {
-        console.log(filter_by_id);
         data = [];
         if (filter_by_id.size) {
             datasource = calculate_restock_data(
@@ -571,14 +383,11 @@
                 c_location_id,
             );
         }
-        // console.log(datasource)
-        // updateKeys.dsource = datasource
         rowCount = datasource.length;
-        resetPagination(); // them dong nay
+        resetPagination(); // 🟢 FIX LỖI: Reset lại trang 1 mỗi khi lọc
     }
 
     function enforce_sorting(ukey: number) {
-        console.log(sort_by_id);
         if (sort_by_id.size) {
             sort_by_id.forEach((sval, skey) => {
                 datasource.sort((a, b) => {
@@ -614,6 +423,7 @@
                 });
             });
         }
+        updatePageData(); // 🟢 FIX LỖI: Cập nhật dữ liệu hiển thị sau khi sắp xếp
     }
 
     let viewing_low_sales = $state(false);
@@ -621,16 +431,12 @@
     function filter_low_sales_items(skip_updating = false) {
         viewing_low_sales = !viewing_low_sales;
         if (viewing_low_sales) {
-            // @ts-ignore
             let s = new Set();
             datasource.forEach((v) => {
                 if (v.c_restock < 20) {
                     s.add(v.c_restock);
                 }
             });
-            //  datasource.filter((v) => {return v.c_restock < 20})
-            console.log("s", s);
-            // @ts-ignore
             last_sales_filter = new Map(filter_by_id);
             filter_by_id.clear();
             filter_by_id.set("c_restock", {
@@ -646,14 +452,11 @@
                 last_sales_filter.forEach((v, k) => {
                     filter_by_id.set(k, v);
                 });
-                // filter_by_id = last_sales_filter
             }
-            last_sales_filter.clear();
+            last_sales_filter?.clear();
         }
 
-        if (skip_updating) {
-            return;
-        } else {
+        if (!skip_updating) {
             filter_update_key.k += 1;
         }
     }
@@ -663,21 +466,16 @@
         viewing_low_stocks = !viewing_low_stocks;
 
         if (viewing_low_sales) {
-            // Toggle to default state
             filter_low_sales_items(true);
         }
 
         if (viewing_low_stocks) {
-            // @ts-ignore
             let s = new Set();
             datasource.forEach((v) => {
                 if (v.c_on_hand < 20) {
                     s.add(v.c_on_hand);
                 }
             });
-            //  datasource.filter((v) => {return v.c_restock < 20})
-            console.log("s", s);
-            // @ts-ignore
             last_sales_filter = new Map(filter_by_id);
             filter_by_id.clear();
             filter_by_id.set("c_on_hand", {
@@ -693,11 +491,9 @@
                 last_sales_filter.forEach((v, k) => {
                     filter_by_id.set(k, v);
                 });
-                // filter_by_id = last_sales_filter
             }
-            last_sales_filter.clear();
+            last_sales_filter?.clear();
         }
-        console.log(filter_by_id);
         filter_update_key.k += 1;
     }
 
@@ -707,8 +503,6 @@
     function on_export_popup_cancel() {
         export_popup_shown = false;
     }
-
-    // TODO: Whenever the filter is updated, update the list of valid items for further filtering
 
     let last_filter_update_key = 0;
     $effect(() => {
@@ -783,38 +577,34 @@
                                     <Button
                                         type="primary"
                                         onclick={async () => {
-                                            is_loading = true
-                                            const x = await export_selected_to_xlsx(
+                                            is_loading = true;
+                                            await export_selected_to_xlsx(
                                                 selected_skus,
                                                 datasource,
                                                 c_location
                                             );
-                                            is_loading = false
+                                            is_loading = false;
                                         }}>Xuất sản phẩm được chọn</Button
                                     >
                                 {:else}
                                     <Button
                                         type="primary"
                                         onclick={async () => {
-                                            is_loading = true
-
+                                            is_loading = true;
                                             await export_selected_to_xlsx(
                                                 selected_skus,
                                                 datasource,
                                                 c_location
                                             ).finally(() => {
-                                            is_loading = false
+                                                is_loading = false;
                                             });
-
                                         }}>Xuất sản phẩm đang hiển thị</Button
                                     >
                                 {/if}
                                 <Button
                                     type="secondary"
                                     onclick={async () => {
-                                        is_loading = true
-
-
+                                        is_loading = true;
                                         await export_all_to_xlsx(
                                             order_records,
                                             transfer_records,
@@ -822,8 +612,7 @@
                                             c_location_id,
                                             c_location
                                         ).finally(() => {
-                                        is_loading = false
-
+                                            is_loading = false;
                                         });
                                     }}>Xuất toàn bộ sản phẩm trong kho</Button
                                 >
@@ -832,23 +621,20 @@
                                     <Button
                                         type="block secondary"
                                         onclick={async () => {
-                                            is_loading = true
+                                            is_loading = true;
                                             await export_transfer_sheet_to_xlsx(
                                                 order_records,
                                                 transfer_records,
                                                 variant_by_id,
                                                 locations,
                                             ).finally(() => {
-                                                is_loading = false
+                                                is_loading = false;
                                             });
                                         }}>Xuất đơn chuyển hàng</Button
                                     >
 
                                     <p style="margin: 0px;">
-                                        <i
-                                            >(Bao gồm hàng tồn kho trong chi
-                                            nhánh trung tâm)</i
-                                        >
+                                        <i>(Bao gồm hàng tồn kho trong chi nhánh trung tâm)</i>
                                     </p>
                                 </div>
                             </div>
@@ -922,8 +708,7 @@
                     {columns}
                     {data}
                     responsive={responsive_fields}
-                    onrequestdata={dataProvider}
-                    dynamic={{ rowCount }}
+                    dynamic={{ rowCount: data.length }}
                     sizes={{ rowHeight: 165 }}
                     rowStyle={(row: any) =>
                         row.c_restock < 20 && c_location_id === 122671
@@ -939,8 +724,7 @@
             {/key}
         </div>
 
-        <!-- THANH PHÂN TRANG - ĐÃ GỘP DÒNG THÔNG TIN SÁT NÚT CHUYỂN TRANG -->
-        <!-- THANH PHÂN TRANG CANH TRÁI CHUẨN ĐẾN TỪNG PIXEL -->
+        <!-- THANH PHÂN TRANG CANH PHẢI CHUẨN ĐẾN TỪNG PIXEL -->
         <div class="pagination-container">
             <!-- Khối 1: Chọn số kết quả -->
             <div class="page-size">
@@ -1009,8 +793,8 @@
         .pagination-container {
             display: flex;
             align-items: center;
-            justify-content: flex-end; /* 🟢 Đã đổi thành canh phải */
-            gap: 40px;                   /* 🟢 Đã thêm khoảng cách giữa các khối */
+            justify-content: flex-end; /* 🟢 CANH PHẢI SÁT MÉP */
+            gap: 40px;
             padding: 8px 16px;
             background: #ffffff;
             border-top: 1px solid #e0e0e0;
