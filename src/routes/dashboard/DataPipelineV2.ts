@@ -132,8 +132,8 @@ export function calculate_restock_data(
                           variant.inventory_level_by_location.get(location_id as any);
 
         // 🟢 Lấy chuẩn Tồn khả dụng (available)
-        variant.c_available = Math.max(0, inventory?.available ?? 0);
-        variant.c_incoming = Math.max(0, inventory?.incoming ?? 0);
+        variant.c_available = Math.max(0, inventory?.available ?? 0); //Lấy chuẩn Tồn khả dụng từ Sapo
+        variant.c_incoming = Math.max(0, inventory?.incoming ?? 0); //Lấy chuẩn số lượng Đang về từ Sapo
         
         // Gán c_on_hand = c_available để Cột "Tồn kho" trên bảng hiển thị đúng Tồn khả dụng
         variant.c_on_hand = variant.c_available;
