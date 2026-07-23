@@ -574,33 +574,42 @@
                                     <b>Xuất phiếu nhập hàng</b>
                                 </p>
                                 {#if selected_skus.size != 0}
-                                    <Button
-                                        type="primary"
-                                        onclick={async () => {
-                                            is_loading = true;
-                                            await export_selected_to_xlsx(
-                                                selected_skus,
-                                                datasource,
-                                                c_location
-                                            );
-                                            is_loading = false;
-                                        }}>Xuất sản phẩm được chọn</Button
-                                    >
-                                {:else}
-                                    <Button
-                                        type="primary"
-                                        onclick={async () => {
-                                            is_loading = true;
-                                            await export_selected_to_xlsx(
-                                                selected_skus,
-                                                datasource,
-                                                c_location
-                                            ).finally(() => {
-                                                is_loading = false;
-                                            });
-                                        }}>Xuất sản phẩm đang hiển thị</Button
-                                    >
-                                {/if}
+                            <Button
+                                type="primary"
+                                onclick={async () => {
+                                    is_loading = true;
+                                    try {
+                                        await export_selected_to_xlsx(
+                                            selected_skus,
+                                            datasource,
+                                            c_location
+                                        );
+                                    } finally {
+                                        is_loading = false;
+                                        export_popup_shown = false;
+                                    }
+                                }}>Xuất {selected_skus.size} sản phẩm đã chọn</Button
+                            >
+                        {:else}
+                            <Button
+                                type="primary"
+                                onclick={async () => {
+                                    is_loading = true;
+                                    try {
+                                        // 🟢 Gom toàn bộ SKU từ danh sách đang lọc (datasource)
+                                        const filtered_skus = new Set(datasource.map(item => item.sku));
+                                        await export_selected_to_xlsx(
+                                            filtered_skus,
+                                            datasource,
+                                            c_location
+                                        );
+                                    } finally {
+                                        is_loading = false;
+                                        export_popup_shown = false;
+                                    }
+                                }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc</Button
+                            >
+                        {/if}
                                 <Button
                                     type="secondary"
                                     onclick={async () => {
