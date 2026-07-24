@@ -47,8 +47,8 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
     await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js", "sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==")
     await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js", "sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ==")
     
-    // Fetch the template
-    const url = "https://lyo-inventory-mgmt.github.io/assets/sapo_mau_file_nhap_don_nhap_hang-1-min.xlsx"
+    // 🟢 DÙNG FILE MẪU NỘI BỘ MỚI TRONG THƯ MỤC STATIC
+    const url = "/sapo_mau_file_nhap_don_nhap_hang-1-min.xlsx"
     const resp = await fetch(url)
 
     if (!resp.ok) {
@@ -64,11 +64,11 @@ export async function _actual_export_handler(prods: ProductV2[], location: Locat
     const ws = wb.getWorksheet('Sheet1');
 
     let row = 8
-    const img_col = 'C'
+    const img_col = 'E' // 🟢 ĐỔI CỘT ẢNH SANG CỘT E
 
     for (let v of prods) {
-        // Add textual data
-        const rowdata = [v.sku, v.barcode, "", v.c_restock_third, v.c_restock_half, v.c_restock, v.c_on_hand, v.c_incoming, v.name]
+        // 🟢 CỘT A: SKU | B: Barcode | C: Tên SP | D: Số lượng (trống) | E: Ô chèn ảnh | F->J: SL tính toán
+        const rowdata = [v.sku, v.barcode, v.name, "", "", v.c_restock_third, v.c_restock_half, v.c_restock, v.c_on_hand, v.c_incoming]
         for (let c = 0; c < rowdata.length; c++) {
             ws.getCell(String.fromCharCode(65 + c) + row).value = rowdata[c]
         }
