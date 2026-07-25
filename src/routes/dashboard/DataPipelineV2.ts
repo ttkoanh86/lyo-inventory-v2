@@ -155,8 +155,11 @@ export function calculate_restock_data(
             sales > 0
         ) {
             variant.c_restock = Math.round(sales);
-            variant.c_restock_half = Math.round(0.5 * variant.c_restock) - (variant.c_available + variant.c_incoming); //Lượng cần đặt - lượng đang có = lượng phải đặt
-            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock) -(variant.c_available + variant.c_incoming);
+            // Lượng cần đặt - Lượng đang có (Nếu kết quả < 0 thì lấy = 0)
+            const current_has = variant.c_available + variant.c_incoming;
+            
+            variant.c_restock_half = Math.max(0, Math.round(0.5 * variant.c_restock) - current_has);
+            variant.c_restock_third = Math.max(0, Math.round((1 / 3) * variant.c_restock) - current_has);
 
             items_need_restocking.push(variant);
         }
