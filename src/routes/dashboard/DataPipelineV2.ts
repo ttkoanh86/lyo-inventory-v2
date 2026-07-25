@@ -88,54 +88,36 @@ export function calculate_restock_data(
     records.sort((a, b) => b.t_unix - a.t_unix);
 
     let sales_by_sku = new Map<string, number>();
-    let time_cutoff_by_sku = new Map<string, number>();
-
     let items_need_restocking: ProductV2[] = [];
 
     const t_unix = getLastDataUpdateTUnix() || new Date().getTime();
+    const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
 
-    for (let v of variant_by_id) {
-        if (v[1].c_on_hand > 0) {
-            time_cutoff_by_sku.set(v[1].sku, t_unix);
-            sales_by_sku.set(v[1].sku, 0);
+    // 🟢 1. KHỞI TẠO TẤT CẢ SẢN PHẨM MẶC ĐỊNH BÁN = 0
+    for (let [_, variant] of variant_by_id) {
+        if (variant.sku) {
+            sales_by_sku.set(variant.sku, 0);
         }
     }
 
+    // 🟢 2. CỘNG DỒN SỐ LƯỢNG BÁN TRONG 30 NGÀY QUA
     for (let record of records) {
-        if (!time_cutoff_by_sku.has(record.sku)) {
-            time_cutoff_by_sku.set(record.sku, record.t_unix);
-            sales_by_sku.set(record.sku, 0);
-        }
-
-        if (location_id == record.location_id) {
-            // @ts-ignore
-            if (
-                record.t_unix >=
-                // @ts-ignore
-                time_cutoff_by_sku.get(record.sku) -
-                30 * 24 * 60 * 60 * 1000
-            ) {
-                // @ts-ignore
-                sales_by_sku.set(
-                    record.sku,
-                    // @ts-ignore
-                    sales_by_sku.get(record.sku) + record.quantity,
-                );
+        if (Number(location_id) === Number(record.location_id)) {
+            if (record.t_unix >= t_unix - thirty_days_ms) {
+                const current_sales = sales_by_sku.get(record.sku) || 0;
+                sales_by_sku.set(record.sku, current_sales + record.quantity);
             }
         }
     }
 
-    variant_by_id.forEach((variant, id) => {
-        // 🟢 Ép location_id về dạng Number chuẩn để tránh lệch kiểu dữ liệu gây lỗi bằng 0
+    // 🟢 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG
+    variant_by_id.forEach((variant) => {
         const locIdNum = Number(location_id);
         const inventory = variant.inventory_level_by_location.get(locIdNum) || 
                           variant.inventory_level_by_location.get(location_id as any);
 
-        // 🟢 Lấy chuẩn Tồn khả dụng (available)
-        variant.c_available = Math.max(0, inventory?.available ?? 0); //Lấy chuẩn Tồn khả dụng từ Sapo
-        variant.c_incoming = Math.max(0, inventory?.incoming ?? 0); //Lấy chuẩn số lượng Đang về từ Sapo
-        
-        // Gán c_on_hand = c_available để Cột "Tồn kho" trên bảng hiển thị đúng Tồn khả dụng
+        variant.c_available = Math.max(0, inventory?.available ?? 0);
+        variant.c_incoming = Math.max(0, inventory?.incoming ?? 0);
         variant.c_on_hand = variant.c_available;
 
         variant.lot_no = inventory?.lot_no || undefined;
@@ -143,21 +125,18 @@ export function calculate_restock_data(
         variant.lot_exp = inventory?.lot_exp || undefined;
         variant.serial = inventory?.serial || undefined;
 
-        // @ts-ignore
         const sales = sales_by_sku.get(variant.sku) ?? 0;
 
-        //Có 2 TH: SL bán 30 ngày > 0, và SL bán 30 ngày = 0
-        // SL bán 30 ngày = 0: có nhập nhưng ko bán được (Tồn kho>0) & ko nhập nên ko có bán (Tồn kho =0)
-        //SL bán 30 ngày = 0 cần quan tâm TH tồn kho = 0 vì tránh hàng cháy, hàng hết lâu ngày quên đặt-> thì cần check để đặt lại
-        //TH1: 🟢 Sản phẩm hiện ra nếu Tồn khả dụng + Đang về <= 1/2 Lượng bán 30 ngày (Bao trọn mốc 1/2 và 1/3) và SL bán > 0
+        // 🟢 CÔNG THỨC HIỆU CHỈNH CHUẨN CỦA DÌ LINH:
         if (
             variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
             sales > 0
         ) {
             variant.c_restock = Math.round(sales);
-            // Lượng cần đặt - Lượng đang có (Nếu kết quả < 0 thì lấy = 0)
+            
             const current_has = variant.c_available + variant.c_incoming;
             
+            // Lượng cần đặt - Lượng đang có (Tránh số âm)
             variant.c_restock_half = Math.max(0, Math.round(0.5 * variant.c_restock) - current_has);
             variant.c_restock_third = Math.max(0, Math.round((1 / 3) * variant.c_restock) - current_has);
 
@@ -169,12 +148,11 @@ export function calculate_restock_data(
 }
 
 export async function get_locations(): Promise<Location[]> {
-
     let a = new Axios({
-    headers: {
-        "Content-Type": "application/json",
-        Authorization: obtain_access_token(),
-    },
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: obtain_access_token(),
+        },
     });
 
     let resp = await a.get(`${proxyUrl}/admin/locations.json`);
@@ -191,9 +169,7 @@ export async function get_locations(): Promise<Location[]> {
                 loc.city,
                 loc.country,
             ];
-            addrs = addrs.filter((v, _, __) => {
-                return v != "" && v != null;
-            });
+            addrs = addrs.filter((v) => v != "" && v != null);
             location_by_id.push({
                 id: loc.id,
                 address: addrs.join(", "),
@@ -267,11 +243,11 @@ export async function get_active_products() {
     let page = 1;
 
     let a = new Axios({
-    headers: {
-        "Content-Type": "application/json",
-        Authorization: obtain_access_token(),
-    },
-});
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: obtain_access_token(),
+        },
+    });
 
     while (running) {
         const resp = await Promise.all([
@@ -385,7 +361,6 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB", 3);
 
-        // 🟢 Tự động tạo bảng nếu chưa có
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
             if (!db.objectStoreNames.contains("OrderRecordsV2")) {
@@ -402,7 +377,6 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
         request.onsuccess = function () {
             const db = request.result;
-            // 🟢 Kiểm tra an toàn: Nếu không tìm thấy bảng thì trả về mảng rỗng chứ không gây crash web
             if (!db.objectStoreNames.contains("OrderRecordsV2")) {
                 db.close();
                 resolve([]);
@@ -452,7 +426,6 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
         const request = indexedDB.open("LYOInventoryDB", 3);
         let transfers: TransferRecord[] = [];
 
-        // 🟢 Tự động tạo bảng nếu chưa có
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
             if (!db.objectStoreNames.contains("OrderRecordsV2")) {
@@ -469,7 +442,6 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
         request.onsuccess = function () {
             const db = request.result;
-            // 🟢 Kiểm tra an toàn: Nếu không tìm thấy bảng thì trả về mảng rỗng
             if (!db.objectStoreNames.contains("OrderRecordsV2")) {
                 db.close();
                 resolve([]);
@@ -563,197 +535,14 @@ export async function updateIndexedDB(records: OrderRecordV2[]) {
     });
 }
 
-export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let a = new Axios({
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: obtain_access_token(),
-        },
-    });
-
-    const last_update_utc = getLastDataUpdate();
-    let existing_order_ids = new Set<number>();
-    let page = 1;
-    let order_records: OrderRecordV2[] = [];
-    let total_pages = Infinity;
-
-    if (!isFirstTime()) {
-        order_records = await fetchRecordsFromIndexedDB();
-    }
-    for (let r of order_records) {
-        existing_order_ids.add(r.order_id);
-    }
-
-    let running = true;
-
-    while (running) {
-        const resp = await Promise.all([
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "completed",
-                    page: page,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "completed",
-                    page: page + 1,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "completed",
-                    page: page + 2,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "completed",
-                    page: page + 3,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-        ]);
-
-        const success =
-            resp[0].status == 200 &&
-            resp[1].status == 200 &&
-            resp[2].status == 200 &&
-            resp[3].status == 200;
-
-        if (success) {
-            total_pages = JSON.parse(resp[0].data).metadata.total;
-
-            for (let r of resp) {
-                const j = JSON.parse(r.data);
-                if (j.orders.length == 0) {
-                    running = false;
-                    break;
-                }
-                if (j.orders) {
-                    j.orders.forEach((order: any) => {
-                        if (!existing_order_ids.has(order.id)) {
-                            order.fulfillments.forEach(
-                                (fulfillment: any) => {
-                                    fulfillment.fulfillment_line_items.forEach(
-                                        (line_item: any) => {
-                                            if (line_item.is_composite) {
-                                                const it = variant_by_id.get(line_item.variant_id);
-                                                it?.composite_item_quantity_by_variant_id?.forEach((id: number, quantity: number) => {
-                                                    const composite_item_sku = variant_by_id.get(id)?.sku;
-                                                    if (composite_item_sku) {
-                                                        order_records.push({
-                                                            order_id: order.id,
-                                                            sku: composite_item_sku,
-                                                            quantity: line_item.quantity * quantity,
-                                                            is_composite: false,
-                                                            location_id: fulfillment.stock_location_id,
-                                                            t_unix: new Date(order.modified_on).getTime(),
-                                                            new_record: true
-                                                        });
-                                                    }
-                                                });
-                                            } else {
-                                                order_records.push({
-                                                    order_id: order.id,
-                                                    quantity: line_item.quantity,
-                                                    sku: line_item.sku,
-                                                    is_composite: line_item.is_composite,
-                                                    location_id: fulfillment.stock_location_id,
-                                                    t_unix: new Date(order.modified_on).getTime(),
-                                                    new_record: true,
-                                                });
-                                            }
-                                        },
-                                    );
-                                },
-                            );
-                            existing_order_ids.add(order.id);
-                        }
-                    });
-                }
-            }
-            page += 4;
-        } else {
-            await sleep(1000);
+export function get_low_sales_skus(p_variants: ProductV2[]) {
+    let _r = new Set<string>();
+    p_variants.forEach((v) => {
+        if (v.c_restock < 20) {
+            _r.add(v.sku);
         }
-    }
-
-    updateIndexedDB(order_records.filter((v) => v.new_record));
-    return order_records;
-}
-
-export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB", 3);
-        let transfers: TransferRecord[] = [];
-
-        // 🟢 THÊM ĐOẠN NÀY: Tự động tạo bảng OrderRecordsV2 nếu chưa có
-        request.onupgradeneeded = function (event) {
-            const db = (event.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                const store = db.createObjectStore("OrderRecordsV2", {
-                    autoIncrement: true,
-                });
-                store.createIndex("type", "type");
-            }
-        };
-
-        request.onerror = function () {
-            reject("IndexedDB connection failed");
-        };
-
-        request.onsuccess = function () {
-            const db = request.result;
-            // 🟢 NẾU CHƯA CÓ BẢNG THÌ TRÁNH CRASH WEB
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                db.close();
-                resolve([]);
-                return;
-            }
-
-            const tx = db.transaction("OrderRecordsV2", "readonly");
-            const store = tx.objectStore("OrderRecordsV2");
-
-            const index = store.index("type");
-            const keyRange = IDBKeyRange.only("transfer");
-            const cursorRequest = index.openCursor(keyRange);
-
-            cursorRequest.onerror = function () {
-                db.close();
-                reject("Cursor error");
-            };
-
-            cursorRequest.onsuccess = function (event) {
-                const cursor = (
-                    event.target as IDBRequest<IDBCursorWithValue>
-                ).result;
-                if (cursor) {
-                    const value = cursor.value;
-                    transfers.push({
-                        sku: value.sku,
-                        t_unix: value.t_unix,
-                        quantity: value.quantity,
-                        location_id: value.location_id,
-                        new_record: false,
-                        transfer_id: value.order_id,
-                    });
-
-                    cursor.continue();
-                } else {
-                    db.close();
-                    resolve(transfers);
-                }
-            };
-        };
     });
+    return _r;
 }
 
 export async function saveInventoryTransferToIndexedDB(
@@ -809,14 +598,124 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-export function get_low_sales_skus(p_variants: ProductV2[]) {
-    let _r = new Set<string>();
-    p_variants.forEach((v) => {
-        if (v.c_restock < 20) {
-            _r.add(v.sku);
-        }
+export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+    let a = new Axios({
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: obtain_access_token(),
+        },
     });
-    return _r;
+
+    const last_update_utc = getLastDataUpdate();
+    let existing_order_ids = new Set<number>();
+    let page = 1;
+    let order_records: OrderRecordV2[] = [];
+
+    if (!isFirstTime()) {
+        order_records = await fetchRecordsFromIndexedDB();
+    }
+    for (let r of order_records) {
+        existing_order_ids.add(r.order_id);
+    }
+
+    let running = true;
+
+    while (running) {
+        const resp = await Promise.all([
+            a.get(`${proxyUrl}/admin/orders.json`, {
+                params: {
+                    status: "completed",
+                    page: page,
+                    limit: 250,
+                    modified_on_min: last_update_utc,
+                },
+            }),
+            a.get(`${proxyUrl}/admin/orders.json`, {
+                params: {
+                    status: "completed",
+                    page: page + 1,
+                    limit: 250,
+                    modified_on_min: last_update_utc,
+                },
+            }),
+            a.get(`${proxyUrl}/admin/orders.json`, {
+                params: {
+                    status: "completed",
+                    page: page + 2,
+                    limit: 250,
+                    modified_on_min: last_update_utc,
+                },
+            }),
+            a.get(`${proxyUrl}/admin/orders.json`, {
+                params: {
+                    status: "completed",
+                    page: page + 3,
+                    limit: 250,
+                    modified_on_min: last_update_utc,
+                },
+            }),
+        ]);
+
+        const success =
+            resp[0].status == 200 &&
+            resp[1].status == 200 &&
+            resp[2].status == 200 &&
+            resp[3].status == 200;
+
+        if (success) {
+            for (let r of resp) {
+                const j = JSON.parse(r.data);
+                if (!j.orders || j.orders.length == 0) {
+                    running = false;
+                    break;
+                }
+                if (j.orders) {
+                    j.orders.forEach((order: any) => {
+                        if (!existing_order_ids.has(order.id)) {
+                            order.fulfillments.forEach((fulfillment: any) => {
+                                fulfillment.fulfillment_line_items.forEach((line_item: any) => {
+                                    if (line_item.is_composite) {
+                                        const it = variant_by_id.get(line_item.variant_id);
+                                        it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                            const composite_item_sku = variant_by_id.get(id)?.sku;
+                                            if (composite_item_sku) {
+                                                order_records.push({
+                                                    order_id: order.id,
+                                                    sku: composite_item_sku,
+                                                    quantity: line_item.quantity * quantity,
+                                                    is_composite: false,
+                                                    location_id: fulfillment.stock_location_id,
+                                                    t_unix: new Date(order.modified_on).getTime(),
+                                                    new_record: true
+                                                });
+                                            }
+                                        });
+                                    } else {
+                                        order_records.push({
+                                            order_id: order.id,
+                                            quantity: line_item.quantity,
+                                            sku: line_item.sku,
+                                            is_composite: line_item.is_composite,
+                                            location_id: fulfillment.stock_location_id,
+                                            t_unix: new Date(order.modified_on).getTime(),
+                                            new_record: true,
+                                        });
+                                    }
+                                });
+                            });
+                            existing_order_ids.add(order.id);
+                        }
+                    });
+                }
+            }
+            page += 4;
+        } else {
+            await sleep(1000);
+        }
+    }
+
+    updateIndexedDB(order_records.filter((v) => v.new_record));
+    return order_records;
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
@@ -832,7 +731,6 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     let existing_transfer_ids = new Set<number>();
     let page = 1;
     let transfer_records: TransferRecord[] = [];
-    let total_pages = Infinity;
 
     if (!isFirstTime()) {
         transfer_records = await fetchInventoryTransferFromIndexedDB();
@@ -886,11 +784,9 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
             resp[3].status == 200;
 
         if (success) {
-            total_pages = JSON.parse(resp[0].data).metadata.total;
-
             for (let r of resp) {
                 const j = JSON.parse(r.data);
-                if (j.stock_transfers.length == 0) {
+                if (!j.stock_transfers || j.stock_transfers.length == 0) {
                     running = false;
                     break;
                 }
@@ -905,8 +801,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                                     transfer_records.push({
                                         transfer_id: transfer.id,
                                         location_id: transfer.source_location_id,
-                                        // @ts-ignore
-                                        sku: p_variants.get(line_item.variant_id).sku,
+                                        sku: p_variants.get(line_item.variant_id)?.sku || "",
                                         t_unix: new Date(transfer.modified_on).getTime(),
                                         quantity: line_item.quantity,
                                         new_record: true,
