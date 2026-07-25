@@ -385,12 +385,30 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB", 3);
 
+        // 🟢 Tự động tạo bảng nếu chưa có
+        request.onupgradeneeded = function (event) {
+            const db = (event.target as IDBOpenDBRequest).result;
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                const store = db.createObjectStore("OrderRecordsV2", {
+                    autoIncrement: true,
+                });
+                store.createIndex("type", "type");
+            }
+        };
+
         request.onerror = function () {
             reject("IndexedDB connection failed");
         };
 
         request.onsuccess = function () {
             const db = request.result;
+            // 🟢 Kiểm tra an toàn: Nếu không tìm thấy bảng thì trả về mảng rỗng chứ không gây crash web
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                db.close();
+                resolve([]);
+                return;
+            }
+
             const tx = db.transaction("OrderRecordsV2", "readonly");
             const store = tx.objectStore("OrderRecordsV2");
             const records: OrderRecordV2[] = [];
@@ -423,6 +441,72 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
                 } else {
                     db.close();
                     resolve(records);
+                }
+            };
+        };
+    });
+}
+
+export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open("LYOInventoryDB", 3);
+        let transfers: TransferRecord[] = [];
+
+        // 🟢 Tự động tạo bảng nếu chưa có
+        request.onupgradeneeded = function (event) {
+            const db = (event.target as IDBOpenDBRequest).result;
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                const store = db.createObjectStore("OrderRecordsV2", {
+                    autoIncrement: true,
+                });
+                store.createIndex("type", "type");
+            }
+        };
+
+        request.onerror = function () {
+            reject("IndexedDB connection failed");
+        };
+
+        request.onsuccess = function () {
+            const db = request.result;
+            // 🟢 Kiểm tra an toàn: Nếu không tìm thấy bảng thì trả về mảng rỗng
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                db.close();
+                resolve([]);
+                return;
+            }
+
+            const tx = db.transaction("OrderRecordsV2", "readonly");
+            const store = tx.objectStore("OrderRecordsV2");
+
+            const index = store.index("type");
+            const keyRange = IDBKeyRange.only("transfer");
+            const cursorRequest = index.openCursor(keyRange);
+
+            cursorRequest.onerror = function () {
+                db.close();
+                reject("Cursor error");
+            };
+
+            cursorRequest.onsuccess = function (event) {
+                const cursor = (
+                    event.target as IDBRequest<IDBCursorWithValue>
+                ).result;
+                if (cursor) {
+                    const value = cursor.value;
+                    transfers.push({
+                        sku: value.sku,
+                        t_unix: value.t_unix,
+                        quantity: value.quantity,
+                        location_id: value.location_id,
+                        new_record: false,
+                        transfer_id: value.order_id,
+                    });
+
+                    cursor.continue();
+                } else {
+                    db.close();
+                    resolve(transfers);
                 }
             };
         };
@@ -611,12 +695,30 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
         const request = indexedDB.open("LYOInventoryDB", 3);
         let transfers: TransferRecord[] = [];
 
+        // 🟢 THÊM ĐOẠN NÀY: Tự động tạo bảng OrderRecordsV2 nếu chưa có
+        request.onupgradeneeded = function (event) {
+            const db = (event.target as IDBOpenDBRequest).result;
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                const store = db.createObjectStore("OrderRecordsV2", {
+                    autoIncrement: true,
+                });
+                store.createIndex("type", "type");
+            }
+        };
+
         request.onerror = function () {
             reject("IndexedDB connection failed");
         };
 
         request.onsuccess = function () {
             const db = request.result;
+            // 🟢 NẾU CHƯA CÓ BẢNG THÌ TRÁNH CRASH WEB
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                db.close();
+                resolve([]);
+                return;
+            }
+
             const tx = db.transaction("OrderRecordsV2", "readonly");
             const store = tx.objectStore("OrderRecordsV2");
 
