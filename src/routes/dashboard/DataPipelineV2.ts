@@ -146,14 +146,17 @@ export function calculate_restock_data(
         // @ts-ignore
         const sales = sales_by_sku.get(variant.sku) ?? 0;
 
-        // 🟢 Sản phẩm hiện ra nếu Tồn khả dụng + Đang về <= 1/2 Lượng bán 30 ngày (Bao trọn mốc 1/2 và 1/3)
+        //Có 2 TH: SL bán 30 ngày > 0, và SL bán 30 ngày = 0
+        // SL bán 30 ngày = 0: có nhập nhưng ko bán được (Tồn kho>0) & ko nhập nên ko có bán (Tồn kho =0)
+        //SL bán 30 ngày = 0 cần quan tâm TH tồn kho = 0 vì tránh hàng cháy, hàng hết lâu ngày quên đặt-> thì cần check để đặt lại
+        //TH1: 🟢 Sản phẩm hiện ra nếu Tồn khả dụng + Đang về <= 1/2 Lượng bán 30 ngày (Bao trọn mốc 1/2 và 1/3) và SL bán > 0
         if (
             variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
             sales > 0
         ) {
             variant.c_restock = Math.round(sales);
-            variant.c_restock_half = Math.round(0.5 * variant.c_restock);
-            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock);
+            variant.c_restock_half = Math.round(0.5 * variant.c_restock) - (variant.c_available + variant.c_incoming); //Lượng cần đặt - lượng đang có = lượng phải đặt
+            variant.c_restock_third = Math.round((1 / 3) * variant.c_restock) -(variant.c_available + variant.c_incoming);
 
             items_need_restocking.push(variant);
         }
