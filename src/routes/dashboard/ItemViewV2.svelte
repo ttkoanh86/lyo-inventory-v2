@@ -443,19 +443,30 @@
 
                                 <hr style="color: #ccc; margin: 4px 0;" />
 
-                                <!-- CỤM 2: XUẤT ĐƠN KIỂM HÀNG ĐỘC LẬP (SIÊU NHANH, FILE "Kiem hang_...") -->
+                                <!-- CỤM 2: XUẤT ĐƠN KIỂM HÀNG (ĐÃ CẬP NHẬT ĐỘNG THEO SP ĐÃ CHỌN/ĐANG LỌC) -->
                                 <p style="margin: 0px;"><b>2. Xuất phiếu kiểm hàng</b></p>
-                                <Button type="block primary" onclick={async () => {
-                                    is_loading = true;
-                                    try {
-                                        // Tự động gom đúng danh sách SKU đang hiển thị để xuất
-                                        const current_skus = selected_skus.size > 0 ? selected_skus : new Set(datasource.map(item => item.sku));
-                                        await export_kiem_hang_to_xlsx(current_skus, datasource, c_location);
-                                    } finally {
-                                        is_loading = false;
-                                        export_popup_shown = false;
-                                    }
-                                }}>Xuất phiếu kiểm hàng ({datasource.length} SP)</Button>
+                                {#if selected_skus.size != 0}
+                                    <Button type="block primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            await export_kiem_hang_to_xlsx(selected_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất {selected_skus.size} sản phẩm đã chọn (Kiểm hàng)</Button>
+                                {:else}
+                                    <Button type="block primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            const filtered_skus = new Set(datasource.map(item => item.sku));
+                                            await export_kiem_hang_to_xlsx(filtered_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Kiểm hàng)</Button>
+                                {/if}
 
                                 <hr style="color: #ccc; margin: 4px 0;" />
 
