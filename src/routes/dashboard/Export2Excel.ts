@@ -3,21 +3,6 @@ import { imageToArrayBuffer } from "./imageToByteArray";
 import { lazyLoadScript } from "./lazyLoadScript";
 import { type Location } from "./Template";
 
-// 🟢 1. HÀM XUẤT FILE CHO KIỂM HÀNG (ÉP TÊN "Kiem hang" VÀ BỎ QUA ẢNH ĐỂ CHẠY NHANH)
-export async function export_kiem_hang_to_xlsx(
-    selected_skus: Set<string>, 
-    datasource: ProductV2[], 
-    location: Location
-) {
-    const x = selected_skus.size > 0 
-        ? datasource.filter((item) => selected_skus.has(item.sku))
-        : datasource;
-        
-    // Ép cứng: is_transfer = false, is_check_mode = true, skip_images = true
-    await _actual_export_handler(x, location, false, true, true);
-}
-
-// 🟢 2. HÀM XUẤT FILE CHO NHẬP HÀNG (CHỌN LỌC)
 export async function export_selected_to_xlsx(
     selected_skus: Set<string>, 
     datasource: ProductV2[], 
@@ -35,7 +20,6 @@ export async function export_selected_to_xlsx(
     }
 }
 
-// 🟢 3. HÀM XUẤT FILE CHO NHẬP HÀNG (TOÀN BỘ)
 export async function export_all_to_xlsx(
     order_records: OrderRecordV2[], 
     transfer_records: TransferRecord[], 
@@ -56,12 +40,12 @@ export async function export_all_to_xlsx(
     }
 }
 
-// 🟢 4. HÀM XUẤT FILE CHO CHUYỂN HÀNG
 export async function export_transfer_sheet_to_xlsx(
     order_records: OrderRecordV2[], 
     transfer_records: TransferRecord[], 
     variant_by_id: Map<number, ProductV2>, 
-    locations: Location[]
+    locations: Location[],
+    skip_images = false
 ) {
     const x = calculate_restock_data(
         [...order_records, ...transfer_records],
@@ -71,12 +55,11 @@ export async function export_transfer_sheet_to_xlsx(
         return x.c_on_hand > 0
     })
 
-    if (await _actual_export_handler(x, locations[0], true, false, false) == false) {
+    if (await _actual_export_handler(x, locations[0], true, false, skip_images) == false) {
         alert("Gặp lỗi khi xuất file")
     }
 }
 
-// 🟢 5. HÀM XỬ LÝ XUẤT FILE CHÍNH
 export async function _actual_export_handler(
     prods: ProductV2[], 
     location: Location, 
@@ -170,7 +153,10 @@ export async function _actual_export_handler(
     const t = new Date();
     const time_str = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}_${String(t.getHours()).padStart(2, '0')}${String(t.getMinutes()).padStart(2, '0')}${String(t.getSeconds()).padStart(2, '0')}`;
 
-    // 🔴 ĐẶT TIỀN TỐ CỤ THỂ 100% THEO BIẾN
+    // 🔴 ĐÚNG BẢN CHẤT LOGIC:
+    // 1. Nếu is_check_mode = true -> "Kiem hang"
+    // 2. Nếu is_transfer = true   -> "Chuyen hang"
+    // 3. Còn lại (mặc định)       -> "Nhap hang"
     let prefix = "Nhap hang";
     if (is_check_mode) {
         prefix = "Kiem hang";
