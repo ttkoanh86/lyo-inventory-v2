@@ -81,7 +81,6 @@ export function obtain_access_token() {
 
 type Record = OrderRecordV2 | TransferRecord;
 
-// 🟢 HÀM TÍNH RESTOCK DỰA TRÊN DỮ LIỆU ĐỘC LẬP THEO TỪNG LOCATION_ID
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -97,27 +96,32 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id);
 
-    // 1. Khởi tạo mảng sản lượng xuất = 0
+    // BẪY LOG 1: KIỂM TRA SỐ LƯỢNG BẢN GHI NHẬN VÀO HÀM TÍNH RESTOCK
+    console.warn(`[BẪY LOG 1] Đang tính Restock cho Kho ID: ${target_location_id}. Tổng số bản ghi nhận vào: ${records.length}`);
+
+    // 1. Khởi tạo mảng bán = 0
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
             sales_by_sku.set(variant.sku, 0);
         }
     }
 
-    // 2. Cộng dồn sản lượng xuất (Đơn bán + Chuyển kho đi) 30 ngày chuẩn xác theo ĐÚNG LOCATION_ID ĐANG CHỌN
+    // 2. Cộng dồn số bán/xuất kho
+    let matched_count = 0;
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
-
-        // Khớp tuyệt đối ID kho chọn OR Đơn không phân kho (rec_loc === 0)
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
                 sales_by_sku.set(record.sku, current_sales + record.quantity);
+                matched_count++;
             }
         }
     }
 
-    // 3. Tính toán Restock cho kho được chọn
+    console.warn(`[BẪY LOG 2] Số bản ghi khớp điều kiện kho ${target_location_id} trong 30 ngày: ${matched_count}`);
+
+    // 3. Tính toán Restock
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
                           variant.inventory_level_by_location.get(location_id as any);
@@ -148,6 +152,7 @@ export function calculate_restock_data(
         }
     });
 
+    console.warn(`[BẪY LOG 3] Số mặt hàng lọc ra cần đặt: ${items_need_restocking.length}`);
     return items_need_restocking;
 }
 
@@ -185,20 +190,19 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 NÂNG LÊN DB V12 ĐỂ XÓA SẠCH VÀ CHẠY ĐỒNG BỘ CHUẨN MỌI KHO
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v12") == null;
+    return localStorage.getItem("last_data_update_v13") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v12",
+        "last_data_update_v13",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v12"));
+    return Number(localStorage.getItem("last_data_update_v13"));
 }
 
 export function getLastDataUpdate() {
@@ -343,7 +347,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V12", 3);
+        const request = indexedDB.open("LYOInventoryDB_V13", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -408,7 +412,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V12", 3);
+        const request = indexedDB.open("LYOInventoryDB_V13", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -472,7 +476,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V12", 3);
+        const request = indexedDB.open("LYOInventoryDB_V13", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -536,7 +540,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V12", 3);
+        const request = indexedDB.open("LYOInventoryDB_V13", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -584,7 +588,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN CHUẨN XÁC THEO LOCATION_ID CHUẨN CỦA ĐƠN HÀNG SAPO
+// 🟢 HÀM FETCH ĐƠN CHỦ ĐỘNG BẮT BẪY LOG
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -608,6 +612,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     let page = 1;
     let running = true;
+    let total_fetched = 0;
 
     while (running) {
         try {
@@ -629,16 +634,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     break;
                 }
 
+                total_fetched += orders.length;
+
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
                     const is_fulfilled = order.fulfillment_status === "fulfilled" || order.fulfillment_status === "partial";
 
                     if (is_not_cancelled && is_fulfilled) {
                         const line_items = order.line_items || [];
-
-                        // 🟢 LẤY LOCATION_ID NGUYÊN BẢN CỦA ĐƠN HÀNG TỪ SAPO
                         const order_loc_id = Number(order.location_id || 0);
-                        
+
                         let export_date_str = order.created_on || order.modified_on;
                         if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].created_on) {
                             export_date_str = order.fulfillments[0].created_on;
@@ -704,12 +709,14 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
+    // BẪY LOG 4: BÁO SỐ ĐƠN TẢI VỀ THÀNH CÔNG VÀ LƯU VÀO DB
+    console.warn(`[BẪY LOG 4] Đã tải xong tổng cộng ${total_fetched} đơn hàng từ Sapo API. Tổng bản ghi tạo ra: ${order_records.length}`);
+
     await updateIndexedDB(order_records.filter((v) => v.new_record));
     setLastDataUpdate();
     return order_records;
 }
 
-// 🟢 HÀM FETCH CHUYỂN KHO CHUẨN XÁC THEO XUẤT KHO (SOURCE_LOCATION_ID)
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
