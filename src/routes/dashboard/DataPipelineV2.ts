@@ -91,6 +91,7 @@ export function calculate_restock_data(
     let sales_by_sku = new Map<string, number>();
     let items_need_restocking: ProductV2[] = [];
 
+    // Mốc 30 ngày tính chuẩn từ thời điểm hiện tại thực tế
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const target_location_id = Number(location_id);
@@ -180,7 +181,6 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 ĐỔI VỀ TÊN BẢN V2 NHƯ DÌ CHỈ ĐỊNH
 export function isFirstTime() {
     return localStorage.getItem("last_data_update_v2") == null;
 }
@@ -361,7 +361,6 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
-// 🟢 ĐỔI BỘ NHỚ INDEXEDDB VỀ TÊN V2
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB_V2", 3);
