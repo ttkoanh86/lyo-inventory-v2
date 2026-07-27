@@ -12,7 +12,7 @@ export interface OrderRecordV2 {
     is_composite: boolean;
     new_record: boolean;
     order_id: number;
-    fulfillment_id?: number;
+    fulfillment_id?: string | number;
 }
 
 export interface TransferRecord {
@@ -170,7 +170,7 @@ export async function get_locations(): Promise<Location[]> {
             ];
             addrs = addrs.filter((v) => v != "" && v != null);
             location_by_id.push({
-                id: Number(loc.id), // Ép kiểu số
+                id: Number(loc.id),
                 address: addrs.join(", "),
                 label: loc.label,
             });
@@ -603,6 +603,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
+// 🟢 HÀM LẤY ĐƠN HÀNG XỬ LÝ CHUẨN XÁC CẢ ĐƠN ONLINE LẪN BÁN TẠI CỬA HÀNG (POS)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -612,7 +613,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     });
 
     const last_update_utc = getLastDataUpdate();
-    let existing_fulfillment_ids = new Set<number>();
+    let existing_records = new Set<string>();
     let page = 1;
     let order_records: OrderRecordV2[] = [];
 
@@ -620,9 +621,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         order_records = await fetchRecordsFromIndexedDB();
     }
     for (let r of order_records) {
-        if (r.fulfillment_id) {
-            existing_fulfillment_ids.add(r.fulfillment_id);
-        }
+        const key = r.fulfillment_id ? `f_${r.fulfillment_id}` : `o_${r.order_id}`;
+        existing_records.add(key);
     }
 
     let running = true;
@@ -679,14 +679,61 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
-                    const has_fulfillment = order.fulfillments && order.fulfillments.length > 0;
 
-                    if (is_not_cancelled && has_fulfillment) {
-                        order.fulfillments.forEach((fulfillment: any) => {
-                            if (!existing_fulfillment_ids.has(fulfillment.id)) {
-                                const items = fulfillment.line_items || fulfillment.fulfillment_line_items || [];
-                                const fulfillment_date = fulfillment.created_on || order.created_on || order.modified_on;
-                                const fulfillment_ts = new Date(fulfillment_date).getTime();
+                    if (is_not_cancelled) {
+                        const has_fulfillments = order.fulfillments && order.fulfillments.length > 0;
+
+                        // 🟢 TRƯỜNG HỢP 1: ĐƠN CÓ PHIẾU XUẤT KHO (ĐƠN ONLINE / GIAO HÀNG)
+                        if (has_fulfillments) {
+                            order.fulfillments.forEach((fulfillment: any) => {
+                                const f_key = `f_${fulfillment.id}`;
+                                if (!existing_records.has(f_key)) {
+                                    const items = fulfillment.line_items || fulfillment.fulfillment_line_items || [];
+                                    const fulfillment_date = fulfillment.created_on || order.created_on || order.modified_on;
+                                    const fulfillment_ts = new Date(fulfillment_date).getTime();
+
+                                    items.forEach((line_item: any) => {
+                                        if (line_item.is_composite) {
+                                            const it = variant_by_id.get(line_item.variant_id);
+                                            it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                                const composite_item_sku = variant_by_id.get(id)?.sku;
+                                                if (composite_item_sku) {
+                                                    order_records.push({
+                                                        order_id: order.id,
+                                                        fulfillment_id: fulfillment.id,
+                                                        sku: composite_item_sku,
+                                                        quantity: line_item.quantity * quantity,
+                                                        is_composite: false,
+                                                        location_id: Number(fulfillment.stock_location_id || order.location_id),
+                                                        t_unix: fulfillment_ts,
+                                                        new_record: true
+                                                    });
+                                                }
+                                            });
+                                        } else {
+                                            order_records.push({
+                                                order_id: order.id,
+                                                fulfillment_id: fulfillment.id,
+                                                quantity: line_item.quantity,
+                                                sku: line_item.sku,
+                                                is_composite: line_item.is_composite,
+                                                location_id: Number(fulfillment.stock_location_id || order.location_id),
+                                                t_unix: fulfillment_ts,
+                                                new_record: true,
+                                            });
+                                        }
+                                    });
+
+                                    existing_records.add(f_key);
+                                }
+                            });
+                        } 
+                        // 🟢 TRƯỜNG HỢP 2: ĐƠN BÁN TRỰC TIẾP TẠI CỬA HÀNG (POS - KHÔNG CÓ FULFILLMENTS)
+                        else {
+                            const o_key = `o_${order.id}`;
+                            if (!existing_records.has(o_key)) {
+                                const items = order.line_items || [];
+                                const order_ts = new Date(order.created_on || order.modified_on).getTime();
 
                                 items.forEach((line_item: any) => {
                                     if (line_item.is_composite) {
@@ -696,12 +743,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                             if (composite_item_sku) {
                                                 order_records.push({
                                                     order_id: order.id,
-                                                    fulfillment_id: fulfillment.id,
                                                     sku: composite_item_sku,
                                                     quantity: line_item.quantity * quantity,
                                                     is_composite: false,
-                                                    location_id: Number(fulfillment.stock_location_id || order.location_id),
-                                                    t_unix: fulfillment_ts,
+                                                    location_id: Number(order.location_id),
+                                                    t_unix: order_ts,
                                                     new_record: true
                                                 });
                                             }
@@ -709,20 +755,19 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                     } else {
                                         order_records.push({
                                             order_id: order.id,
-                                            fulfillment_id: fulfillment.id,
                                             quantity: line_item.quantity,
                                             sku: line_item.sku,
                                             is_composite: line_item.is_composite,
-                                            location_id: Number(fulfillment.stock_location_id || order.location_id),
-                                            t_unix: fulfillment_ts,
+                                            location_id: Number(order.location_id),
+                                            t_unix: order_ts,
                                             new_record: true,
                                         });
                                     }
                                 });
 
-                                existing_fulfillment_ids.add(fulfillment.id);
+                                existing_records.add(o_key);
                             }
-                        });
+                        }
                     }
                 });
             }
