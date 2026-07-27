@@ -46,156 +46,22 @@
     } from "./Export2Excel";
 
     const columns = [
-        {
-            id: "id",
-            hidden: true,
-        },
-        {
-            id: "selected",
-            cell: SelectionCheckboxCell,
-            width: 36,
-        },
-        {
-            id: "sku",
-            resize: true,
-            width: 130,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "SKU",
-                },
-            ],
-        },
-        {
-            id: "name",
-            resize: true,
-            width: 240,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Tên sản phẩm",
-                },
-            ],
-        },
-        {
-            id: "image",
-            header: "Ảnh",
-            cell: ImageCell,
-        },
-        {
-            id: "image_path",
-            hidden: true,
-        },
-        {
-            id: "c_restock_third",
-            resize: true,
-            width: 140,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "SL đặt\n(1/3 tháng)",
-                },
-            ],
-        },
-        {
-            id: "c_restock_half",
-            resize: true,
-            width: 140,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "SL đặt\n(1/2 tháng)",
-                },
-            ],
-        },
-        {
-            id: "c_restock",
-            resize: true,
-            width: 140,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "SL bán\n(1 tháng)",
-                },
-            ],
-        },
-        {
-            id: "c_on_hand",
-            resize: true,
-            width: 140,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Tồn kho",
-                },
-            ],
-        },
-        {
-            id: "c_incoming",
-            resize: true,
-            width: 140,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Đang về",
-                },
-            ],
-        },
-        {
-            id: "brand",
-            resize: true,
-            width: 180,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Nhãn hiệu",
-                },
-            ],
-        },
-        {
-            id: "unit",
-            resize: true,
-            width: 180,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Đơn vị tính",
-                },
-            ],
-        },
-        {
-            id: "import_price",
-            resize: true,
-            width: 180,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Giá nhập",
-                },
-            ],
-        },
-        {
-            id: "retail_price",
-            resize: true,
-            width: 180,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Thành tiền (Shop)",
-                },
-            ],
-        },
-        {
-            id: "retail_price_ecomm",
-            resize: true,
-            width: 180,
-            header: [
-                {
-                    cell: HeaderWithSortUi,
-                    text: "Thành tiền (TMĐT)",
-                },
-            ],
-        },
+        { id: "id", hidden: true },
+        { id: "selected", cell: SelectionCheckboxCell, width: 36 },
+        { id: "sku", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "SKU" }] },
+        { id: "name", resize: true, width: 240, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
+        { id: "image", header: "Ảnh", cell: ImageCell },
+        { id: "image_path", hidden: true },
+        { id: "c_restock_third", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/3 tháng)" }] },
+        { id: "c_restock_half", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/2 tháng)" }] },
+        { id: "c_restock", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL bán\n(1 tháng)" }] },
+        { id: "c_on_hand", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "Tồn kho" }] },
+        { id: "c_incoming", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "Đang về" }] },
+        { id: "brand", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] },
+        { id: "unit", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Đơn vị tính" }] },
+        { id: "import_price", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Giá nhập" }] },
+        { id: "retail_price", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Thành tiền (Shop)" }] },
+        { id: "retail_price_ecomm", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Thành tiền (TMĐT)" }] },
     ];
 
     const filter_by_id: Map<string, Filtering> = $state(new Map());
@@ -204,17 +70,12 @@
     setContext("filterbyid", filter_by_id);
     setContext("sortbyid", sort_by_id);
 
-    const responsive_fields = {
-        800: {
-            columns: columns,
-        },
-    };
+    const responsive_fields = { 800: { columns: columns } };
 
     let data: ProductV2[] = $state([]);
 
     let currentPage = $state(1);
     let itemsPerPage = $state(50);
-
     let totalPages = $derived(Math.ceil(datasource.length / itemsPerPage) || 1);
 
     function updatePageData() {
@@ -527,208 +388,120 @@
     <Willow>
         <div style="display: flex; gap: 10px; padding-bottom: 10px">
             <div>
-                <Button
-                    onclick={initialize}
-                    type="primary"
-                    icon="mdi mdi-refresh"
-                ></Button>
+                <Button onclick={initialize} type="primary" icon="mdi mdi-refresh"></Button>
             </div>
             <div style="width: 250px; display:flex; align-items: center">
                 <span>Kho:&nbsp;</span>
-                <Select
-                    bind:value={c_location_id}
-                    options={locations}
-                    onchange={handle_location_update}
-                    width="100"
-                    placeholder="Chọn kho hàng..."
-                ></Select>
+                <Select bind:value={c_location_id} options={locations} onchange={handle_location_update} width="100" placeholder="Chọn kho hàng..."></Select>
             </div>
             <div style="display: flex; gap: 5px">
                 <Button onclick={select_all}>Chọn tất cả</Button>
                 <Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
-                <Button
-                    icon="mdi mdi-package-variant-closed-check"
-                    onclick={filter_low_stock_items}>Kiểm hàng</Button
-                >
+                <Button icon="mdi mdi-package-variant-closed-check" onclick={filter_low_stock_items}>Kiểm hàng</Button>
+                
                 <div bind:this={export_popup_parent}>
-                    <Button
-                        onclick={() => {
-                            export_popup_shown = !export_popup_shown;
-                        }}
-                        icon="mdi mdi-download">Xuất Excel</Button
-                    >
+                    <Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">Xuất Excel</Button>
                 </div>
+
                 {#if export_popup_shown}
                     <Portal>
-                        <Popup
-                            parent={export_popup_parent}
-                            at="bottom"
-                            oncancel={on_export_popup_cancel}
-                        >
-                            <div
-                                class="download-popup"
-                                style="padding: 10px; display: flex; flex-direction: column; gap: 5px"
-                            >
-                                <p style="margin-bottom: 5px; margin-top: 5px">
-                                    <b>{viewing_low_stocks ? "Xuất phiếu kiểm hàng" : "Xuất phiếu nhập hàng"}</b>
-                                </p>
+                        <Popup parent={export_popup_parent} at="bottom" oncancel={on_export_popup_cancel}>
+                            <div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
+                                
+                                <!-- CỤM 1: XUẤT PHIẾU NHẬP HÀNG -->
+                                <p style="margin: 0px;"><b>1. Xuất phiếu nhập hàng</b></p>
                                 {#if selected_skus.size != 0}
-                                    <Button
-                                        type="primary"
-                                        onclick={async () => {
-                                            is_loading = true;
-                                            try {
-                                                if (viewing_low_stocks) {
-                                                    await export_kiem_hang_to_xlsx(
-                                                        selected_skus,
-                                                        datasource,
-                                                        c_location
-                                                    );
-                                                } else {
-                                                    await export_selected_to_xlsx(
-                                                        selected_skus,
-                                                        datasource,
-                                                        c_location
-                                                    );
-                                                }
-                                            } finally {
-                                                is_loading = false;
-                                                export_popup_shown = false;
-                                            }
-                                        }}>Xuất {selected_skus.size} sản phẩm đã chọn</Button
-                                    >
-                                {:else}
-                                    <Button
-                                        type="primary"
-                                        onclick={async () => {
-                                            is_loading = true;
-                                            try {
-                                                const filtered_skus = new Set(datasource.map(item => item.sku));
-                                                if (viewing_low_stocks) {
-                                                    await export_kiem_hang_to_xlsx(
-                                                        filtered_skus,
-                                                        datasource,
-                                                        c_location
-                                                    );
-                                                } else {
-                                                    await export_selected_to_xlsx(
-                                                        filtered_skus,
-                                                        datasource,
-                                                        c_location
-                                                    );
-                                                }
-                                            } finally {
-                                                is_loading = false;
-                                                export_popup_shown = false;
-                                            }
-                                        }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc</Button
-                                    >
-                                {/if}
-                                <Button
-                                    type="secondary"
-                                    onclick={async () => {
+                                    <Button type="primary" onclick={async () => {
                                         is_loading = true;
-                                        if (viewing_low_stocks) {
-                                            const all_skus = new Set(datasource.map(item => item.sku));
-                                            await export_kiem_hang_to_xlsx(
-                                                all_skus,
-                                                datasource,
-                                                c_location
-                                            ).finally(() => {
-                                                is_loading = false;
-                                            });
-                                        } else {
-                                            await export_all_to_xlsx(
-                                                order_records,
-                                                transfer_records,
-                                                variant_by_id,
-                                                c_location_id,
-                                                c_location
-                                            ).finally(() => {
-                                                is_loading = false;
-                                            });
+                                        try {
+                                            await export_selected_to_xlsx(selected_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
                                         }
-                                    }}>Xuất toàn bộ sản phẩm trong kho</Button
-                                >
-                                <hr style="color: gray; width: 1px" />
-                                <div>
-                                    <Button
-                                        type="block secondary"
-                                        onclick={async () => {
-                                            is_loading = true;
-                                            await export_transfer_sheet_to_xlsx(
-                                                order_records,
-                                                transfer_records,
-                                                variant_by_id,
-                                                locations,
-                                            ).finally(() => {
-                                                is_loading = false;
-                                            });
-                                        }}>Xuất đơn chuyển hàng</Button
-                                    >
+                                    }}>Xuất {selected_skus.size} sản phẩm đã chọn</Button>
+                                {:else}
+                                    <Button type="primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            const filtered_skus = new Set(datasource.map(item => item.sku));
+                                            await export_selected_to_xlsx(filtered_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc</Button>
+                                {/if}
 
-                                    <p style="margin: 0px;">
+                                <Button type="secondary" onclick={async () => {
+                                    is_loading = true;
+                                    await export_all_to_xlsx(order_records, transfer_records, variant_by_id, c_location_id, c_location).finally(() => {
+                                        is_loading = false;
+                                    });
+                                }}>Xuất toàn bộ sản phẩm trong kho</Button>
+
+                                <hr style="color: #ccc; margin: 4px 0;" />
+
+                                <!-- CỤM 2: XUẤT ĐƠN KIỂM HÀNG ĐỘC LẬP (SIÊU NHANH, FILE "Kiem hang_...") -->
+                                <p style="margin: 0px;"><b>2. Xuất phiếu kiểm hàng</b></p>
+                                <Button type="block primary" onclick={async () => {
+                                    is_loading = true;
+                                    try {
+                                        // Tự động gom đúng danh sách SKU đang hiển thị để xuất
+                                        const current_skus = selected_skus.size > 0 ? selected_skus : new Set(datasource.map(item => item.sku));
+                                        await export_kiem_hang_to_xlsx(current_skus, datasource, c_location);
+                                    } finally {
+                                        is_loading = false;
+                                        export_popup_shown = false;
+                                    }
+                                }}>Xuất phiếu kiểm hàng ({datasource.length} SP)</Button>
+
+                                <hr style="color: #ccc; margin: 4px 0;" />
+
+                                <!-- CỤM 3: XUẤT ĐƠN CHUYỂN HÀNG -->
+                                <p style="margin: 0px;"><b>3. Xuất phiếu chuyển hàng</b></p>
+                                <div>
+                                    <Button type="block secondary" onclick={async () => {
+                                        is_loading = true;
+                                        await export_transfer_sheet_to_xlsx(order_records, transfer_records, variant_by_id, locations).finally(() => {
+                                            is_loading = false;
+                                        });
+                                    }}>Xuất đơn chuyển hàng</Button>
+                                    <p style="margin: 0px; font-size: 11px; color: gray;">
                                         <i>(Bao gồm hàng tồn kho trong chi nhánh trung tâm)</i>
                                     </p>
                                 </div>
+
                             </div>
                         </Popup>
                     </Portal>
                 {/if}
 
-                <Button
-                    icon="mdi mdi-cog"
-                    onclick={() => {
-                        is_settings_open = true;
-                    }}
-                ></Button>
-                <Button icon="mdi mdi-logout" onclick={logout} type="danger"
-                ></Button>
+                <Button icon="mdi mdi-cog" onclick={() => { is_settings_open = true; }}></Button>
+                <Button icon="mdi mdi-logout" onclick={logout} type="danger"></Button>
             </div>
         </div>
 
         {#if low_sales_skus.size && !viewing_low_stocks}
-            <div
-                style="width: 100%; padding-left: 10px; background-color: #ffc748; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; border-radius: 5px"
-            >
+            <div style="width: 100%; padding-left: 10px; background-color: #ffc748; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; border-radius: 5px">
                 {#if !viewing_low_sales}
-                    <p>
-                        <b>{low_sales_skus.size}</b> mặt hàng có sản lượng thấp (trong
-                        1 tháng, dưới 20).
-                    </p>
+                    <p><b>{low_sales_skus.size}</b> mặt hàng có sản lượng thấp (trong 1 tháng, dưới 20).</p>
                     <div style="height: 32px;">
-                        <Button
-                            onclick={() => {
-                                filter_low_sales_items(false);
-                            }}>Xem chi tiết</Button
-                        >
+                        <Button onclick={() => { filter_low_sales_items(false); }}>Xem chi tiết</Button>
                     </div>
                 {:else}
-                    <p>
-                        <i class="mdi mdi-eye"></i>&nbsp;Đang xem
-                        <b>{low_sales_skus.size}</b> mặt hàng sản lượng thấp (trong
-                        1 tháng, dưới 20).
-                    </p>
+                    <p><i class="mdi mdi-eye"></i>&nbsp;Đang xem <b>{low_sales_skus.size}</b> mặt hàng sản lượng thấp (trong 1 tháng, dưới 20).</p>
                     <div style="height: 32px;">
-                        <Button
-                            onclick={() => {
-                                filter_low_sales_items(false);
-                            }}>Quay lại</Button
-                        >
+                        <Button onclick={() => { filter_low_sales_items(false); }}>Quay lại</Button>
                     </div>
                 {/if}
             </div>
         {/if}
 
         {#if viewing_low_stocks}
-            <div
-                style="width: 100%; padding-left: 10px; background-color: #ffc748; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; border-radius: 5px"
-            >
-                <p>
-                    <i class="mdi mdi-eye"></i>&nbsp;Đang xem
-                    <b>danh sách kiểm hàng</b> (mặt hàng tồn kho dưới 20).
-                </p>
+            <div style="width: 100%; padding-left: 10px; background-color: #ffc748; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; border-radius: 5px">
+                <p><i class="mdi mdi-eye"></i>&nbsp;Đang xem <b>danh sách kiểm hàng</b> (mặt hàng tồn kho dưới 20).</p>
                 <div style="height: 32px;">
                     <Button onclick={filter_low_stock_items}>Quay lại</Button>
                 </div>
@@ -737,22 +510,9 @@
 
         <div style="height: calc(100dvh - 160px); overflow: hidden;">
             {#key grid_key}
-                <Grid
-                    bind:this={grid_api}
-                    {columns}
-                    {data}
-                    responsive={responsive_fields}
-                    sizes={{ rowHeight: 165 }}
-                    rowStyle={(row: any) =>
-                        row.c_restock < 20 && c_location_id === 122671
-                            ? "lowSales"
-                            : ""}
-                />
-
+                <Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} rowStyle={(row: any) => row.c_restock < 20 && c_location_id === 122671 ? "lowSales" : ""} />
                 <style>
-                    .lowSales {
-                        background-color: #ff9248 !important;
-                    }
+                    .lowSales { background-color: #ff9248 !important; }
                 </style>
             {/key}
         </div>
@@ -779,17 +539,13 @@
 
             <div class="page-controls">
                 <button disabled={currentPage === 1} onclick={() => { currentPage--; updatePageData(); }}>&lt;</button>
-                
                 {#each Array(totalPages) as _, i}
                     {#if i + 1 === 1 || i + 1 === totalPages || (i + 1 >= currentPage - 1 && i + 1 <= currentPage + 1)}
-                        <button 
-                            class:active={currentPage === i + 1} 
-                            onclick={() => { currentPage = i + 1; updatePageData(); }}>
+                        <button class:active={currentPage === i + 1} onclick={() => { currentPage = i + 1; updatePageData(); }}>
                             {i + 1}
                         </button>
                     {/if}
                 {/each}
-
                 <button disabled={currentPage === totalPages} onclick={() => { currentPage++; updatePageData(); }}>&gt;</button>
             </div>
         </div>
@@ -797,9 +553,7 @@
         {#if is_loading}
             <Portal>
                 <Modal buttons={[]}>
-                    <div
-                        style="display:flex; flex-direction:column; align-items: center;"
-                    >
+                    <div style="display:flex; flex-direction:column; align-items: center;">
                         <LoadingThrobber></LoadingThrobber>
                         <p style="margin-bottom: 0px;">Đang tải...</p>
                     </div>
