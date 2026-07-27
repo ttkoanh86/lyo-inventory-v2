@@ -110,7 +110,7 @@ export function calculate_restock_data(
         }
     }
 
-    // 🟢 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG
+    // 🟢 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG (GIỮ NGUYÊN ĐIỀU KIỆN CHUẨN CỦA DÌ)
     variant_by_id.forEach((variant) => {
         const locIdNum = Number(location_id);
         const inventory = variant.inventory_level_by_location.get(locIdNum) || 
@@ -179,23 +179,24 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
+// 🟢 ĐÃ SỬA: Dùng key last_data_update_v2 đồng bộ với DB V2
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update") == null;
+    return localStorage.getItem("last_data_update_v2") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update",
+        "last_data_update_v2",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update"));
+    return Number(localStorage.getItem("last_data_update_v2"));
 }
 
 export function getLastDataUpdate() {
-    const t_unix = localStorage.getItem("last_data_update");
+    const t_unix = localStorage.getItem("last_data_update_v2");
     let utcString;
     if (t_unix != null) {
         utcString = new Date(Number(t_unix)).toISOString();
@@ -619,7 +620,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
 
     while (running) {
-        // 🟢 ĐÃ SỬA: status: "any" để quét toàn bộ đơn (open, closed...) tránh bỏ sót đơn xuất kho
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
@@ -670,7 +670,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 }
                 if (j.orders) {
                     j.orders.forEach((order: any) => {
-                        // 🟢 BỘ LỌC CHUẨN: Đơn không bị Hủy AND Đã có phiếu xuất kho (Fulfillment)
                         const is_not_cancelled = order.status !== "cancelled";
                         const has_fulfillment = order.fulfillments && order.fulfillments.length > 0;
 
@@ -745,7 +744,6 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     let running = true;
 
     while (running) {
-        // 🟢 ĐÃ SỬA: status: "any" cho chuyển hàng để lấy đầy đủ phiếu chuyển kho
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
