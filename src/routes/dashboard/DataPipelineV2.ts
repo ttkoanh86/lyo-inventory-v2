@@ -180,32 +180,27 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
+// 🟢 TỰ ĐỘNG CHUYỂN SANG V3 ĐỂ RESET SẠCH MỐC BỊ KHÓA CŨ
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v2") == null;
+    return localStorage.getItem("last_data_update_v3") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v2",
+        "last_data_update_v3",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v2"));
+    return Number(localStorage.getItem("last_data_update_v3"));
 }
 
-export function getLastDataUpdate(force_full = false) {
-    const t_unix = localStorage.getItem("last_data_update_v2");
-    let utcString;
-    if (t_unix != null && !force_full) {
-        utcString = new Date(Number(t_unix)).toISOString();
-    } else {
-        const now = new Date();
-        now.setMonth(now.getMonth() - 6);
-        utcString = now.toISOString();
-    }
-    return utcString.replace(/\.\d{3}Z$/, "Z");
+// 🟢 CHỈ LẤY ĐƠN TRONG 40 NGÀY GẦN NHẤT ĐỂ ĐẢM BẢO QUÉT ĐỦ 100% ĐƠN 30 NGÀY BÁN
+export function getLastDataUpdate() {
+    const now = new Date();
+    now.setDate(now.getDate() - 40);
+    return now.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export function sleep(ms: number) {
@@ -362,7 +357,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -427,7 +422,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -491,7 +486,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -555,7 +550,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -616,9 +611,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         order_records = await fetchRecordsFromIndexedDB();
     }
 
-    // 🟢 CƠ CHẾ CỨU DỮ LIỆU: NẾU DB RỖNG -> BẮT BUỘC TẢI LẠI 6 THÁNG QUA
-    const is_db_empty = order_records.length === 0;
-    const last_update_utc = getLastDataUpdate(is_db_empty);
+    // 🟢 LUÔN BẢO ĐẢM MỐC LẤY LÀ 40 NGÀY GẦN NHẤT KHI CHẠY MỚI
+    const min_created_date = getLastDataUpdate();
 
     let existing_records = new Set<string>();
     for (let r of order_records) {
@@ -630,13 +624,14 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
 
     while (running) {
+        // Lấy theo created_on_min 40 ngày gần nhất
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     status: "any",
                     page: page,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
@@ -644,32 +639,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     status: "any",
                     page: page + 1,
                     limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "any",
-                    page: page + 2,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "any",
-                    page: page + 3,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
         ]);
 
-        const success =
-            resp[0].status == 200 &&
-            resp[1].status == 200 &&
-            resp[2].status == 200 &&
-            resp[3].status == 200;
+        const success = resp[0].status == 200 && resp[1].status == 200;
 
         if (success) {
             let total_orders_fetched = 0;
@@ -776,13 +751,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 break;
             }
 
-            page += 4;
+            page += 2;
         } else {
             await sleep(1000);
         }
     }
 
-    // 🟢 BẮT BUỘC GHI XONG ĐƠN VÀO INDEXEDDB MỚI CHO PHÉP SET MỐC THỜI GIAN
     await updateIndexedDB(order_records.filter((v) => v.new_record));
     setLastDataUpdate();
     return order_records;
@@ -801,8 +775,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
         transfer_records = await fetchInventoryTransferFromIndexedDB();
     }
 
-    const is_db_empty = transfer_records.length === 0;
-    const last_update_utc = getLastDataUpdate(is_db_empty);
+    const min_created_date = getLastDataUpdate();
 
     let existing_transfer_ids = new Set<number>();
     for (let r of transfer_records) {
@@ -819,7 +792,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
@@ -827,32 +800,12 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page + 1,
                     limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
-                params: {
-                    status: "any",
-                    page: page + 2,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
-                params: {
-                    status: "any",
-                    page: page + 3,
-                    limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
         ]);
 
-        const success =
-            resp[0].status == 200 &&
-            resp[1].status == 200 &&
-            resp[2].status == 200 &&
-            resp[3].status == 200;
+        const success = resp[0].status == 200 && resp[1].status == 200;
 
         if (success) {
             let total_transfers_fetched = 0;
@@ -889,7 +842,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                 break;
             }
 
-            page += 4;
+            page += 2;
         } else {
             await sleep(1000);
         }
