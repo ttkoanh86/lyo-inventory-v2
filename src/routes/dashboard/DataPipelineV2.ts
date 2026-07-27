@@ -93,6 +93,7 @@ export function calculate_restock_data(
 
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
+    const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id);
 
     // 1. Khởi tạo mảng bán = 0
@@ -102,11 +103,11 @@ export function calculate_restock_data(
         }
     }
 
-    // 2. Cộng dồn chính xác theo ngày xuất kho trong 30 ngày qua
+    // 2. Cộng dồn số lượng bán trong 30 ngày qua dựa trên thời điểm xuất kho thực tế
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
-        if (rec_loc === target_location_id || rec_loc === 0) {
-            if (record.t_unix >= now_ts - thirty_days_ms && record.t_unix <= now_ts) {
+        if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
+            if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
                 sales_by_sku.set(record.sku, current_sales + record.quantity);
             }
@@ -181,7 +182,6 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 GIỮ NGUYÊN BẢN V2 THEO Ý DÌ
 export function isFirstTime() {
     return localStorage.getItem("last_data_update_v2") == null;
 }
@@ -199,7 +199,7 @@ export function getLastDataUpdateTUnix() {
 
 export function getLastDataUpdate() {
     const now = new Date();
-    now.setDate(now.getDate() - 45); // Quét lùi 45 ngày để phủ kín mốc 30 ngày bán
+    now.setDate(now.getDate() - 45); // Lấy dôi ra 45 ngày từ Sapo API
     return now.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
@@ -408,7 +408,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
                         is_composite: value.is_composite,
                         new_record: false,
                         order_id: value.order_id,
-                        fulfillment_id: value.fulfillment_id,
+                        fulfillment_id: value.fulfillment_id
                     });
                     cursor.continue();
                 } else {
@@ -598,7 +598,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM LẤY ĐƠN HÀNG CHUẨN XÁC TÍNH THEO NGÀY XUẤT KHO THỰC TẾ
+// 🟢 HÀM XỬ LÝ CHUẨN XÁC MỐC THỜI GIAN XUẤT KHO THỰC TẾ CỦA SAPO
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -615,9 +615,14 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     const min_created_date = getLastDataUpdate();
 
     let existing_fulfillment_ids = new Set<number>();
+    let existing_order_ids = new Set<number>();
+
     for (let r of order_records) {
         if (r.fulfillment_id) {
             existing_fulfillment_ids.add(r.fulfillment_id);
+        }
+        if (r.order_id) {
+            existing_order_ids.add(r.order_id);
         }
     }
 
@@ -625,7 +630,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
 
     while (running) {
-        // Gọi Sapo lấy các đơn có phát sinh giao hàng
+        // Yêu cầu Sapo lọc sẵn các đơn có xuất kho (fulfilled, partial)
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
@@ -676,16 +681,18 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 total_orders_fetched += orders.length;
 
                 orders.forEach((order: any) => {
+                    const loc_id = Number(order.location_id || 0);
+
+                    // TH1: Đơn có phiếu xuất kho fulfillments
                     if (order.fulfillments && order.fulfillments.length > 0) {
                         order.fulfillments.forEach((fulfillment: any) => {
-                            // Chỉ lấy phiếu xuất kho thành công (status !== failure)
                             if (fulfillment.status !== "failure" && !existing_fulfillment_ids.has(fulfillment.id)) {
                                 const items = fulfillment.line_items || fulfillment.fulfillment_line_items || [];
                                 
-                                // 🟢 LẤY NGÀY XUẤT KHO THỰC TẾ (created_on của Fulfillment)
-                                const fulfillment_date = fulfillment.created_on || order.created_on;
-                                const fulfillment_ts = new Date(fulfillment_date).getTime();
-                                const loc_id = Number(fulfillment.stock_location_id || order.location_id || 0);
+                                // 🟢 ƯU TIÊN 1: Dùng ngày tạo phiếu fulfillment (Thực tế trừ kho)
+                                const export_date_str = fulfillment.created_on || order.modified_on || order.created_on;
+                                const fulfillment_ts = new Date(export_date_str).getTime();
+                                const f_loc_id = Number(fulfillment.stock_location_id || loc_id);
 
                                 items.forEach((line_item: any) => {
                                     const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
@@ -701,7 +708,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                         sku: sub_sku,
                                                         quantity: line_item.quantity * quantity,
                                                         is_composite: false,
-                                                        location_id: loc_id,
+                                                        location_id: f_loc_id,
                                                         t_unix: fulfillment_ts,
                                                         new_record: true
                                                     });
@@ -714,7 +721,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                 quantity: line_item.quantity,
                                                 sku: sku,
                                                 is_composite: false,
-                                                location_id: loc_id,
+                                                location_id: f_loc_id,
                                                 t_unix: fulfillment_ts,
                                                 new_record: true,
                                             });
@@ -725,6 +732,47 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                 existing_fulfillment_ids.add(fulfillment.id);
                             }
                         });
+                    } 
+                    // TH2: Đơn đã giao (fulfilled) nhưng không tách mảng fulfillments -> Bóc từ order.line_items
+                    else if (!existing_order_ids.has(order.id)) {
+                        const items = order.line_items || [];
+                        const export_date_str = order.modified_on || order.created_on;
+                        const order_ts = new Date(export_date_str).getTime();
+
+                        items.forEach((line_item: any) => {
+                            const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
+                            if (sku) {
+                                if (line_item.is_composite) {
+                                    const it = variant_by_id.get(line_item.variant_id);
+                                    it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                        const sub_sku = variant_by_id.get(id)?.sku;
+                                        if (sub_sku) {
+                                            order_records.push({
+                                                order_id: order.id,
+                                                sku: sub_sku,
+                                                quantity: line_item.quantity * quantity,
+                                                is_composite: false,
+                                                location_id: loc_id,
+                                                t_unix: order_ts,
+                                                new_record: true
+                                            });
+                                        }
+                                    });
+                                } else {
+                                    order_records.push({
+                                        order_id: order.id,
+                                        quantity: line_item.quantity,
+                                        sku: sku,
+                                        is_composite: false,
+                                        location_id: loc_id,
+                                        t_unix: order_ts,
+                                        new_record: true,
+                                    });
+                                }
+                            }
+                        });
+
+                        existing_order_ids.add(order.id);
                     }
                 });
             }
