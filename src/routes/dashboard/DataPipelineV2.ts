@@ -91,7 +91,6 @@ export function calculate_restock_data(
     let sales_by_sku = new Map<string, number>();
     let items_need_restocking: ProductV2[] = [];
 
-    // Mốc 30 ngày tính chuẩn từ thời điểm hiện tại thực tế
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const target_location_id = Number(location_id);
@@ -171,7 +170,7 @@ export async function get_locations(): Promise<Location[]> {
             ];
             addrs = addrs.filter((v) => v != "" && v != null);
             location_by_id.push({
-                id: loc.id,
+                id: Number(loc.id), // Ép kiểu số
                 address: addrs.join(", "),
                 label: loc.label,
             });
