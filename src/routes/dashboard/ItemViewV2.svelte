@@ -405,89 +405,68 @@
                 </div>
 
                 {#if export_popup_shown}
-    <Portal>
-        <Popup parent={export_popup_parent} at="bottom" oncancel={on_export_popup_cancel}>
-            <div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
-                
-                <!-- CỤM 1: XUẤT PHIẾU NHẬP HÀNG (THÔNG MINH DỰA THEO LỰA CHỌN) -->
-                <p style="margin: 0px;"><b>1. Xuất phiếu nhập hàng</b></p>
-                {#if selected_skus.size != 0}
-                    <Button type="primary" onclick={async () => {
-                        is_loading = true;
-                        try {
-                            await export_selected_to_xlsx(selected_skus, datasource, c_location);
-                        } finally {
-                            is_loading = false;
-                            export_popup_shown = false;
-                        }
-                    }}>Xuất {selected_skus.size} sản phẩm đã chọn (Nhập hàng)</Button>
-                {:else}
-                    <Button type="primary" onclick={async () => {
-                        is_loading = true;
-                        try {
-                            const filtered_skus = new Set(datasource.map(item => item.sku));
-                            await export_selected_to_xlsx(filtered_skus, datasource, c_location);
-                        } finally {
-                            is_loading = false;
-                            export_popup_shown = false;
-                        }
-                    }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Nhập hàng)</Button>
-                {/if}
+                    <Portal>
+                        <Popup parent={export_popup_parent} at="bottom" oncancel={on_export_popup_cancel}>
+                            <div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
+                                
+                                <!-- CỤM 1: XUẤT PHIẾU NHẬP HÀNG -->
+                                <p style="margin: 0px;"><b>1. Xuất phiếu nhập hàng</b></p>
+                                {#if selected_skus.size != 0}
+                                    <Button type="primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            await export_selected_to_xlsx(selected_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất {selected_skus.size} sản phẩm đã chọn (Nhập hàng)</Button>
+                                {:else}
+                                    <Button type="primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            const filtered_skus = new Set(datasource.map(item => item.sku));
+                                            await export_selected_to_xlsx(filtered_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Nhập hàng)</Button>
+                                {/if}
 
-                <Button type="secondary" onclick={async () => {
-                    is_loading = true;
-                    await export_all_to_xlsx(order_records, transfer_records, variant_by_id, c_location_id, c_location).finally(() => {
-                        is_loading = false;
-                    });
-                }}>Xuất toàn bộ sản phẩm trong kho</Button>
+                                <Button type="secondary" onclick={async () => {
+                                    is_loading = true;
+                                    await export_all_to_xlsx(order_records, transfer_records, variant_by_id, c_location_id, c_location).finally(() => {
+                                        is_loading = false;
+                                    });
+                                }}>Xuất toàn bộ sản phẩm trong kho</Button>
 
-                <hr style="color: #ccc; margin: 4px 0;" />
+                                <hr style="color: #ccc; margin: 4px 0;" />
 
-                <!-- CỤM 2: XUẤT PHIẾU KIỂM HÀNG (THÔNG MINH DỰA THEO LỰA CHỌN) -->
-                <p style="margin: 0px;"><b>2. Xuất phiếu kiểm hàng</b></p>
-                {#if selected_skus.size != 0}
-                    <Button type="block primary" onclick={async () => {
-                        is_loading = true;
-                        try {
-                            await export_kiem_hang_to_xlsx(selected_skus, datasource, c_location);
-                        } finally {
-                            is_loading = false;
-                            export_popup_shown = false;
-                        }
-                    }}>Xuất {selected_skus.size} sản phẩm đã chọn (Kiểm hàng)</Button>
-                {:else}
-                    <Button type="block primary" onclick={async () => {
-                        is_loading = true;
-                        try {
-                            const filtered_skus = new Set(datasource.map(item => item.sku));
-                            await export_kiem_hang_to_xlsx(filtered_skus, datasource, c_location);
-                        } finally {
-                            is_loading = false;
-                            export_popup_shown = false;
-                        }
-                    }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Kiểm hàng)</Button>
-                {/if}
-
-                <hr style="color: #ccc; margin: 4px 0;" />
-
-                <!-- CỤM 3: XUẤT ĐƠN CHUYỂN HÀNG -->
-                <p style="margin: 0px;"><b>3. Xuất phiếu chuyển hàng</b></p>
-                <div>
-                    <Button type="block secondary" onclick={async () => {
-                        is_loading = true;
-                        await export_transfer_sheet_to_xlsx(order_records, transfer_records, variant_by_id, locations).finally(() => {
-                            is_loading = false;
-                        });
-                    }}>Xuất đơn chuyển hàng</Button>
-                    <p style="margin: 0px; font-size: 11px; color: gray;">
-                        <i>(Bao gồm hàng tồn kho trong chi nhánh trung tâm)</i>
-                    </p>
-                </div>
-
-            </div>
-        </Popup>
-    </Portal>
-{/if}
+                                <!-- CỤM 2: XUẤT PHIẾU KIỂM HÀNG -->
+                                <p style="margin: 0px;"><b>2. Xuất phiếu kiểm hàng</b></p>
+                                {#if selected_skus.size != 0}
+                                    <Button type="block primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            await export_kiem_hang_to_xlsx(selected_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất {selected_skus.size} sản phẩm đã chọn (Kiểm hàng)</Button>
+                                {:else}
+                                    <Button type="block primary" onclick={async () => {
+                                        is_loading = true;
+                                        try {
+                                            const filtered_skus = new Set(datasource.map(item => item.sku));
+                                            await export_kiem_hang_to_xlsx(filtered_skus, datasource, c_location);
+                                        } finally {
+                                            is_loading = false;
+                                            export_popup_shown = false;
+                                        }
+                                    }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Kiểm hàng)</Button>
+                                {/if}
 
                                 <hr style="color: #ccc; margin: 4px 0;" />
 
