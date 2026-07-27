@@ -90,8 +90,10 @@ export function calculate_restock_data(
     let sales_by_sku = new Map<string, number>();
     let items_need_restocking: ProductV2[] = [];
 
-    const t_unix = getLastDataUpdateTUnix() || new Date().getTime();
+    // 🟢 MỐC 30 NGÀY TÍNH TỪ THỜI ĐIỂM HIỆN TẠI
+    const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
+    const target_location_id = Number(location_id);
 
     // 🟢 1. KHỞI TẠO TẤT CẢ SẢN PHẨM MẶC ĐỊNH BÁN = 0
     for (let [_, variant] of variant_by_id) {
@@ -102,8 +104,8 @@ export function calculate_restock_data(
 
     // 🟢 2. CỘNG DỒN SỐ LƯỢNG BÁN TRONG 30 NGÀY QUA
     for (let record of records) {
-        if (Number(location_id) === Number(record.location_id)) {
-            if (record.t_unix >= t_unix - thirty_days_ms) {
+        if (Number(record.location_id) === target_location_id) {
+            if (record.t_unix >= now_ts - thirty_days_ms && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
                 sales_by_sku.set(record.sku, current_sales + record.quantity);
             }
@@ -112,8 +114,7 @@ export function calculate_restock_data(
 
     // 🟢 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG (GIỮ NGUYÊN ĐIỀU KIỆN CHUẨN CỦA DÌ)
     variant_by_id.forEach((variant) => {
-        const locIdNum = Number(location_id);
-        const inventory = variant.inventory_level_by_location.get(locIdNum) || 
+        const inventory = variant.inventory_level_by_location.get(target_location_id) || 
                           variant.inventory_level_by_location.get(location_id as any);
 
         variant.c_available = Math.max(0, inventory?.available ?? 0);
@@ -179,24 +180,24 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 ĐÃ SỬA: Dùng key last_data_update_v2 đồng bộ với DB V2
+// 🟢 BỘ NHỚ LƯU MỐC THỜI GIAN V3
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v2") == null;
+    return localStorage.getItem("last_data_update_v3") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v2",
+        "last_data_update_v3",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v2"));
+    return Number(localStorage.getItem("last_data_update_v3"));
 }
 
 export function getLastDataUpdate() {
-    const t_unix = localStorage.getItem("last_data_update_v2");
+    const t_unix = localStorage.getItem("last_data_update_v3");
     let utcString;
     if (t_unix != null) {
         utcString = new Date(Number(t_unix)).toISOString();
@@ -271,13 +272,12 @@ export async function get_active_products() {
             resp[3].status == 200;
 
         if (success) {
-            if (JSON.parse(resp[0].data).products.length == 0) {
-                running = false;
-                break;
-            }
+            let total_products_fetched = 0;
 
             for (let r of resp) {
-                const products = JSON.parse(r.data).products;
+                const products = JSON.parse(r.data).products || [];
+                total_products_fetched += products.length;
+
                 products.forEach((product: any) => {
                     product.variants.forEach((variant: any) => {
                         if (!is_promotional_item(product.brand)) {
@@ -306,7 +306,7 @@ export async function get_active_products() {
                             variant.inventories.forEach(
                                 (inventory: any) => {
                                     p_variant.inventory_level_by_location.set(
-                                        inventory.location_id,
+                                        Number(inventory.location_id),
                                         {
                                             on_hand: inventory.on_hand,
                                             incoming: inventory.incoming,
@@ -336,7 +336,7 @@ export async function get_active_products() {
                             );
 
                             for (let price of variant.variant_prices) {
-                                if (price.price_list.code == "GIANHAP") {
+                                if (price.price_list && price.price_list.code == "GIANHAP") {
                                     p_variant.retail_price_ecomm = price.included_tax_price;
                                     break;
                                 }
@@ -348,6 +348,11 @@ export async function get_active_products() {
                 });
             }
 
+            if (total_products_fetched === 0) {
+                running = false;
+                break;
+            }
+
             page += 4;
         } else {
             await sleep(1000);
@@ -356,9 +361,10 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
+// 🟢 KẾT NỐI KHO INDEXEDDB V3
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -405,7 +411,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
                         sku: value.sku,
                         t_unix: value.t_unix,
                         quantity: value.quantity,
-                        location_id: value.location_id,
+                        location_id: Number(value.location_id),
                         is_composite: value.is_composite,
                         new_record: false,
                         order_id: value.order_id,
@@ -422,7 +428,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -469,7 +475,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
                         sku: value.sku,
                         t_unix: value.t_unix,
                         quantity: value.quantity,
-                        location_id: value.location_id,
+                        location_id: Number(value.location_id),
                         new_record: false,
                         transfer_id: value.order_id,
                     });
@@ -486,7 +492,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -514,7 +520,7 @@ export async function updateIndexedDB(records: OrderRecordV2[]) {
                         t_unix: r.t_unix,
                         quantity: r.quantity,
                         sku: r.sku,
-                        location_id: r.location_id,
+                        location_id: Number(r.location_id),
                         is_composite: r.is_composite,
                         order_id: r.order_id,
                         type: "order",
@@ -549,7 +555,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V3", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -576,7 +582,7 @@ export async function saveInventoryTransferToIndexedDB(
                         t_unix: r.t_unix,
                         quantity: r.quantity,
                         sku: r.sku,
-                        location_id: r.location_id,
+                        location_id: Number(r.location_id),
                         is_composite: false,
                         order_id: r.transfer_id,
                         type: "transfer",
@@ -662,54 +668,63 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             resp[3].status == 200;
 
         if (success) {
+            let total_orders_fetched = 0;
+
             for (let r of resp) {
                 const j = JSON.parse(r.data);
-                if (!j.orders || j.orders.length == 0) {
-                    running = false;
-                    break;
-                }
-                if (j.orders) {
-                    j.orders.forEach((order: any) => {
-                        const is_not_cancelled = order.status !== "cancelled";
-                        const has_fulfillment = order.fulfillments && order.fulfillments.length > 0;
+                const orders = j.orders || [];
+                total_orders_fetched += orders.length;
 
-                        if (!existing_order_ids.has(order.id) && is_not_cancelled && has_fulfillment) {
-                            order.fulfillments.forEach((fulfillment: any) => {
-                                fulfillment.fulfillment_line_items.forEach((line_item: any) => {
-                                    if (line_item.is_composite) {
-                                        const it = variant_by_id.get(line_item.variant_id);
-                                        it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
-                                            const composite_item_sku = variant_by_id.get(id)?.sku;
-                                            if (composite_item_sku) {
-                                                order_records.push({
-                                                    order_id: order.id,
-                                                    sku: composite_item_sku,
-                                                    quantity: line_item.quantity * quantity,
-                                                    is_composite: false,
-                                                    location_id: fulfillment.stock_location_id,
-                                                    t_unix: new Date(order.modified_on).getTime(),
-                                                    new_record: true
-                                                });
-                                            }
-                                        });
-                                    } else {
-                                        order_records.push({
-                                            order_id: order.id,
-                                            quantity: line_item.quantity,
-                                            sku: line_item.sku,
-                                            is_composite: line_item.is_composite,
-                                            location_id: fulfillment.stock_location_id,
-                                            t_unix: new Date(order.modified_on).getTime(),
-                                            new_record: true,
-                                        });
-                                    }
-                                });
+                orders.forEach((order: any) => {
+                    const is_not_cancelled = order.status !== "cancelled";
+                    const has_fulfillment = order.fulfillments && order.fulfillments.length > 0;
+
+                    if (!existing_order_ids.has(order.id) && is_not_cancelled && has_fulfillment) {
+                        order.fulfillments.forEach((fulfillment: any) => {
+                            fulfillment.fulfillment_line_items.forEach((line_item: any) => {
+                                // 🟢 LẤY ĐÚNG THỜI ĐIỂM TẠO ĐƠN HOẶC XUẤT KHO
+                                const order_date_ts = new Date(order.created_on || order.modified_on).getTime();
+
+                                if (line_item.is_composite) {
+                                    const it = variant_by_id.get(line_item.variant_id);
+                                    it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                        const composite_item_sku = variant_by_id.get(id)?.sku;
+                                        if (composite_item_sku) {
+                                            order_records.push({
+                                                order_id: order.id,
+                                                sku: composite_item_sku,
+                                                quantity: line_item.quantity * quantity,
+                                                is_composite: false,
+                                                location_id: Number(fulfillment.stock_location_id || order.location_id),
+                                                t_unix: order_date_ts,
+                                                new_record: true
+                                            });
+                                        }
+                                    });
+                                } else {
+                                    order_records.push({
+                                        order_id: order.id,
+                                        quantity: line_item.quantity,
+                                        sku: line_item.sku,
+                                        is_composite: line_item.is_composite,
+                                        location_id: Number(fulfillment.stock_location_id || order.location_id),
+                                        t_unix: order_date_ts,
+                                        new_record: true,
+                                    });
+                                }
                             });
-                            existing_order_ids.add(order.id);
-                        }
-                    });
-                }
+                        });
+                        existing_order_ids.add(order.id);
+                    }
+                });
             }
+
+            // 🟢 CHỈ DỪNG KHI CẢ 4 TRANG ĐỀU KHÔNG CÓ ĐƠN NÀO
+            if (total_orders_fetched === 0) {
+                running = false;
+                break;
+            }
+
             page += 4;
         } else {
             await sleep(1000);
@@ -786,35 +801,40 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
             resp[3].status == 200;
 
         if (success) {
+            let total_transfers_fetched = 0;
+
             for (let r of resp) {
                 const j = JSON.parse(r.data);
-                if (!j.stock_transfers || j.stock_transfers.length == 0) {
-                    running = false;
-                    break;
-                }
-                if (j.stock_transfers) {
-                    j.stock_transfers.forEach((transfer: any) => {
-                        if (
-                            !existing_transfer_ids.has(transfer.id) &&
-                            (transfer.status == "received" || transfer.status == "shipped")
-                        ) {
-                            transfer.line_items.forEach((line_item: any) => {
-                                if (p_variants.has(line_item.variant_id)) {
-                                    transfer_records.push({
-                                        transfer_id: transfer.id,
-                                        location_id: transfer.source_location_id,
-                                        sku: p_variants.get(line_item.variant_id)?.sku || "",
-                                        t_unix: new Date(transfer.modified_on).getTime(),
-                                        quantity: line_item.quantity,
-                                        new_record: true,
-                                    });
-                                }
-                            });
-                            existing_transfer_ids.add(transfer.id);
-                        }
-                    });
-                }
+                const stock_transfers = j.stock_transfers || [];
+                total_transfers_fetched += stock_transfers.length;
+
+                stock_transfers.forEach((transfer: any) => {
+                    if (
+                        !existing_transfer_ids.has(transfer.id) &&
+                        (transfer.status == "received" || transfer.status == "shipped")
+                    ) {
+                        transfer.line_items.forEach((line_item: any) => {
+                            if (p_variants.has(line_item.variant_id)) {
+                                transfer_records.push({
+                                    transfer_id: transfer.id,
+                                    location_id: Number(transfer.source_location_id),
+                                    sku: p_variants.get(line_item.variant_id)?.sku || "",
+                                    t_unix: new Date(transfer.created_on || transfer.modified_on).getTime(),
+                                    quantity: line_item.quantity,
+                                    new_record: true,
+                                });
+                            }
+                        });
+                        existing_transfer_ids.add(transfer.id);
+                    }
+                });
             }
+
+            if (total_transfers_fetched === 0) {
+                running = false;
+                break;
+            }
+
             page += 4;
         } else {
             await sleep(1000);
