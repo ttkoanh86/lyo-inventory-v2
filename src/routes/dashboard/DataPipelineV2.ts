@@ -91,7 +91,6 @@ export function calculate_restock_data(
     let sales_by_sku = new Map<string, number>();
     let items_need_restocking: ProductV2[] = [];
 
-    // 🟢 CỐ ĐỊNH MỐC 30 NGÀY TỚI THỜI ĐIỂM HIỆN TẠI
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const target_location_id = Number(location_id);
@@ -181,23 +180,24 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
+// 🟢 ĐỔI VỀ TÊN BẢN V2 NHƯ DÌ CHỈ ĐỊNH
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v5") == null;
+    return localStorage.getItem("last_data_update_v2") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v5",
+        "last_data_update_v2",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v5"));
+    return Number(localStorage.getItem("last_data_update_v2"));
 }
 
 export function getLastDataUpdate() {
-    const t_unix = localStorage.getItem("last_data_update_v5");
+    const t_unix = localStorage.getItem("last_data_update_v2");
     let utcString;
     if (t_unix != null) {
         utcString = new Date(Number(t_unix)).toISOString();
@@ -361,9 +361,10 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
+// 🟢 ĐỔI BỘ NHỚ INDEXEDDB VỀ TÊN V2
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V5", 3);
+        const request = indexedDB.open("LYOInventoryDB_V2", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -428,7 +429,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V5", 3);
+        const request = indexedDB.open("LYOInventoryDB_V2", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -492,7 +493,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V5", 3);
+        const request = indexedDB.open("LYOInventoryDB_V2", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -556,7 +557,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V5", 3);
+        const request = indexedDB.open("LYOInventoryDB_V2", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -684,11 +685,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                     if (is_not_cancelled && has_fulfillment) {
                         order.fulfillments.forEach((fulfillment: any) => {
-                            // 🟢 LỌC THEO FULFILLMENT ID ĐỂ KHÔNG BỎ SÓT ĐƠN BÁN NHIỀU LẦN
                             if (!existing_fulfillment_ids.has(fulfillment.id)) {
                                 const items = fulfillment.line_items || fulfillment.fulfillment_line_items || [];
-                                
-                                // 🟢 LẤY CHÍNH XÁC NGÀY XUẤT KHO THỰC TẾ (created_on của Fulfillment)
                                 const fulfillment_date = fulfillment.created_on || order.created_on || order.modified_on;
                                 const fulfillment_ts = new Date(fulfillment_date).getTime();
 
