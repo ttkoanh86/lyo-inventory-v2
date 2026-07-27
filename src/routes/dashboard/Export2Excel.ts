@@ -3,7 +3,7 @@ import { imageToArrayBuffer } from "./imageToByteArray";
 import { lazyLoadScript } from "./lazyLoadScript";
 import { type Location } from "./Template";
 
-// 1. Hàm riêng cho Kiểm Hàng (Ép tên "Kiem hang" và bỏ tải ảnh)
+// 🟢 1. HÀM XUẤT CHO KIỂM HÀNG (ÉP TÊN KIỂM HÀNG + BỎ TẢI ẢNH SIÊU NHANH)
 export async function export_kiem_hang_to_xlsx(
     selected_skus: Set<string>, 
     datasource: ProductV2[], 
@@ -13,10 +13,11 @@ export async function export_kiem_hang_to_xlsx(
         ? datasource.filter((item) => selected_skus.has(item.sku))
         : datasource;
         
+    // 🟢 ÉP BẮT BUỘC: is_transfer = false, is_check_mode = true, skip_images = true
     await _actual_export_handler(x, location, false, true, true);
 }
 
-// 2. Hàm xuất đã chọn cho Nhập Hàng
+// 🟢 2. HÀM XUẤT CHO NHẬP HÀNG (CÓ CHỌN / ĐANG LỌC)
 export async function export_selected_to_xlsx(
     selected_skus: Set<string>, 
     datasource: ProductV2[], 
@@ -34,7 +35,7 @@ export async function export_selected_to_xlsx(
     }
 }
 
-// 3. Hàm xuất toàn bộ cho Nhập Hàng
+// 🟢 3. HÀM XUẤT TOÀN BỘ SẢN PHẨM TRONG KHO
 export async function export_all_to_xlsx(
     order_records: OrderRecordV2[], 
     transfer_records: TransferRecord[], 
@@ -55,7 +56,7 @@ export async function export_all_to_xlsx(
     }
 }
 
-// 4. Hàm xuất Chuyển Hàng
+// 🟢 4. HÀM XUẤT CHUYỂN HÀNG
 export async function export_transfer_sheet_to_xlsx(
     order_records: OrderRecordV2[], 
     transfer_records: TransferRecord[], 
@@ -76,7 +77,7 @@ export async function export_transfer_sheet_to_xlsx(
     }
 }
 
-// 5. Hàm xử lý xuất chính
+// 🟢 5. HÀM XỬ LÝ CHÍNH
 export async function _actual_export_handler(
     prods: ProductV2[], 
     location: Location, 
@@ -170,6 +171,7 @@ export async function _actual_export_handler(
     const t = new Date();
     const time_str = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}_${String(t.getHours()).padStart(2, '0')}${String(t.getMinutes()).padStart(2, '0')}${String(t.getSeconds()).padStart(2, '0')}`;
 
+    // 🔴 ĐẶT TIỀN TỐ ĐÚNG CHUẨN NGUYÊN BẢN LOGIC
     let prefix = "Nhap hang";
     if (is_check_mode) {
         prefix = "Kiem hang";
