@@ -212,9 +212,8 @@
 
     let data: ProductV2[] = $state([]);
 
-    // === CẤU HÌNH PHÂN TRANG CHUẨN MƯỢT MÀ ===
     let currentPage = $state(1);
-    let itemsPerPage = $state(50); // Mặc định 50 dòng/trang
+    let itemsPerPage = $state(50);
 
     let totalPages = $derived(Math.ceil(datasource.length / itemsPerPage) || 1);
 
@@ -580,7 +579,6 @@
                                         onclick={async () => {
                                             is_loading = true;
                                             try {
-                                                // 🟢 ĐÚNG BẢN CHẤT: Đang Kiểm hàng -> Gọi hàm Kiểm hàng riêng
                                                 if (viewing_low_stocks) {
                                                     await export_kiem_hang_to_xlsx(
                                                         selected_skus,
@@ -607,7 +605,6 @@
                                             is_loading = true;
                                             try {
                                                 const filtered_skus = new Set(datasource.map(item => item.sku));
-                                                // 🟢 ĐÚNG BẢN CHẤT: Đang Kiểm hàng -> Gọi hàm Kiểm hàng riêng
                                                 if (viewing_low_stocks) {
                                                     await export_kiem_hang_to_xlsx(
                                                         filtered_skus,
@@ -632,7 +629,6 @@
                                     type="secondary"
                                     onclick={async () => {
                                         is_loading = true;
-                                        // 🟢 ĐÚNG BẢN CHẤT: Đang Kiểm hàng -> Gọi hàm Kiểm hàng riêng
                                         if (viewing_low_stocks) {
                                             const all_skus = new Set(datasource.map(item => item.sku));
                                             await export_kiem_hang_to_xlsx(
@@ -761,9 +757,7 @@
             {/key}
         </div>
 
-        <!-- THANH PHÂN TRANG CANH PHẢI CHUẨN ĐẾN TỪNG PIXEL -->
         <div class="pagination-container">
-            <!-- Khối 1: Chọn số kết quả -->
             <div class="page-size">
                 <span>Hiển thị</span>
                 <select bind:value={itemsPerPage} onchange={resetPagination}>
@@ -775,7 +769,6 @@
                 <span>kết quả</span>
             </div>
 
-            <!-- Khối 2: Thông tin tổng kết quả -->
             <div class="page-info">
                 {#if datasource.length > 0}
                     Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, datasource.length)}</b> trên tổng <b>{datasource.length}</b> kết quả
@@ -784,7 +777,6 @@
                 {/if}
             </div>
 
-            <!-- Khối 3: Cụm nút bấm chuyển trang -->
             <div class="page-controls">
                 <button disabled={currentPage === 1} onclick={() => { currentPage--; updatePageData(); }}>&lt;</button>
                 
