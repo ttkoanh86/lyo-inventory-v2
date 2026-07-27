@@ -3,6 +3,20 @@ import { imageToArrayBuffer } from "./imageToByteArray";
 import { lazyLoadScript } from "./lazyLoadScript";
 import { type Location } from "./Template";
 
+// 1. Hàm riêng cho Kiểm Hàng (Ép tên "Kiem hang" và bỏ tải ảnh)
+export async function export_kiem_hang_to_xlsx(
+    selected_skus: Set<string>, 
+    datasource: ProductV2[], 
+    location: Location
+) {
+    const x = selected_skus.size > 0 
+        ? datasource.filter((item) => selected_skus.has(item.sku))
+        : datasource;
+        
+    await _actual_export_handler(x, location, false, true, true);
+}
+
+// 2. Hàm xuất đã chọn cho Nhập Hàng
 export async function export_selected_to_xlsx(
     selected_skus: Set<string>, 
     datasource: ProductV2[], 
@@ -20,6 +34,7 @@ export async function export_selected_to_xlsx(
     }
 }
 
+// 3. Hàm xuất toàn bộ cho Nhập Hàng
 export async function export_all_to_xlsx(
     order_records: OrderRecordV2[], 
     transfer_records: TransferRecord[], 
@@ -40,6 +55,7 @@ export async function export_all_to_xlsx(
     }
 }
 
+// 4. Hàm xuất Chuyển Hàng
 export async function export_transfer_sheet_to_xlsx(
     order_records: OrderRecordV2[], 
     transfer_records: TransferRecord[], 
@@ -60,6 +76,7 @@ export async function export_transfer_sheet_to_xlsx(
     }
 }
 
+// 5. Hàm xử lý xuất chính
 export async function _actual_export_handler(
     prods: ProductV2[], 
     location: Location, 
@@ -153,15 +170,10 @@ export async function _actual_export_handler(
     const t = new Date();
     const time_str = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}_${String(t.getHours()).padStart(2, '0')}${String(t.getMinutes()).padStart(2, '0')}${String(t.getSeconds()).padStart(2, '0')}`;
 
-    // 🔴 ĐÚNG BẢN CHẤT LOGIC:
-    // 1. Nếu is_check_mode = true -> "Kiem hang"
-    // 2. Nếu is_transfer = true   -> "Chuyen hang"
-    // 3. Còn lại (mặc định)       -> "Nhap hang"
-    // 🟢 ĐẶT TIỀN TỐ ƯU TIÊN SỐ 1 CHO KIỂM HÀNG
     let prefix = "Nhap hang";
-    if (is_check_mode === true) {
+    if (is_check_mode) {
         prefix = "Kiem hang";
-    } else if (is_transfer === true) {
+    } else if (is_transfer) {
         prefix = "Chuyen hang";
     }
 
