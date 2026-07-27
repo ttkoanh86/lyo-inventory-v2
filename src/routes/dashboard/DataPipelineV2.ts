@@ -12,7 +12,6 @@ export interface OrderRecordV2 {
     is_composite: boolean;
     new_record: boolean;
     order_id: number;
-    fulfillment_id?: string | number;
 }
 
 export interface TransferRecord {
@@ -104,7 +103,8 @@ export function calculate_restock_data(
 
     // 2. CỘNG DỒN SỐ LƯỢNG BÁN TRONG 30 NGÀY QUA
     for (let record of records) {
-        if (Number(record.location_id) === target_location_id) {
+        const rec_loc = Number(record.location_id || 0);
+        if (rec_loc === target_location_id || rec_loc === 0) {
             if (record.t_unix >= now_ts - thirty_days_ms && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
                 sales_by_sku.set(record.sku, current_sales + record.quantity);
@@ -112,7 +112,7 @@ export function calculate_restock_data(
         }
     }
 
-    // 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG
+    // 3. TÍNH TOÁN RESTOCK
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
                           variant.inventory_level_by_location.get(location_id as any);
@@ -180,23 +180,22 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 TỰ ĐỘNG CHUYỂN SANG V3 ĐỂ RESET SẠCH MỐC BỊ KHÓA CŨ
+// 🟢 NÂNG LÊN KEY V6 ĐỂ CHẠY MỚI SẠCH SẼ
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v3") == null;
+    return localStorage.getItem("last_data_update_v6") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v3",
+        "last_data_update_v6",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v3"));
+    return Number(localStorage.getItem("last_data_update_v6"));
 }
 
-// 🟢 CHỈ LẤY ĐƠN TRONG 40 NGÀY GẦN NHẤT ĐỂ ĐẢM BẢO QUÉT ĐỦ 100% ĐƠN 30 NGÀY BÁN
 export function getLastDataUpdate() {
     const now = new Date();
     now.setDate(now.getDate() - 40);
@@ -357,7 +356,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V6", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -408,7 +407,6 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
                         is_composite: value.is_composite,
                         new_record: false,
                         order_id: value.order_id,
-                        fulfillment_id: value.fulfillment_id
                     });
                     cursor.continue();
                 } else {
@@ -422,7 +420,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V6", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -486,7 +484,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V6", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -517,7 +515,6 @@ export async function updateIndexedDB(records: OrderRecordV2[]) {
                         location_id: Number(r.location_id),
                         is_composite: r.is_composite,
                         order_id: r.order_id,
-                        fulfillment_id: r.fulfillment_id,
                         type: "order",
                     });
                 });
@@ -550,7 +547,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V6", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -598,6 +595,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
+// 🟢 TRẢ VỀ CÁCH GỌI API CHUẨN XÁC VÀ ĐƠN GIẢN NHẤT CỦA SAPO
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -611,40 +609,58 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         order_records = await fetchRecordsFromIndexedDB();
     }
 
-    // 🟢 LUÔN BẢO ĐẢM MỐC LẤY LÀ 40 NGÀY GẦN NHẤT KHI CHẠY MỚI
     const min_created_date = getLastDataUpdate();
 
-    let existing_records = new Set<string>();
+    let existing_order_ids = new Set<number>();
     for (let r of order_records) {
-        const key = r.fulfillment_id ? `f_${r.fulfillment_id}` : `o_${r.order_id}`;
-        existing_records.add(key);
+        existing_order_ids.add(r.order_id);
     }
 
     let page = 1;
     let running = true;
 
     while (running) {
-        // Lấy theo created_on_min 40 ngày gần nhất
+        // 🟢 GỬI CÁC PARAMS TRỰC TIẾP ĐỂ SAPO LỌC SẠCH TRÊN SERVER
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
-                    status: "any",
+                    status: "open,closed",
+                    fulfillment_status: "fulfilled,partial",
                     page: page,
                     limit: 250,
-                    created_on_min: min_created_date,
+                    created_on_min: min_created_date
                 },
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
-                    status: "any",
+                    status: "open,closed",
+                    fulfillment_status: "fulfilled,partial",
                     page: page + 1,
                     limit: 250,
-                    created_on_min: min_created_date,
+                    created_on_min: min_created_date
+                },
+            }),
+            a.get(`${proxyUrl}/admin/orders.json`, {
+                params: {
+                    status: "open,closed",
+                    fulfillment_status: "fulfilled,partial",
+                    page: page + 2,
+                    limit: 250,
+                    created_on_min: min_created_date
+                },
+            }),
+            a.get(`${proxyUrl}/admin/orders.json`, {
+                params: {
+                    status: "open,closed",
+                    fulfillment_status: "fulfilled,partial",
+                    page: page + 3,
+                    limit: 250,
+                    created_on_min: min_created_date
                 },
             }),
         ]);
 
-        const success = resp[0].status == 200 && resp[1].status == 200;
+        const success = resp[0].status == 200 && resp[1].status == 200 && resp[2].status == 200 && resp[3].status == 200;
 
         if (success) {
             let total_orders_fetched = 0;
@@ -655,93 +671,45 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 total_orders_fetched += orders.length;
 
                 orders.forEach((order: any) => {
-                    const is_not_cancelled = order.status !== "cancelled";
+                    if (!existing_order_ids.has(order.id)) {
+                        const items = order.line_items || [];
+                        const order_ts = new Date(order.created_on || order.modified_on).getTime();
+                        const loc_id = Number(order.location_id || 0);
 
-                    if (is_not_cancelled) {
-                        const has_fulfillments = order.fulfillments && order.fulfillments.length > 0;
-
-                        if (has_fulfillments) {
-                            order.fulfillments.forEach((fulfillment: any) => {
-                                const f_key = `f_${fulfillment.id}`;
-                                if (!existing_records.has(f_key)) {
-                                    const items = fulfillment.line_items || fulfillment.fulfillment_line_items || [];
-                                    const fulfillment_date = fulfillment.created_on || order.created_on || order.modified_on;
-                                    const fulfillment_ts = new Date(fulfillment_date).getTime();
-
-                                    items.forEach((line_item: any) => {
-                                        if (line_item.is_composite) {
-                                            const it = variant_by_id.get(line_item.variant_id);
-                                            it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
-                                                const composite_item_sku = variant_by_id.get(id)?.sku;
-                                                if (composite_item_sku) {
-                                                    order_records.push({
-                                                        order_id: order.id,
-                                                        fulfillment_id: fulfillment.id,
-                                                        sku: composite_item_sku,
-                                                        quantity: line_item.quantity * quantity,
-                                                        is_composite: false,
-                                                        location_id: Number(fulfillment.stock_location_id || order.location_id),
-                                                        t_unix: fulfillment_ts,
-                                                        new_record: true
-                                                    });
-                                                }
-                                            });
-                                        } else {
+                        items.forEach((line_item: any) => {
+                            const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
+                            if (sku) {
+                                if (line_item.is_composite) {
+                                    const it = variant_by_id.get(line_item.variant_id);
+                                    it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                        const sub_sku = variant_by_id.get(id)?.sku;
+                                        if (sub_sku) {
                                             order_records.push({
                                                 order_id: order.id,
-                                                fulfillment_id: fulfillment.id,
-                                                quantity: line_item.quantity,
-                                                sku: line_item.sku,
-                                                is_composite: line_item.is_composite,
-                                                location_id: Number(fulfillment.stock_location_id || order.location_id),
-                                                t_unix: fulfillment_ts,
-                                                new_record: true,
+                                                sku: sub_sku,
+                                                quantity: line_item.quantity * quantity,
+                                                is_composite: false,
+                                                location_id: loc_id,
+                                                t_unix: order_ts,
+                                                new_record: true
                                             });
                                         }
                                     });
-
-                                    existing_records.add(f_key);
+                                } else {
+                                    order_records.push({
+                                        order_id: order.id,
+                                        quantity: line_item.quantity,
+                                        sku: sku,
+                                        is_composite: false,
+                                        location_id: loc_id,
+                                        t_unix: order_ts,
+                                        new_record: true,
+                                    });
                                 }
-                            });
-                        } else {
-                            const o_key = `o_${order.id}`;
-                            if (!existing_records.has(o_key)) {
-                                const items = order.line_items || [];
-                                const order_ts = new Date(order.created_on || order.modified_on).getTime();
-
-                                items.forEach((line_item: any) => {
-                                    if (line_item.is_composite) {
-                                        const it = variant_by_id.get(line_item.variant_id);
-                                        it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
-                                            const composite_item_sku = variant_by_id.get(id)?.sku;
-                                            if (composite_item_sku) {
-                                                order_records.push({
-                                                    order_id: order.id,
-                                                    sku: composite_item_sku,
-                                                    quantity: line_item.quantity * quantity,
-                                                    is_composite: false,
-                                                    location_id: Number(order.location_id),
-                                                    t_unix: order_ts,
-                                                    new_record: true
-                                                });
-                                            }
-                                        });
-                                    } else {
-                                        order_records.push({
-                                            order_id: order.id,
-                                            quantity: line_item.quantity,
-                                            sku: line_item.sku,
-                                            is_composite: line_item.is_composite,
-                                            location_id: Number(order.location_id),
-                                            t_unix: order_ts,
-                                            new_record: true,
-                                        });
-                                    }
-                                });
-
-                                existing_records.add(o_key);
                             }
-                        }
+                        });
+
+                        existing_order_ids.add(order.id);
                     }
                 });
             }
@@ -751,7 +719,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 break;
             }
 
-            page += 2;
+            page += 4;
         } else {
             await sleep(1000);
         }
@@ -803,9 +771,25 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     created_on_min: min_created_date,
                 },
             }),
+            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
+                params: {
+                    status: "any",
+                    page: page + 2,
+                    limit: 250,
+                    created_on_min: min_created_date,
+                },
+            }),
+            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
+                params: {
+                    status: "any",
+                    page: page + 3,
+                    limit: 250,
+                    created_on_min: min_created_date,
+                },
+            }),
         ]);
 
-        const success = resp[0].status == 200 && resp[1].status == 200;
+        const success = resp[0].status == 200 && resp[1].status == 200 && resp[2].status == 200 && resp[3].status == 200;
 
         if (success) {
             let total_transfers_fetched = 0;
@@ -842,7 +826,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                 break;
             }
 
-            page += 2;
+            page += 4;
         } else {
             await sleep(1000);
         }
