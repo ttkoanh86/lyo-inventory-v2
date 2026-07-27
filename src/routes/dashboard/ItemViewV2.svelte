@@ -40,6 +40,7 @@
     import {
         export_all_to_xlsx,
         export_selected_to_xlsx,
+        export_kiem_hang_to_xlsx,
         export_transfer_sheet_to_xlsx,
         _actual_export_handler,
     } from "./Export2Excel";
@@ -579,13 +580,20 @@
                                         onclick={async () => {
                                             is_loading = true;
                                             try {
-                                                await export_selected_to_xlsx(
-                                                    selected_skus,
-                                                    datasource,
-                                                    c_location,
-                                                    viewing_low_stocks,
-                                                    true
-                                                );
+                                                // 🟢 ĐÚNG BẢN CHẤT: Đang Kiểm hàng -> Gọi hàm Kiểm hàng riêng
+                                                if (viewing_low_stocks) {
+                                                    await export_kiem_hang_to_xlsx(
+                                                        selected_skus,
+                                                        datasource,
+                                                        c_location
+                                                    );
+                                                } else {
+                                                    await export_selected_to_xlsx(
+                                                        selected_skus,
+                                                        datasource,
+                                                        c_location
+                                                    );
+                                                }
                                             } finally {
                                                 is_loading = false;
                                                 export_popup_shown = false;
@@ -599,13 +607,20 @@
                                             is_loading = true;
                                             try {
                                                 const filtered_skus = new Set(datasource.map(item => item.sku));
-                                                await export_selected_to_xlsx(
-                                                    filtered_skus,
-                                                    datasource,
-                                                    c_location,
-                                                    viewing_low_stocks,
-                                                    true
-                                                );
+                                                // 🟢 ĐÚNG BẢN CHẤT: Đang Kiểm hàng -> Gọi hàm Kiểm hàng riêng
+                                                if (viewing_low_stocks) {
+                                                    await export_kiem_hang_to_xlsx(
+                                                        filtered_skus,
+                                                        datasource,
+                                                        c_location
+                                                    );
+                                                } else {
+                                                    await export_selected_to_xlsx(
+                                                        filtered_skus,
+                                                        datasource,
+                                                        c_location
+                                                    );
+                                                }
                                             } finally {
                                                 is_loading = false;
                                                 export_popup_shown = false;
@@ -617,17 +632,27 @@
                                     type="secondary"
                                     onclick={async () => {
                                         is_loading = true;
-                                        await export_all_to_xlsx(
-                                            order_records,
-                                            transfer_records,
-                                            variant_by_id,
-                                            c_location_id,
-                                            c_location,
-                                            viewing_low_stocks,
-                                            true
-                                        ).finally(() => {
-                                            is_loading = false;
-                                        });
+                                        // 🟢 ĐÚNG BẢN CHẤT: Đang Kiểm hàng -> Gọi hàm Kiểm hàng riêng
+                                        if (viewing_low_stocks) {
+                                            const all_skus = new Set(datasource.map(item => item.sku));
+                                            await export_kiem_hang_to_xlsx(
+                                                all_skus,
+                                                datasource,
+                                                c_location
+                                            ).finally(() => {
+                                                is_loading = false;
+                                            });
+                                        } else {
+                                            await export_all_to_xlsx(
+                                                order_records,
+                                                transfer_records,
+                                                variant_by_id,
+                                                c_location_id,
+                                                c_location
+                                            ).finally(() => {
+                                                is_loading = false;
+                                            });
+                                        }
                                     }}>Xuất toàn bộ sản phẩm trong kho</Button
                                 >
                                 <hr style="color: gray; width: 1px" />
