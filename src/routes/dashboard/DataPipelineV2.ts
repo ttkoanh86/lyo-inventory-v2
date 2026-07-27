@@ -103,7 +103,7 @@ export function calculate_restock_data(
         }
     }
 
-    // 2. Cộng dồn số lượng bán 30 ngày chuẩn xác
+    // 2. Cộng dồn số lượng bán trong 30 ngày qua
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
@@ -244,33 +244,17 @@ export async function get_active_products() {
     });
 
     while (running) {
-        const resp = await Promise.all([
-            a.get(`${proxyUrl}/admin/products.json`, {
+        try {
+            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
-            }),
-            a.get(`${proxyUrl}/admin/products.json`, {
-                params: { limit: 250, page: page + 1, status: "active" },
-            }),
-            a.get(`${proxyUrl}/admin/products.json`, {
-                params: { limit: 250, page: page + 2, status: "active" },
-            }),
-            a.get(`${proxyUrl}/admin/products.json`, {
-                params: { limit: 250, page: page + 3, status: "active" },
-            }),
-        ]);
+            });
 
-        const success =
-            resp[0].status == 200 &&
-            resp[1].status == 200 &&
-            resp[2].status == 200 &&
-            resp[3].status == 200;
-
-        if (success) {
-            let total_products_fetched = 0;
-
-            for (let r of resp) {
-                const products = JSON.parse(r.data).products || [];
-                total_products_fetched += products.length;
+            if (resp.status == 200) {
+                const products = JSON.parse(resp.data).products || [];
+                if (products.length === 0) {
+                    running = false;
+                    break;
+                }
 
                 products.forEach((product: any) => {
                     product.variants.forEach((variant: any) => {
@@ -340,15 +324,13 @@ export async function get_active_products() {
                         }
                     });
                 });
-            }
 
-            if (total_products_fetched === 0) {
-                running = false;
-                break;
+                page++;
+                await sleep(150);
+            } else {
+                await sleep(1000);
             }
-
-            page += 4;
-        } else {
+        } catch (e) {
             await sleep(1000);
         }
     }
@@ -598,7 +580,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN TÍNH THEO THUỘC TÍNH CỦA LINE_ITEMS
+// 🟢 HÀM FETCH ĐƠN CHUẨN XÁC KHÔNG BAO GIỜ BỊ CRASH DO TẢI TRÂN SAPO API
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -625,80 +607,45 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
 
     while (running) {
-        const resp = await Promise.all([
-            a.get(`${proxyUrl}/admin/orders.json`, {
+        try {
+            // Tải từng trang một có nghỉ 150ms để không bị Sapo block lỗi 429
+            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     status: "any",
                     page: page,
                     limit: 250,
                     created_on_min: min_created_date
                 },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "any",
-                    page: page + 1,
-                    limit: 250,
-                    created_on_min: min_created_date
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "any",
-                    page: page + 2,
-                    limit: 250,
-                    created_on_min: min_created_date
-                },
-            }),
-            a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "any",
-                    page: page + 3,
-                    limit: 250,
-                    created_on_min: min_created_date
-                },
-            }),
-        ]);
+            });
 
-        const success = resp[0].status == 200 && resp[1].status == 200 && resp[2].status == 200 && resp[3].status == 200;
-
-        if (success) {
-            let total_orders_fetched = 0;
-
-            for (let r of resp) {
-                const j = JSON.parse(r.data);
+            if (resp.status === 200) {
+                const j = JSON.parse(resp.data);
                 const orders = j.orders || [];
-                total_orders_fetched += orders.length;
+
+                if (orders.length === 0) {
+                    running = false;
+                    break;
+                }
 
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
+                    // Chỉ tính các đơn đã có xuất kho giao hàng
+                    const is_fulfilled = order.fulfillment_status === "fulfilled" || order.fulfillment_status === "partial";
 
-                    if (is_not_cancelled && !existing_order_ids.has(order.id)) {
+                    if (is_not_cancelled && is_fulfilled && !existing_order_ids.has(order.id)) {
                         const line_items = order.line_items || [];
 
-                        // Lấy mốc thời gian xuất kho thực tế (ưu tiên fulfillment[0].created_on)
-                        let export_date_str = order.created_on || order.modified_on;
-                        if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].created_on) {
-                            export_date_str = order.fulfillments[0].created_on;
-                        }
-
-                        const order_ts = new Date(export_date_str).getTime();
+                        // Mốc thời gian xuất kho chuẩn đồng bộ như của Huy
+                        const order_ts = new Date(order.created_on || order.modified_on).getTime();
                         const loc_id = Number(order.location_id || 0);
 
                         line_items.forEach((line_item: any) => {
-                            // 🟢 TÍNH SỐ LƯỢNG ĐÃ XUẤT KHO THỰC TẾ CỦA TỪNG ITEM
-                            let fulfilled_qty = 0;
-                            const status = line_item.fulfillment_status;
-
-                            if (status === "fulfilled") {
-                                fulfilled_qty = line_item.quantity;
-                            } else if (status === "partial") {
+                            // Số lượng xuất kho thực tế
+                            let fulfilled_qty = line_item.quantity;
+                            if (line_item.fulfillment_status === "partial") {
                                 fulfilled_qty = line_item.quantity - (line_item.fulfillable_quantity || 0);
-                            } else if (order.fulfillment_status === "fulfilled") {
-                                fulfilled_qty = line_item.quantity;
                             }
 
-                            // Chỉ ghi nhận nếu item đó đã có xuất bán thực tế
                             if (fulfilled_qty > 0) {
                                 const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
                                 if (sku) {
@@ -736,15 +683,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         existing_order_ids.add(order.id);
                     }
                 });
-            }
 
-            if (total_orders_fetched === 0) {
-                running = false;
-                break;
+                page++;
+                await sleep(150); // Nghỉ 150ms để không bị Sapo block
+            } else {
+                await sleep(1000);
             }
-
-            page += 4;
-        } else {
+        } catch (e) {
             await sleep(1000);
         }
     }
@@ -778,50 +723,24 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     let running = true;
 
     while (running) {
-        const resp = await Promise.all([
-            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
+        try {
+            const resp = await a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
                     status: "any",
                     page: page,
                     limit: 250,
                     created_on_min: min_created_date,
                 },
-            }),
-            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
-                params: {
-                    status: "any",
-                    page: page + 1,
-                    limit: 250,
-                    created_on_min: min_created_date,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
-                params: {
-                    status: "any",
-                    page: page + 2,
-                    limit: 250,
-                    created_on_min: min_created_date,
-                },
-            }),
-            a.get(`${proxyUrl}/admin/stock_transfers.json`, {
-                params: {
-                    status: "any",
-                    page: page + 3,
-                    limit: 250,
-                    created_on_min: min_created_date,
-                },
-            }),
-        ]);
+            });
 
-        const success = resp[0].status == 200 && resp[1].status == 200 && resp[2].status == 200 && resp[3].status == 200;
-
-        if (success) {
-            let total_transfers_fetched = 0;
-
-            for (let r of resp) {
-                const j = JSON.parse(r.data);
+            if (resp.status === 200) {
+                const j = JSON.parse(resp.data);
                 const stock_transfers = j.stock_transfers || [];
-                total_transfers_fetched += stock_transfers.length;
+
+                if (stock_transfers.length === 0) {
+                    running = false;
+                    break;
+                }
 
                 stock_transfers.forEach((transfer: any) => {
                     if (
@@ -843,15 +762,13 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                         existing_transfer_ids.add(transfer.id);
                     }
                 });
-            }
 
-            if (total_transfers_fetched === 0) {
-                running = false;
-                break;
+                page++;
+                await sleep(150);
+            } else {
+                await sleep(1000);
             }
-
-            page += 4;
-        } else {
+        } catch (e) {
             await sleep(1000);
         }
     }
