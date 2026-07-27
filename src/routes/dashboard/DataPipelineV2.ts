@@ -103,9 +103,11 @@ export function calculate_restock_data(
         }
     }
 
-    // 2. Cộng dồn số lượng bán trong 30 ngày qua
+    // 2. Cộng dồn sản lượng xuất (Bán + Chuyển đi) trong 30 ngày qua
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
+        
+        // Khớp chính xác Kho chọn OR Đơn không gán kho cụ thể (rec_loc === 0)
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
@@ -580,7 +582,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN CHUẨN XÁC KHÔNG BAO GIỜ BỊ CRASH DO TẢI TRÂN SAPO API
+// 🟢 HÀM FETCH ĐƠN HÀNG LẤY TOÀN BỘ ĐƠN SỬA ĐỔI HOẶC XUẤT KHO TRONG 45 NGÀY
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -594,7 +596,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         order_records = await fetchRecordsFromIndexedDB();
     }
 
-    const min_created_date = getLastDataUpdate();
+    const min_modified_date = getLastDataUpdate();
 
     let existing_order_ids = new Set<number>();
     for (let r of order_records) {
@@ -608,13 +610,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     while (running) {
         try {
-            // Tải từng trang một có nghỉ 150ms để không bị Sapo block lỗi 429
+            // Quét theo modified_on_min để lấy trọn vẹn mọi đơn có phát sinh giao hàng
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     status: "any",
                     page: page,
                     limit: 250,
-                    created_on_min: min_created_date
+                    modified_on_min: min_modified_date
                 },
             });
 
@@ -629,18 +631,26 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
-                    // Chỉ tính các đơn đã có xuất kho giao hàng
+                    // Lấy tất cả các đơn đã xuất bán (hoàn thành hoặc một phần)
                     const is_fulfilled = order.fulfillment_status === "fulfilled" || order.fulfillment_status === "partial";
 
                     if (is_not_cancelled && is_fulfilled && !existing_order_ids.has(order.id)) {
                         const line_items = order.line_items || [];
 
-                        // Mốc thời gian xuất kho chuẩn đồng bộ như của Huy
-                        const order_ts = new Date(order.created_on || order.modified_on).getTime();
-                        const loc_id = Number(order.location_id || 0);
+                        // Mốc thời gian xuất kho chuẩn
+                        let export_date_str = order.created_on || order.modified_on;
+                        if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].created_on) {
+                            export_date_str = order.fulfillments[0].created_on;
+                        }
+
+                        const order_ts = new Date(export_date_str).getTime();
+                        // 🟢 LẤY LOCATION_ID VÀ ÉP KIỂU SỐ CHUẨN XÁC (ƯU TIÊN FULFILLMENT KHO XUẤT)
+                        let loc_id = Number(order.location_id || 0);
+                        if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].stock_location_id) {
+                            loc_id = Number(order.fulfillments[0].stock_location_id);
+                        }
 
                         line_items.forEach((line_item: any) => {
-                            // Số lượng xuất kho thực tế
                             let fulfilled_qty = line_item.quantity;
                             if (line_item.fulfillment_status === "partial") {
                                 fulfilled_qty = line_item.quantity - (line_item.fulfillable_quantity || 0);
@@ -685,7 +695,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 });
 
                 page++;
-                await sleep(150); // Nghỉ 150ms để không bị Sapo block
+                await sleep(150);
             } else {
                 await sleep(1000);
             }
@@ -699,6 +709,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     return order_records;
 }
 
+// 🟢 HÀM XỬ LÝ CHUYỂN KHO: GIỮ NGUYÊN BẢN CHẤT SẢN LƯỢNG XUẤT CỦA KHO XUẤT (SOURCE_LOCATION_ID)
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -712,7 +723,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
         transfer_records = await fetchInventoryTransferFromIndexedDB();
     }
 
-    const min_created_date = getLastDataUpdate();
+    const min_modified_date = getLastDataUpdate();
 
     let existing_transfer_ids = new Set<number>();
     for (let r of transfer_records) {
@@ -729,7 +740,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page,
                     limit: 250,
-                    created_on_min: min_created_date,
+                    modified_on_min: min_modified_date,
                 },
             });
 
@@ -751,6 +762,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                             if (p_variants.has(line_item.variant_id)) {
                                 transfer_records.push({
                                     transfer_id: transfer.id,
+                                    // 🟢 GÁN CHUẨN KHO XUẤT (SOURCE) THỂ HIỆN NĂNG LỰC CUNG CỨU CỦA KHO NGUỒN
                                     location_id: Number(transfer.source_location_id),
                                     sku: p_variants.get(line_item.variant_id)?.sku || "",
                                     t_unix: new Date(transfer.created_on || transfer.modified_on).getTime(),
