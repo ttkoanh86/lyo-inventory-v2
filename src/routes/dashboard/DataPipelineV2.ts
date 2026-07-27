@@ -127,7 +127,6 @@ export function calculate_restock_data(
 
         const sales = sales_by_sku.get(variant.sku) ?? 0;
 
-        // 🟢 CÔNG THỨC HIỆU CHỈNH CHUẨN CỦA DÌ LINH:
         if (
             variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
             sales > 0
@@ -136,7 +135,6 @@ export function calculate_restock_data(
             
             const current_has = variant.c_available + variant.c_incoming;
             
-            // Lượng cần đặt - Lượng đang có (Tránh số âm)
             variant.c_restock_half = Math.max(0, Math.round(0.5 * variant.c_restock) - current_has);
             variant.c_restock_third = Math.max(0, Math.round((1 / 3) * variant.c_restock) - current_has);
 
@@ -621,10 +619,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
 
     while (running) {
+        // 🟢 ĐÃ SỬA: status: "any" để quét toàn bộ đơn (open, closed...) tránh bỏ sót đơn xuất kho
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -632,7 +631,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page + 1,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -640,7 +639,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page + 2,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -648,7 +647,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page + 3,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -671,7 +670,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 }
                 if (j.orders) {
                     j.orders.forEach((order: any) => {
-                        if (!existing_order_ids.has(order.id)) {
+                        // 🟢 BỘ LỌC CHUẨN: Đơn không bị Hủy AND Đã có phiếu xuất kho (Fulfillment)
+                        const is_not_cancelled = order.status !== "cancelled";
+                        const has_fulfillment = order.fulfillments && order.fulfillments.length > 0;
+
+                        if (!existing_order_ids.has(order.id) && is_not_cancelled && has_fulfillment) {
                             order.fulfillments.forEach((fulfillment: any) => {
                                 fulfillment.fulfillment_line_items.forEach((line_item: any) => {
                                     if (line_item.is_composite) {
@@ -742,10 +745,11 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     let running = true;
 
     while (running) {
+        // 🟢 ĐÃ SỬA: status: "any" cho chuyển hàng để lấy đầy đủ phiếu chuyển kho
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -753,7 +757,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page + 1,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -761,7 +765,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page + 2,
                     limit: 250,
                     modified_on_min: last_update_utc,
@@ -769,7 +773,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
-                    status: "completed",
+                    status: "any",
                     page: page + 3,
                     limit: 250,
                     modified_on_min: last_update_utc,
