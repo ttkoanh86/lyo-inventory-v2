@@ -304,7 +304,7 @@
         sort_by_id.clear();
 
         rowCount = datasource.length;
-        resetPagination(); // 🟢 FIX LỖI: Cập nhật lại phân trang khi chọn kho mới
+        resetPagination(); 
 
         is_loading = false;
         c_location = locations.find((v) => v.id == c_location_id) as Location;
@@ -350,7 +350,7 @@
         rowCount = datasource.length;
         c_location_id = locations[0].id;
         
-        resetPagination(); // 🟢 FIX LỖI: Load phân trang chuẩn 50 dòng ngay khi khởi động
+        resetPagination(); 
         grid_key++;
         is_loading = false;
         
@@ -384,7 +384,7 @@
             );
         }
         rowCount = datasource.length;
-        resetPagination(); // 🟢 FIX LỖI: Reset lại trang 1 mỗi khi lọc
+        resetPagination(); 
     }
 
     function enforce_sorting(ukey: number) {
@@ -423,7 +423,7 @@
                 });
             });
         }
-        updatePageData(); // 🟢 FIX LỖI: Cập nhật dữ liệu hiển thị sau khi sắp xếp
+        updatePageData(); 
     }
 
     let viewing_low_sales = $state(false);
@@ -571,45 +571,48 @@
                                 style="padding: 10px; display: flex; flex-direction: column; gap: 5px"
                             >
                                 <p style="margin-bottom: 5px; margin-top: 5px">
-                                    <b>Xuất phiếu nhập hàng</b>
+                                    <b>{viewing_low_stocks ? "Xuất phiếu kiểm hàng" : "Xuất phiếu nhập hàng"}</b>
                                 </p>
                                 {#if selected_skus.size != 0}
-                            <Button
-                                type="primary"
-                                onclick={async () => {
-                                    is_loading = true;
-                                    try {
-                                        await export_selected_to_xlsx(
-                                            selected_skus,
-                                            datasource,
-                                            c_location
-                                        );
-                                    } finally {
-                                        is_loading = false;
-                                        export_popup_shown = false;
-                                    }
-                                }}>Xuất {selected_skus.size} sản phẩm đã chọn</Button
-                            >
-                        {:else}
-                            <Button
-                                type="primary"
-                                onclick={async () => {
-                                    is_loading = true;
-                                    try {
-                                        // 🟢 Gom toàn bộ SKU từ danh sách đang lọc (datasource)
-                                        const filtered_skus = new Set(datasource.map(item => item.sku));
-                                        await export_selected_to_xlsx(
-                                            filtered_skus,
-                                            datasource,
-                                            c_location
-                                        );
-                                    } finally {
-                                        is_loading = false;
-                                        export_popup_shown = false;
-                                    }
-                                }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc</Button
-                            >
-                        {/if}
+                                    <Button
+                                        type="primary"
+                                        onclick={async () => {
+                                            is_loading = true;
+                                            try {
+                                                await export_selected_to_xlsx(
+                                                    selected_skus,
+                                                    datasource,
+                                                    c_location,
+                                                    viewing_low_stocks,
+                                                    true
+                                                );
+                                            } finally {
+                                                is_loading = false;
+                                                export_popup_shown = false;
+                                            }
+                                        }}>Xuất {selected_skus.size} sản phẩm đã chọn</Button
+                                    >
+                                {:else}
+                                    <Button
+                                        type="primary"
+                                        onclick={async () => {
+                                            is_loading = true;
+                                            try {
+                                                const filtered_skus = new Set(datasource.map(item => item.sku));
+                                                await export_selected_to_xlsx(
+                                                    filtered_skus,
+                                                    datasource,
+                                                    c_location,
+                                                    viewing_low_stocks,
+                                                    true
+                                                );
+                                            } finally {
+                                                is_loading = false;
+                                                export_popup_shown = false;
+                                            }
+                                        }}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc</Button
+                                    >
+                                {/if}
                                 <Button
                                     type="secondary"
                                     onclick={async () => {
@@ -619,7 +622,9 @@
                                             transfer_records,
                                             variant_by_id,
                                             c_location_id,
-                                            c_location
+                                            c_location,
+                                            viewing_low_stocks,
+                                            true
                                         ).finally(() => {
                                             is_loading = false;
                                         });
@@ -800,7 +805,7 @@
         .pagination-container {
             display: flex;
             align-items: center;
-            justify-content: flex-end; /* 🟢 CANH PHẢI SÁT MÉP */
+            justify-content: flex-end; 
             gap: 40px;
             padding: 8px 16px;
             background: #ffffff;
