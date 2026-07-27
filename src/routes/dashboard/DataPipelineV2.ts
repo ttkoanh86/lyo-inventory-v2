@@ -195,10 +195,10 @@ export function getLastDataUpdateTUnix() {
     return Number(localStorage.getItem("last_data_update_v2"));
 }
 
-export function getLastDataUpdate() {
+export function getLastDataUpdate(force_full = false) {
     const t_unix = localStorage.getItem("last_data_update_v2");
     let utcString;
-    if (t_unix != null) {
+    if (t_unix != null && !force_full) {
         utcString = new Date(Number(t_unix)).toISOString();
     } else {
         const now = new Date();
@@ -603,7 +603,6 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM LẤY ĐƠN HÀNG XỬ LÝ CHUẨN XÁC CẢ ĐƠN ONLINE LẪN BÁN TẠI CỬA HÀNG (POS)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -612,19 +611,22 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         },
     });
 
-    const last_update_utc = getLastDataUpdate();
-    let existing_records = new Set<string>();
-    let page = 1;
     let order_records: OrderRecordV2[] = [];
-
     if (!isFirstTime()) {
         order_records = await fetchRecordsFromIndexedDB();
     }
+
+    // 🟢 CƠ CHẾ CỨU DỮ LIỆU: NẾU DB RỖNG -> BẮT BUỘC TẢI LẠI 6 THÁNG QUA
+    const is_db_empty = order_records.length === 0;
+    const last_update_utc = getLastDataUpdate(is_db_empty);
+
+    let existing_records = new Set<string>();
     for (let r of order_records) {
         const key = r.fulfillment_id ? `f_${r.fulfillment_id}` : `o_${r.order_id}`;
         existing_records.add(key);
     }
 
+    let page = 1;
     let running = true;
 
     while (running) {
@@ -683,7 +685,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     if (is_not_cancelled) {
                         const has_fulfillments = order.fulfillments && order.fulfillments.length > 0;
 
-                        // 🟢 TRƯỜNG HỢP 1: ĐƠN CÓ PHIẾU XUẤT KHO (ĐƠN ONLINE / GIAO HÀNG)
                         if (has_fulfillments) {
                             order.fulfillments.forEach((fulfillment: any) => {
                                 const f_key = `f_${fulfillment.id}`;
@@ -727,9 +728,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                     existing_records.add(f_key);
                                 }
                             });
-                        } 
-                        // 🟢 TRƯỜNG HỢP 2: ĐƠN BÁN TRỰC TIẾP TẠI CỬA HÀNG (POS - KHÔNG CÓ FULFILLMENTS)
-                        else {
+                        } else {
                             const o_key = `o_${order.id}`;
                             if (!existing_records.has(o_key)) {
                                 const items = order.line_items || [];
@@ -783,7 +782,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    updateIndexedDB(order_records.filter((v) => v.new_record));
+    // 🟢 BẮT BUỘC GHI XONG ĐƠN VÀO INDEXEDDB MỚI CHO PHÉP SET MỐC THỜI GIAN
+    await updateIndexedDB(order_records.filter((v) => v.new_record));
     setLastDataUpdate();
     return order_records;
 }
@@ -796,19 +796,20 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
         },
     });
 
-    const last_update_utc = getLastDataUpdate();
-
-    let existing_transfer_ids = new Set<number>();
-    let page = 1;
     let transfer_records: TransferRecord[] = [];
-
     if (!isFirstTime()) {
         transfer_records = await fetchInventoryTransferFromIndexedDB();
     }
+
+    const is_db_empty = transfer_records.length === 0;
+    const last_update_utc = getLastDataUpdate(is_db_empty);
+
+    let existing_transfer_ids = new Set<number>();
     for (let r of transfer_records) {
         existing_transfer_ids.add(r.transfer_id);
     }
 
+    let page = 1;
     let running = true;
 
     while (running) {
@@ -894,7 +895,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
         }
     }
 
-    saveInventoryTransferToIndexedDB(
+    await saveInventoryTransferToIndexedDB(
         transfer_records.filter((v) => v.new_record),
         p_variants,
     );
