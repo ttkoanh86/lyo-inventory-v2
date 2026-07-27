@@ -130,7 +130,6 @@ export function calculate_restock_data(
 
         const sales = sales_by_sku.get(variant.sku) ?? 0;
 
-        // Công thức Restock chuẩn
         if (
             variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
             sales > 0
@@ -183,7 +182,6 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 NÂNG KEY DB LÊN V10 ĐỂ TỰ ĐỘNG XÓA TOÀN BỘ RÁC CŨ TRÊN MỌI THIẾT BỊ
 export function isFirstTime() {
     return localStorage.getItem("last_data_update_v10") == null;
 }
@@ -201,7 +199,7 @@ export function getLastDataUpdateTUnix() {
 
 export function getLastDataUpdate() {
     const now = new Date();
-    now.setDate(now.getDate() - 60); // Quét lùi 60 ngày để phủ trọn vẹn mọi đơn bán
+    now.setDate(now.getDate() - 60);
     return now.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
@@ -582,7 +580,6 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN SỬ DỤNG CREATED_ON_MIN LẤY TOÀN BỘ ĐƠN HÀNG THỰC TẾ
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -609,7 +606,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     while (running) {
         try {
-            // Dùng created_on_min chuẩn Sapo API
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     status: "any",
@@ -635,7 +631,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     if (is_not_cancelled && is_fulfilled) {
                         const line_items = order.line_items || [];
 
-                        // Tìm kho xuất thực tế
+                        // 🟢 IN LOG KIỂM TRA DỮ LIỆU THỰC TẾ
+                        console.log("=== KIỂM TRA ĐƠN SAPO ===");
+                        console.log("Mã đơn:", order.code || order.id, "| order.location_id:", order.location_id);
+                        console.log("Fulfillments:", order.fulfillments);
+
                         let actual_loc_id = Number(order.location_id || 0);
                         let export_date_str = order.created_on || order.modified_on;
 
