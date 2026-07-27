@@ -157,10 +157,11 @@ export async function _actual_export_handler(
     // 1. Nếu is_check_mode = true -> "Kiem hang"
     // 2. Nếu is_transfer = true   -> "Chuyen hang"
     // 3. Còn lại (mặc định)       -> "Nhap hang"
+    // 🟢 ĐẶT TIỀN TỐ ƯU TIÊN SỐ 1 CHO KIỂM HÀNG
     let prefix = "Nhap hang";
-    if (is_check_mode) {
+    if (is_check_mode === true) {
         prefix = "Kiem hang";
-    } else if (is_transfer) {
+    } else if (is_transfer === true) {
         prefix = "Chuyen hang";
     }
 
