@@ -95,24 +95,24 @@ export function calculate_restock_data(
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const target_location_id = Number(location_id);
 
-    // 🟢 1. KHỞI TẠO TẤT CẢ SẢN PHẨM MẶC ĐỊNH BÁN = 0
+    // 1. KHỞI TẠO TẤT CẢ SẢN PHẨM MẶC ĐỊNH BÁN = 0
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
             sales_by_sku.set(variant.sku, 0);
         }
     }
 
-    // 🟢 2. CỘNG DỒN SỐ LƯỢNG BÁN TRONG 30 NGÀY QUA
+    // 2. CỘNG DỒN SỐ LƯỢNG BÁN TRONG 30 NGÀY QUA
     for (let record of records) {
         if (Number(record.location_id) === target_location_id) {
-            if (record.t_unix >= now_ts - thirty_days_ms && record.t_unix <= now_ts) {
+            if (record.t_unix >= now_ts - thirty_days_ms) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
                 sales_by_sku.set(record.sku, current_sales + record.quantity);
             }
         }
     }
 
-    // 🟢 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG (GIỮ NGUYÊN ĐIỀU KIỆN CHUẨN CỦA DÌ)
+    // 3. TÍNH TOÁN VÀ LỌC SẢN PHẨM CẦN ĐẶT HÀNG
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
                           variant.inventory_level_by_location.get(location_id as any);
@@ -180,33 +180,26 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 BỘ NHỚ LƯU MỐC THỜI GIAN V3
+// 🟢 GIỮ NGUYÊN BỘ NHỚ V4
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v3") == null;
+    return localStorage.getItem("last_data_update_v4") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v3",
+        "last_data_update_v4",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v3"));
+    return Number(localStorage.getItem("last_data_update_v4"));
 }
 
 export function getLastDataUpdate() {
-    const t_unix = localStorage.getItem("last_data_update_v3");
-    let utcString;
-    if (t_unix != null) {
-        utcString = new Date(Number(t_unix)).toISOString();
-    } else {
-        const now = new Date();
-        now.setMonth(now.getMonth() - 6);
-        utcString = now.toISOString();
-    }
-    return utcString.replace(/\.\d{3}Z$/, "Z");
+    const now = new Date();
+    now.setDate(now.getDate() - 45); // Kéo lùi 45 ngày để phủ toàn bộ đơn trong 30 ngày
+    return now.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export function sleep(ms: number) {
@@ -361,10 +354,10 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
-// 🟢 KẾT NỐI KHO INDEXEDDB V3
+// 🟢 GIỮ NGUYÊN KẾT NỐI DB V4
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V4", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -428,7 +421,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V4", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -492,7 +485,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V4", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -555,7 +548,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V3", 3);
+        const request = indexedDB.open("LYOInventoryDB_V4", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -611,7 +604,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         },
     });
 
-    const last_update_utc = getLastDataUpdate();
+    const min_created_date = getLastDataUpdate();
     let existing_order_ids = new Set<number>();
     let page = 1;
     let order_records: OrderRecordV2[] = [];
@@ -626,13 +619,14 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
 
     while (running) {
+        // 🟢 DÙNG created_on_min ĐỂ LẤY TOÀN BỘ ĐƠN TRONG 45 NGÀY QUA BẤT KỂ ĐƠN CÓ ĐƯỢC CHỈNH SỬA HAY KHÔNG
         const resp = await Promise.all([
             a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     status: "any",
                     page: page,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
@@ -640,7 +634,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     status: "any",
                     page: page + 1,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
@@ -648,7 +642,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     status: "any",
                     page: page + 2,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/orders.json`, {
@@ -656,7 +650,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     status: "any",
                     page: page + 3,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
         ]);
@@ -682,7 +676,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     if (!existing_order_ids.has(order.id) && is_not_cancelled && has_fulfillment) {
                         order.fulfillments.forEach((fulfillment: any) => {
                             fulfillment.fulfillment_line_items.forEach((line_item: any) => {
-                                // 🟢 LẤY ĐÚNG THỜI ĐIỂM TẠO ĐƠN HOẶC XUẤT KHO
                                 const order_date_ts = new Date(order.created_on || order.modified_on).getTime();
 
                                 if (line_item.is_composite) {
@@ -719,7 +712,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 });
             }
 
-            // 🟢 CHỈ DỪNG KHI CẢ 4 TRANG ĐỀU KHÔNG CÓ ĐƠN NÀO
             if (total_orders_fetched === 0) {
                 running = false;
                 break;
@@ -732,6 +724,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     }
 
     updateIndexedDB(order_records.filter((v) => v.new_record));
+    setLastDataUpdate();
     return order_records;
 }
 
@@ -743,7 +736,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
         },
     });
 
-    const last_update_utc = getLastDataUpdate();
+    const min_created_date = getLastDataUpdate();
 
     let existing_transfer_ids = new Set<number>();
     let page = 1;
@@ -765,7 +758,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
@@ -773,7 +766,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page + 1,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
@@ -781,7 +774,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page + 2,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
             a.get(`${proxyUrl}/admin/stock_transfers.json`, {
@@ -789,7 +782,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                     status: "any",
                     page: page + 3,
                     limit: 250,
-                    modified_on_min: last_update_utc,
+                    created_on_min: min_created_date,
                 },
             }),
         ]);
