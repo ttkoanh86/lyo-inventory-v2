@@ -103,11 +103,9 @@ export function calculate_restock_data(
         }
     }
 
-    // 2. Cộng dồn sản lượng xuất (Bán + Chuyển đi) trong 30 ngày qua
+    // 2. Cộng dồn sản lượng xuất (Bán + Chuyển đi) 30 ngày chuẩn xác theo kho
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
-        
-        // Khớp chính xác Kho chọn OR Đơn không gán kho cụ thể (rec_loc === 0)
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
@@ -184,19 +182,20 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
+// 🟢 NÂNG LÊN KEY V8 ĐỂ TỰ ĐỘNG CLEAN SẠCH DỮ LIỆU CŨ TRÊN MỌI MÁY
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v2") == null;
+    return localStorage.getItem("last_data_update_v8") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v2",
+        "last_data_update_v8",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v2"));
+    return Number(localStorage.getItem("last_data_update_v8"));
 }
 
 export function getLastDataUpdate() {
@@ -341,7 +340,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V8", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -406,7 +405,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V8", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -470,7 +469,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V8", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -534,7 +533,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V2", 3);
+        const request = indexedDB.open("LYOInventoryDB_V8", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -582,7 +581,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN HÀNG LẤY TOÀN BỘ ĐƠN SỬA ĐỔI HOẶC XUẤT KHO TRONG 45 NGÀY
+// 🟢 HÀM FETCH ĐƠN CHUẨN XÁC: LẤY LOCATION THỰC TẾ BỊ TRỪ HÀNG (STOCK_LOCATION_ID)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -598,11 +597,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     const min_modified_date = getLastDataUpdate();
 
-    let existing_order_ids = new Set<number>();
+    let existing_fulfillment_keys = new Set<string>();
     for (let r of order_records) {
-        if (r.order_id) {
-            existing_order_ids.add(r.order_id);
-        }
+        const key = `${r.order_id}_${r.sku}_${r.location_id}`;
+        existing_fulfillment_keys.add(key);
     }
 
     let page = 1;
@@ -610,7 +608,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     while (running) {
         try {
-            // Quét theo modified_on_min để lấy trọn vẹn mọi đơn có phát sinh giao hàng
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     status: "any",
@@ -631,24 +628,28 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
-                    // Lấy tất cả các đơn đã xuất bán (hoàn thành hoặc một phần)
                     const is_fulfilled = order.fulfillment_status === "fulfilled" || order.fulfillment_status === "partial";
 
-                    if (is_not_cancelled && is_fulfilled && !existing_order_ids.has(order.id)) {
+                    if (is_not_cancelled && is_fulfilled) {
                         const line_items = order.line_items || [];
 
-                        // Mốc thời gian xuất kho chuẩn
+                        // 🟢 TÌM KHO XUẤT THỰC TẾ (STOCK_LOCATION_ID) TỪ PHIẾU GIAO HÀNG SON...
+                        let actual_loc_id = Number(order.location_id || 0);
                         let export_date_str = order.created_on || order.modified_on;
-                        if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].created_on) {
-                            export_date_str = order.fulfillments[0].created_on;
+
+                        if (order.fulfillments && order.fulfillments.length > 0) {
+                            const valid_fulfillment = order.fulfillments.find((f: any) => f.status !== "failure") || order.fulfillments[0];
+                            if (valid_fulfillment) {
+                                if (valid_fulfillment.stock_location_id) {
+                                    actual_loc_id = Number(valid_fulfillment.stock_location_id);
+                                }
+                                if (valid_fulfillment.created_on) {
+                                    export_date_str = valid_fulfillment.created_on;
+                                }
+                            }
                         }
 
                         const order_ts = new Date(export_date_str).getTime();
-                        // 🟢 LẤY LOCATION_ID VÀ ÉP KIỂU SỐ CHUẨN XÁC (ƯU TIÊN FULFILLMENT KHO XUẤT)
-                        let loc_id = Number(order.location_id || 0);
-                        if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].stock_location_id) {
-                            loc_id = Number(order.fulfillments[0].stock_location_id);
-                        }
 
                         line_items.forEach((line_item: any) => {
                             let fulfilled_qty = line_item.quantity;
@@ -659,38 +660,42 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             if (fulfilled_qty > 0) {
                                 const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
                                 if (sku) {
-                                    if (line_item.is_composite) {
-                                        const it = variant_by_id.get(line_item.variant_id);
-                                        it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
-                                            const sub_sku = variant_by_id.get(id)?.sku;
-                                            if (sub_sku) {
-                                                order_records.push({
-                                                    order_id: order.id,
-                                                    sku: sub_sku,
-                                                    quantity: fulfilled_qty * quantity,
-                                                    is_composite: false,
-                                                    location_id: loc_id,
-                                                    t_unix: order_ts,
-                                                    new_record: true
-                                                });
-                                            }
-                                        });
-                                    } else {
-                                        order_records.push({
-                                            order_id: order.id,
-                                            quantity: fulfilled_qty,
-                                            sku: sku,
-                                            is_composite: false,
-                                            location_id: loc_id,
-                                            t_unix: order_ts,
-                                            new_record: true,
-                                        });
+                                    const record_key = `${order.id}_${sku}_${actual_loc_id}`;
+
+                                    if (!existing_fulfillment_keys.has(record_key)) {
+                                        if (line_item.is_composite) {
+                                            const it = variant_by_id.get(line_item.variant_id);
+                                            it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                                const sub_sku = variant_by_id.get(id)?.sku;
+                                                if (sub_sku) {
+                                                    order_records.push({
+                                                        order_id: order.id,
+                                                        sku: sub_sku,
+                                                        quantity: fulfilled_qty * quantity,
+                                                        is_composite: false,
+                                                        location_id: actual_loc_id,
+                                                        t_unix: order_ts,
+                                                        new_record: true
+                                                    });
+                                                }
+                                            });
+                                        } else {
+                                            order_records.push({
+                                                order_id: order.id,
+                                                quantity: fulfilled_qty,
+                                                sku: sku,
+                                                is_composite: false,
+                                                location_id: actual_loc_id,
+                                                t_unix: order_ts,
+                                                new_record: true,
+                                            });
+                                        }
+
+                                        existing_fulfillment_keys.add(record_key);
                                     }
                                 }
                             }
                         });
-
-                        existing_order_ids.add(order.id);
                     }
                 });
 
@@ -709,7 +714,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     return order_records;
 }
 
-// 🟢 HÀM XỬ LÝ CHUYỂN KHO: GIỮ NGUYÊN BẢN CHẤT SẢN LƯỢNG XUẤT CỦA KHO XUẤT (SOURCE_LOCATION_ID)
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -762,7 +766,6 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                             if (p_variants.has(line_item.variant_id)) {
                                 transfer_records.push({
                                     transfer_id: transfer.id,
-                                    // 🟢 GÁN CHUẨN KHO XUẤT (SOURCE) THỂ HIỆN NĂNG LỰC CUNG CỨU CỦA KHO NGUỒN
                                     location_id: Number(transfer.source_location_id),
                                     sku: p_variants.get(line_item.variant_id)?.sku || "",
                                     t_unix: new Date(transfer.created_on || transfer.modified_on).getTime(),
