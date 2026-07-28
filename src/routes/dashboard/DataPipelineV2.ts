@@ -98,14 +98,12 @@ export function calculate_restock_data(
 
     console.warn(`[BẪY LOG 1] Đang tính Restock cho Kho ID: ${target_location_id}. Tổng số bản ghi nhận vào: ${records.length}`);
 
-    // 1. Khởi tạo mảng bán = 0
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
             sales_by_sku.set(variant.sku, 0);
         }
     }
 
-    // 2. Cộng dồn số bán/xuất kho theo ĐÚNG LOCATION_ID
     let matched_count = 0;
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
@@ -118,9 +116,8 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[BẪY LOG 2] Số bản ghi khớp điều kiện kho ${target_location_id} trong 30 ngày: ${matched_count}`);
+    console.warn(`[BẪY LOG 2] Số bản ghi khớp kho ${target_location_id} trong 30 ngày qua: ${matched_count}`);
 
-    // 3. Tính toán Restock
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
                           variant.inventory_level_by_location.get(location_id as any);
@@ -190,21 +187,21 @@ export async function get_locations(): Promise<Location[]> {
 }
 
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v14") == null;
+    return localStorage.getItem("last_data_update_v18") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v14",
+        "last_data_update_v18",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v14"));
+    return Number(localStorage.getItem("last_data_update_v18"));
 }
 
-// 🟢 FIX CHUẨN ĐỊNH DẠNG NGÀY SAPO CHẤP NHẬN: YYYY-MM-DD HH:mm:ss
+// 🟢 CHUẨN HÓA ĐỊNH DẠNG NGÀY TRUYỀN SAPO API: YYYY-MM-DD HH:mm:ss
 export function getLastDataUpdate() {
     const now = new Date();
     now.setDate(now.getDate() - 45);
@@ -352,7 +349,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V14", 3);
+        const request = indexedDB.open("LYOInventoryDB_V18", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -417,7 +414,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V14", 3);
+        const request = indexedDB.open("LYOInventoryDB_V18", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -481,7 +478,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V14", 3);
+        const request = indexedDB.open("LYOInventoryDB_V18", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -545,7 +542,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V14", 3);
+        const request = indexedDB.open("LYOInventoryDB_V18", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -593,6 +590,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
+// 🟢 HÀM FETCH ĐƠN SỬA HOÀN HẢO THAM SỐ NGÀY VÀ AN TOÀN FULFILLMENTS
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -618,6 +616,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
     let total_fetched = 0;
 
+    console.log(`[DEBUG API] Gọi Sapo API với created_on_min = "${min_created_date}"`);
+
     while (running) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
@@ -633,6 +633,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = JSON.parse(resp.data);
                 const orders = j.orders || [];
 
+                console.log(`[DEBUG API] Trang ${page}: Sapo trả về ${orders.length} đơn hàng.`);
+
                 if (orders.length === 0) {
                     running = false;
                     break;
@@ -646,11 +648,24 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                     if (is_not_cancelled && is_fulfilled) {
                         const line_items = order.line_items || [];
-                        const order_loc_id = Number(order.location_id || 0);
 
+                        // Lấy kho xuất thực tế (stock_location_id) có bẫy an toàn
+                        let actual_loc_id = Number(order.location_id || 0);
                         let export_date_str = order.created_on || order.modified_on;
-                        if (order.fulfillments && order.fulfillments.length > 0 && order.fulfillments[0].created_on) {
-                            export_date_str = order.fulfillments[0].created_on;
+
+                        if (Array.isArray(order.fulfillments) && order.fulfillments.length > 0) {
+                            const valid_fulfillment = order.fulfillments.find(
+                                (f: any) => f && f.status !== "cancelled" && f.status !== "failure"
+                            ) || order.fulfillments[0];
+
+                            if (valid_fulfillment) {
+                                if (valid_fulfillment.stock_location_id) {
+                                    actual_loc_id = Number(valid_fulfillment.stock_location_id);
+                                }
+                                if (valid_fulfillment.created_on) {
+                                    export_date_str = valid_fulfillment.created_on;
+                                }
+                            }
                         }
 
                         const order_ts = new Date(export_date_str).getTime();
@@ -664,7 +679,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             if (fulfilled_qty > 0) {
                                 const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
                                 if (sku) {
-                                    const record_key = `${order.id}_${sku}_${order_loc_id}`;
+                                    const record_key = `${order.id}_${sku}_${actual_loc_id}`;
 
                                     if (!existing_fulfillment_keys.has(record_key)) {
                                         if (line_item.is_composite) {
@@ -677,7 +692,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                         sku: sub_sku,
                                                         quantity: fulfilled_qty * quantity,
                                                         is_composite: false,
-                                                        location_id: order_loc_id,
+                                                        location_id: actual_loc_id,
                                                         t_unix: order_ts,
                                                         new_record: true
                                                     });
@@ -689,7 +704,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                 quantity: fulfilled_qty,
                                                 sku: sku,
                                                 is_composite: false,
-                                                location_id: order_loc_id,
+                                                location_id: actual_loc_id,
                                                 t_unix: order_ts,
                                                 new_record: true,
                                             });
@@ -706,9 +721,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(150);
             } else {
+                console.error(`[DEBUG API] Lỗi HTTP Status: ${resp.status}`);
                 await sleep(1000);
             }
         } catch (e) {
+            console.error(`[DEBUG API] Ngoại lệ kết nối API:`, e);
             await sleep(1000);
         }
     }
