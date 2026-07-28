@@ -188,18 +188,18 @@ export async function get_locations(): Promise<Location[]> {
 }
 
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v23") == null;
+    return localStorage.getItem("last_data_update_v26") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v23",
+        "last_data_update_v26",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v23"));
+    return Number(localStorage.getItem("last_data_update_v26"));
 }
 
 export function sleep(ms: number) {
@@ -338,7 +338,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V23", 3);
+        const request = indexedDB.open("LYOInventoryDB_V26", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -403,7 +403,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V23", 3);
+        const request = indexedDB.open("LYOInventoryDB_V26", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -467,7 +467,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V23", 3);
+        const request = indexedDB.open("LYOInventoryDB_V26", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -531,7 +531,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V23", 3);
+        const request = indexedDB.open("LYOInventoryDB_V26", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -579,7 +579,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM BẮT BẪY LOG CHI TIẾT TỪNG PHẢN HỒI THÔ CỦA PROXY SERVER
+// 🟢 LỌC CHUẨN XÁC THEO TRẠNG THÁI NGHIỆP VỤ SAPO (STATUS: OPEN,CLOSED | FULFILLMENT: FULFILLED,PARTIAL)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -602,146 +602,140 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     const now_ts = new Date().getTime();
     const min_valid_ts = now_ts - (45 * 24 * 60 * 60 * 1000);
 
-    let page = 1;
-    let running = true;
+    // Danh sách 2 trạng thái đơn hàng thực tế
+    const order_statuses = ["open", "closed"];
     let total_fetched = 0;
 
-    console.warn(`[BẪY LỖI API] Đang gửi Request tới: ${proxyUrl}/admin/orders.json`);
+    for (let status_item of order_statuses) {
+        let page = 1;
+        let running = true;
 
-    while (running) {
-        try {
-            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
-                params: {
-                    status: "any",
-                    page: page,
-                    limit: 250
-                },
-            });
+        console.warn(`[SAPO RUN V26] Đang quét các đơn có status="${status_item}"...`);
 
-            // 🟢 BẪY LOG 1: BÁO MÃ HTTP STATUS THỰC TẾ
-            console.log(`[BẪY LỖI API] Trang ${page} - HTTP Status Code:`, resp.status);
-
-            if (resp.status === 200) {
-                // 🟢 BẪY LOG 2: IN CHUỖI DỮ LIỆU THÔ BAN ĐẦU TỪ PROXY (CẮT CẮT 300 KÝ TỰ ĐẦU)
-                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                console.log(`[BẪY LỖI API] Dữ liệu thô từ Proxy (300 ký tự đầu):`, raw_data_str.substring(0, 300));
-
-                const j = JSON.parse(raw_data_str);
-                
-                // 🟢 BẪY LOG 3: BÁO BẤT KỲ LỖI LẤY ĐƯỢC TRONG OBJECT
-                if (j.errors || j.error) {
-                    console.error(`[BẪY LỖI API] Proxy / Sapo báo lỗi nội bộ:`, j.errors || j.error);
-                }
-
-                const orders = j.orders || [];
-
-                console.warn(`[BẪY LỖI API] Trang ${page}: Bóc tách ra ${orders.length} đơn hàng.`);
-
-                if (orders.length === 0) {
-                    running = false;
-                    break;
-                }
-
-                total_fetched += orders.length;
-
-                orders.forEach((order: any) => {
-                    const is_not_cancelled = order.status !== "cancelled";
-                    const is_fulfilled = order.fulfillment_status === "fulfilled" || order.fulfillment_status === "partial";
-
-                    if (is_not_cancelled && is_fulfilled) {
-                        const line_items = order.line_items || [];
-
-                        let actual_loc_id = Number(order.location_id || 0);
-                        let export_date_str = order.created_on || order.created_at || order.modified_on;
-
-                        if (Array.isArray(order.fulfillments) && order.fulfillments.length > 0) {
-                            const valid_fulfillment = order.fulfillments.find(
-                                (f: any) => f && f.status !== "cancelled" && f.status !== "failure"
-                            ) || order.fulfillments[0];
-
-                            if (valid_fulfillment) {
-                                if (valid_fulfillment.stock_location_id) {
-                                    actual_loc_id = Number(valid_fulfillment.stock_location_id);
-                                }
-                                if (valid_fulfillment.created_on || valid_fulfillment.created_at) {
-                                    export_date_str = valid_fulfillment.created_on || valid_fulfillment.created_at;
-                                }
-                            }
-                        }
-
-                        const order_ts = new Date(export_date_str).getTime();
-
-                        if (order_ts >= min_valid_ts) {
-                            line_items.forEach((line_item: any) => {
-                                let fulfilled_qty = line_item.quantity;
-                                if (line_item.fulfillment_status === "partial") {
-                                    fulfilled_qty = line_item.quantity - (line_item.fulfillable_quantity || 0);
-                                }
-
-                                if (fulfilled_qty > 0) {
-                                    const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
-                                    if (sku) {
-                                        const record_key = `${order.id}_${sku}_${actual_loc_id}`;
-
-                                        if (!existing_fulfillment_keys.has(record_key)) {
-                                            if (line_item.is_composite) {
-                                                const it = variant_by_id.get(line_item.variant_id);
-                                                it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
-                                                    const sub_sku = variant_by_id.get(id)?.sku;
-                                                    if (sub_sku) {
-                                                        order_records.push({
-                                                            order_id: order.id,
-                                                            sku: sub_sku,
-                                                            quantity: fulfilled_qty * quantity,
-                                                            is_composite: false,
-                                                            location_id: actual_loc_id,
-                                                            t_unix: order_ts,
-                                                            new_record: true
-                                                        });
-                                                    }
-                                                });
-                                            } else {
-                                                order_records.push({
-                                                    order_id: order.id,
-                                                    quantity: fulfilled_qty,
-                                                    sku: sku,
-                                                    is_composite: false,
-                                                    location_id: actual_loc_id,
-                                                    t_unix: order_ts,
-                                                    new_record: true,
-                                                });
-                                            }
-
-                                            existing_fulfillment_keys.add(record_key);
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    }
+        while (running) {
+            try {
+                // 🟢 QUÉT LẦN LƯỢT OPEN VÀ CLOSED VỚI FULFILLMENT = FULFILLED,PARTIAL
+                const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
+                    params: {
+                        limit: 250,
+                        page: page,
+                        status: status_item,
+                        fulfillment_status: "fulfilled,partial"
+                    },
                 });
 
-                const last_order = orders[orders.length - 1];
-                const last_ts = new Date(last_order.created_on || last_order.created_at).getTime();
-                if (last_ts < min_valid_ts) {
-                    console.log(`[BẪY LỖI API] Đã quét xong 45 ngày đơn. Dừng.`);
-                    running = false;
-                    break;
-                }
+                if (resp.status === 200) {
+                    const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+                    const j = JSON.parse(raw_data_str);
+                    const orders = j.orders || [];
 
-                page++;
-                await sleep(150);
-            } else {
-                console.error(`[BẪY LỖI API] Response HTTP status khác 200:`, resp.status, resp.data);
+                    console.log(`[SAPO RUN V26] status="${status_item}", Trang ${page}: Sapo nhè ra ${orders.length} đơn hàng.`);
+
+                    if (orders.length === 0) {
+                        running = false;
+                        break;
+                    }
+
+                    total_fetched += orders.length;
+
+                    orders.forEach((order: any) => {
+                        const is_not_cancelled = order.status !== "cancelled";
+
+                        if (is_not_cancelled) {
+                            const line_items = order.line_items || [];
+
+                            let actual_loc_id = Number(order.location_id || 0);
+                            let export_date_str = order.created_on || order.created_at || order.modified_on;
+
+                            if (Array.isArray(order.fulfillments) && order.fulfillments.length > 0) {
+                                const valid_fulfillment = order.fulfillments.find(
+                                    (f: any) => f && f.status !== "cancelled" && f.status !== "failure"
+                                ) || order.fulfillments[0];
+
+                                if (valid_fulfillment) {
+                                    if (valid_fulfillment.stock_location_id) {
+                                        actual_loc_id = Number(valid_fulfillment.stock_location_id);
+                                    }
+                                    if (valid_fulfillment.created_on || valid_fulfillment.created_at) {
+                                        export_date_str = valid_fulfillment.created_on || valid_fulfillment.created_at;
+                                    }
+                                }
+                            }
+
+                            const order_ts = new Date(export_date_str).getTime();
+
+                            if (order_ts >= min_valid_ts) {
+                                line_items.forEach((line_item: any) => {
+                                    let fulfilled_qty = line_item.quantity;
+                                    if (line_item.fulfillment_status === "partial") {
+                                        fulfilled_qty = line_item.quantity - (line_item.fulfillable_quantity || 0);
+                                    }
+
+                                    if (fulfilled_qty > 0) {
+                                        const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
+                                        if (sku) {
+                                            const record_key = `${order.id}_${sku}_${actual_loc_id}`;
+
+                                            if (!existing_fulfillment_keys.has(record_key)) {
+                                                if (line_item.is_composite) {
+                                                    const it = variant_by_id.get(line_item.variant_id);
+                                                    it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
+                                                        const sub_sku = variant_by_id.get(id)?.sku;
+                                                        if (sub_sku) {
+                                                            order_records.push({
+                                                                order_id: order.id,
+                                                                sku: sub_sku,
+                                                                quantity: fulfilled_qty * quantity,
+                                                                is_composite: false,
+                                                                location_id: actual_loc_id,
+                                                                t_unix: order_ts,
+                                                                new_record: true
+                                                            });
+                                                        }
+                                                    });
+                                                } else {
+                                                    order_records.push({
+                                                        order_id: order.id,
+                                                        quantity: fulfilled_qty,
+                                                        sku: sku,
+                                                        is_composite: false,
+                                                        location_id: actual_loc_id,
+                                                        t_unix: order_ts,
+                                                        new_record: true,
+                                                    });
+                                                }
+
+                                                existing_fulfillment_keys.add(record_key);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    });
+
+                    const last_order = orders[orders.length - 1];
+                    const last_ts = new Date(last_order.created_on || last_order.created_at).getTime();
+                    if (last_ts < min_valid_ts) {
+                        console.log(`[SAPO RUN V26] status="${status_item}" đã lấy đủ đơn trong 45 ngày. Chuyển tiếp.`);
+                        running = false;
+                        break;
+                    }
+
+                    page++;
+                    await sleep(150);
+                } else {
+                    console.error(`[SAPO RUN V26] Lỗi HTTP status:`, resp.status);
+                    await sleep(1000);
+                }
+            } catch (e) {
+                console.error(`[SAPO RUN V26] Ngoại lệ kết nối:`, e);
                 await sleep(1000);
             }
-        } catch (e) {
-            console.error(`[BẪY LỖI API] Bị văng Exception kết nối:`, e);
-            await sleep(1000);
         }
     }
 
-    console.warn(`[BẪY LỖI API] Tổng kết thúc: ${total_fetched} đơn hàng. Tạo ${order_records.length} bản ghi.`);
+    console.warn(`[SAPO RUN V26] Hoàn tất! Tổng đơn nhận về: ${total_fetched}. Tạo ${order_records.length} bản ghi.`);
 
     await updateIndexedDB(order_records.filter((v) => v.new_record));
     setLastDataUpdate();
