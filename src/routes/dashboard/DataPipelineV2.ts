@@ -96,11 +96,11 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id);
 
-    console.warn(`[TÍNH RESTOCK] Kho ID đang chọn: ${target_location_id}. Tổng bản ghi đơn hàng đang có: ${records.length}`);
+    console.warn(`[TÍNH RESTOCK V31] Đang tính cho Kho ID: ${target_location_id}. Tổng bản ghi đơn: ${records.length}`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
-            sales_by_sku.set(variant.sku, 0);
+            sales_by_sku.set(variant.sku.trim(), 0);
         }
     }
 
@@ -110,14 +110,15 @@ export function calculate_restock_data(
         
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-                const current_sales = sales_by_sku.get(record.sku) || 0;
-                sales_by_sku.set(record.sku, current_sales + record.quantity);
+                const clean_sku = (record.sku || "").trim();
+                const current_sales = sales_by_sku.get(clean_sku) || 0;
+                sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
                 matched_count++;
             }
         }
     }
 
-    console.warn(`[TÍNH RESTOCK] Số bản ghi đơn hàng của kho ${target_location_id} trong 30 ngày: ${matched_count}`);
+    console.warn(`[TÍNH RESTOCK V31] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -132,7 +133,8 @@ export function calculate_restock_data(
         variant.lot_exp = inventory?.lot_exp || undefined;
         variant.serial = inventory?.serial || undefined;
 
-        const sales = sales_by_sku.get(variant.sku) ?? 0;
+        const clean_sku = (variant.sku || "").trim();
+        const sales = sales_by_sku.get(clean_sku) ?? 0;
 
         if (
             variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
@@ -149,7 +151,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[TÍNH RESTOCK] Kết quả lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V31] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -188,18 +190,18 @@ export async function get_locations(): Promise<Location[]> {
 }
 
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v28") == null;
+    return localStorage.getItem("last_data_update_v31") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v28",
+        "last_data_update_v31",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v28"));
+    return Number(localStorage.getItem("last_data_update_v31"));
 }
 
 export function sleep(ms: number) {
@@ -338,7 +340,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V28", 3);
+        const request = indexedDB.open("LYOInventoryDB_V31", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -403,7 +405,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V28", 3);
+        const request = indexedDB.open("LYOInventoryDB_V31", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -467,7 +469,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V28", 3);
+        const request = indexedDB.open("LYOInventoryDB_V31", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -531,7 +533,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V28", 3);
+        const request = indexedDB.open("LYOInventoryDB_V31", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -579,7 +581,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM MỞ TỐI ĐA VÒI KÉO DỮ LIỆU ĐƠN HÀNG VỀ BROWSER
+// 🟢 NƠI LẮP BẮT ĐƠN AN TOÀN VẦ TỰ ĐỘNG TRIM SKU
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -605,12 +607,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
     let total_fetched = 0;
+    const MAX_PAGES = 25;
 
-    console.warn(`[KÉO DỮ LIỆU V28] Bắt đầu quét kéo toàn bộ đơn hàng từ Sapo API...`);
+    console.warn(`[KÉO V31 NỚI LỎNG DỮ LIỆU] Bắt đầu quét đơn...`);
 
-    while (running) {
+    while (running && page <= MAX_PAGES) {
         try {
-            // 🟢 CHỈ GỬI LIMIT VÀ PAGE ĐỂ SAPO KHÔNG BAO GIỜ CHẶN TẮC VÒI
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     limit: 250,
@@ -623,7 +625,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`[KÉO DỮ LIỆU V28] Trang ${page}: Sapo nhè ra ${orders.length} đơn hàng.`);
+                console.log(`[KÉO V31 NỚI LỎNG DỮ LIỆU] Trang ${page}/${MAX_PAGES}: Sapo nhè ra ${orders.length} đơn hàng.`);
 
                 if (orders.length === 0) {
                     running = false;
@@ -633,6 +635,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 total_fetched += orders.length;
 
                 orders.forEach((order: any) => {
+                    // 🟢 NỚI LỎNG ĐIỀU KIỆN: BỎ CHECK FULFILLMENT_STATUS CỦA ORDER GỐC, CHỈ CẦN ĐƠN KHÔNG HỦY
                     const is_not_cancelled = order.status !== "cancelled";
 
                     if (is_not_cancelled) {
@@ -656,49 +659,29 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             }
                         }
 
-                        const order_ts = new Date(export_date_str).getTime();
+                        const order_ts = Date.parse(export_date_str) || new Date(export_date_str).getTime();
 
-                        // LỌC ĐƠN TRONG MỐC 45 NGÀY
-                        if (order_ts >= min_valid_ts) {
+                        if (!isNaN(order_ts) && order_ts >= min_valid_ts) {
                             line_items.forEach((line_item: any) => {
-                                let fulfilled_qty = line_item.quantity;
-                                if (line_item.fulfillment_status === "partial") {
-                                    fulfilled_qty = line_item.quantity - (line_item.fulfillable_quantity || 0);
-                                }
+                                let fulfilled_qty = Number(line_item.quantity) || 0;
 
                                 if (fulfilled_qty > 0) {
-                                    const sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
-                                    if (sku) {
+                                    const raw_sku = variant_by_id.get(line_item.variant_id)?.sku || line_item.sku;
+                                    
+                                    if (raw_sku) {
+                                        const sku = raw_sku.trim(); // 🟢 TRIM SẠCH KHOẢNG TRẮNG
                                         const record_key = `${order.id}_${sku}_${actual_loc_id}`;
 
                                         if (!existing_fulfillment_keys.has(record_key)) {
-                                            if (line_item.is_composite) {
-                                                const it = variant_by_id.get(line_item.variant_id);
-                                                it?.composite_item_quantity_by_variant_id?.forEach((quantity: number, id: number) => {
-                                                    const sub_sku = variant_by_id.get(id)?.sku;
-                                                    if (sub_sku) {
-                                                        order_records.push({
-                                                            order_id: order.id,
-                                                            sku: sub_sku,
-                                                            quantity: fulfilled_qty * quantity,
-                                                            is_composite: false,
-                                                            location_id: actual_loc_id,
-                                                            t_unix: order_ts,
-                                                            new_record: true
-                                                        });
-                                                    }
-                                                });
-                                            } else {
-                                                order_records.push({
-                                                    order_id: order.id,
-                                                    quantity: fulfilled_qty,
-                                                    sku: sku,
-                                                    is_composite: false,
-                                                    location_id: actual_loc_id,
-                                                    t_unix: order_ts,
-                                                    new_record: true,
-                                                });
-                                            }
+                                            order_records.push({
+                                                order_id: order.id,
+                                                quantity: fulfilled_qty,
+                                                sku: sku,
+                                                is_composite: false,
+                                                location_id: actual_loc_id,
+                                                t_unix: order_ts,
+                                                new_record: true,
+                                            });
 
                                             existing_fulfillment_keys.add(record_key);
                                         }
@@ -709,11 +692,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 });
 
-                // Kiểm tra ngày của đơn cuối cùng trên trang, nếu cũ hơn 45 ngày thì dừng lại
                 const last_order = orders[orders.length - 1];
-                const last_ts = new Date(last_order.created_on || last_order.created_at || last_order.modified_on).getTime();
-                if (last_ts < min_valid_ts) {
-                    console.warn(`[KÉO DỮ LIỆU V28] Đã quét xong toàn bộ đơn hàng trong 45 ngày gần nhất. Dừng.`);
+                const last_date_raw = last_order.created_on || last_order.created_at || last_order.modified_on;
+                const last_ts = Date.parse(last_date_raw) || new Date(last_date_raw).getTime();
+
+                if (!isNaN(last_ts) && last_ts < min_valid_ts) {
+                    console.warn(`[KÉO V31 NỚI LỎNG DỮ LIỆU] Đã quá 45 ngày. Dừng.`);
                     running = false;
                     break;
                 }
@@ -721,16 +705,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(150);
             } else {
-                console.error(`[KÉO DỮ LIỆU V28] Lỗi HTTP status:`, resp.status);
+                console.error(`[KÉO V31 NỚI LỎNG DỮ LIỆU] Lỗi HTTP status:`, resp.status);
                 await sleep(1000);
             }
         } catch (e) {
-            console.error(`[KÉO DỮ LIỆU V28] Bị lỗi ngoại lệ:`, e);
+            console.error(`[KÉO V31 NỚI LỎNG DỮ LIỆU] Lỗi ngoại lệ:`, e);
             await sleep(1000);
         }
     }
 
-    console.warn(`[KÉO DỮ LIỆU V28] Hoàn tất kéo dữ liệu! Tổng đơn kéo về: ${total_fetched}. Tạo ${order_records.length} bản ghi.`);
+    console.warn(`[KÉO V31 NỚI LỎNG DỮ LIỆU] Đã xong! Tổng đơn kéo về: ${total_fetched}. Tạo ${order_records.length} bản ghi mới.`);
 
     await updateIndexedDB(order_records.filter((v) => v.new_record));
     setLastDataUpdate();
@@ -758,7 +742,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     let page = 1;
     let running = true;
 
-    while (running) {
+    while (running && page <= 10) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
@@ -786,7 +770,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                                 transfer_records.push({
                                     transfer_id: transfer.id,
                                     location_id: Number(transfer.source_location_id),
-                                    sku: p_variants.get(line_item.variant_id)?.sku || "",
+                                    sku: (p_variants.get(line_item.variant_id)?.sku || "").trim(),
                                     t_unix: new Date(transfer.created_on || transfer.created_at || transfer.modified_on).getTime(),
                                     quantity: line_item.quantity,
                                     new_record: true,
