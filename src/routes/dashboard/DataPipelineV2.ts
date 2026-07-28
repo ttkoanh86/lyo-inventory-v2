@@ -187,30 +187,25 @@ export async function get_locations(): Promise<Location[]> {
 }
 
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v18") == null;
+    return localStorage.getItem("last_data_update_v20") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v18",
+        "last_data_update_v20",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v18"));
+    return Number(localStorage.getItem("last_data_update_v20"));
 }
 
-// 🟢 CHUẨN HÓA ĐỊNH DẠNG NGÀY TRUYỀN SAPO API: YYYY-MM-DD HH:mm:ss
+// 🟢 CHUẨN ĐỊNH DẠNG ISO 8601 SAPO YÊU CẦU: YYYY-MM-DDTHH:mm:ssZ
 export function getLastDataUpdate() {
     const now = new Date();
     now.setDate(now.getDate() - 45);
-
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-
-    return `${year}-${month}-${day} 00:00:00`;
+    return now.toISOString();
 }
 
 export function sleep(ms: number) {
@@ -349,7 +344,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V18", 3);
+        const request = indexedDB.open("LYOInventoryDB_V20", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -414,7 +409,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V18", 3);
+        const request = indexedDB.open("LYOInventoryDB_V20", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -478,7 +473,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V18", 3);
+        const request = indexedDB.open("LYOInventoryDB_V20", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -542,7 +537,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V18", 3);
+        const request = indexedDB.open("LYOInventoryDB_V20", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -590,7 +585,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN SỬA HOÀN HẢO THAM SỐ NGÀY VÀ AN TOÀN FULFILLMENTS
+// 🟢 GIỮ NGUYÊN CREATED_ON_MIN NHƯNG SỬ DỤNG CHUẨN ISO DẠNG T/Z
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -649,7 +644,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     if (is_not_cancelled && is_fulfilled) {
                         const line_items = order.line_items || [];
 
-                        // Lấy kho xuất thực tế (stock_location_id) có bẫy an toàn
                         let actual_loc_id = Number(order.location_id || 0);
                         let export_date_str = order.created_on || order.modified_on;
 
