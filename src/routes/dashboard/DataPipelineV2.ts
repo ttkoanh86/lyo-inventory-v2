@@ -89,6 +89,7 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
+// 🟢 CỘNG DỒN CẢ BÁN HÀNG LẪN CHUYỂN KHO ĐI
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -104,7 +105,7 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id || 781327);
 
-    console.warn(`[TÍNH RESTOCK V48] Đang tính cho Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi XUẤT KHO CHUẨN.`);
+    console.warn(`[TÍNH RESTOCK V49] Tính cho Kho ID: ${target_location_id}. CỘNG CẢ BÁN + CHUYỂN KHO.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -126,7 +127,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[TÍNH RESTOCK V48] Khớp ${matched_count} bản ghi ĐÃ XUẤT KHO cho Kho ${target_location_id}`);
+    console.warn(`[TÍNH RESTOCK V49] Khớp ${matched_count} bản ghi (Gồm Bán + Chuyển kho) cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -159,7 +160,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[TÍNH RESTOCK V48] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V49] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -221,13 +222,13 @@ export function isFirstTime() {
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v48",
+        "last_data_update_v49",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v48"));
+    return Number(localStorage.getItem("last_data_update_v49"));
 }
 
 export function sleep(ms: number) {
@@ -361,13 +362,13 @@ export async function get_active_products() {
             await sleep(500);
         }
     }
-    console.warn(`[V48 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
+    console.warn(`[V49 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
     return p_variant_by_ids;
 }
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V48", 3);
+        const request = indexedDB.open("LYOInventoryDB_V49", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -429,7 +430,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V48", 3);
+        const request = indexedDB.open("LYOInventoryDB_V49", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -475,7 +476,6 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 V48 CHUẨN MẢNG order_line_items VÀ LỌC XUẤT KHO FULFILLED
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -493,9 +493,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
     let total_fetched = 0;
-    let olay_found_count = 0;
 
-    console.warn(`[V48 CHUẨN SAPO] Bắt đầu đồng bộ đơn hàng từ order_line_items...`);
+    console.warn(`[V49 CHUẨN XUẤT KHO] Bắt đầu lấy đơn hàng...`);
 
     while (running) {
         try {
@@ -524,14 +523,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                     if (is_not_cancelled) {
                         const actual_loc_id = Number(order.location_id || 0);
-                        const date_str = order.created_on || order.created_at || order.modified_on;
+                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // 🟢 LỌC CHUẨN XUẤT KHO: CHỈ ĐẾM KHI ĐƠN ĐÃ XUẤT KHO
                         const is_fulfilled = order.fulfillment_status === "fulfilled" || (order.fulfillments && order.fulfillments.length > 0);
 
                         if (is_fulfilled && order_ts > 0 && order_ts >= min_valid_ts) {
-                            // 🟢 ĐỌC CHUẨN MẢNG order_line_items TỪ SAPO
                             const line_items = order.order_line_items || order.line_items || [];
 
                             line_items.forEach((line_item: any, index: number) => {
@@ -539,12 +536,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                 if (qty > 0) {
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const raw_sku = variant_obj?.sku || line_item.sku || line_item.barcode || "";
-                                    const item_name = (line_item.variant_name || line_item.product_name || variant_obj?.name || "").toLowerCase();
-
-                                    if (item_name.includes("olay") || raw_sku.includes("690314836")) {
-                                        olay_found_count++;
-                                        console.warn(`🔥 [BẪY V48 OLAY BẮT CHUẨN] Mã đơn=${order.code || order.id}, Ngày=${date_str}, SL=${qty}, Kho=${actual_loc_id}, SKU=[${raw_sku}], Tên=[${line_item.variant_name}]`);
-                                    }
 
                                     if (raw_sku) {
                                         const sku = raw_sku.trim();
@@ -588,13 +579,33 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    console.warn(`[V48 CHUẨN SAPO] Hoàn tất! Bắt được ${olay_found_count} dòng Olay ĐÃ XUẤT KHO từ ${total_fetched} đơn Sapo.`);
+    console.warn(`[V49 CHUẨN XUẤT KHO] Đã nạp ${order_records.length} bản ghi đơn bán.`);
+
+    // 🟢 TIẾP TỤC CÀO ĐƠN CHUYỂN KHO NỘI BỘ VÀ CỘNG CHUNG VÀO DỮ LIỆU
+    try {
+        const transfer_records = await fetch_inventory_transfer(variant_by_id);
+        transfer_records.forEach((tf) => {
+            order_records.push({
+                order_id: tf.transfer_id,
+                quantity: tf.quantity,
+                sku: tf.sku,
+                is_composite: false,
+                location_id: tf.location_id,
+                t_unix: tf.t_unix,
+                new_record: true,
+            });
+        });
+        console.warn(`[V49 CỘNG CHUYỂN KHO] Đã cộng thêm ${transfer_records.length} bản ghi xuất chuyển kho.`);
+    } catch (e) {
+        console.error("[V49 CỘNG CHUYỂN KHO LỖI]", e);
+    }
 
     await updateIndexedDB(order_records);
     setLastDataUpdate();
     return order_records;
 }
 
+// 🟢 CÀO DỮ LIỆU XUẤT CHUYỂN KHO (STOCK TRANSFERS)
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -629,19 +640,27 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                 }
 
                 stock_transfers.forEach((transfer: any) => {
+                    // LẤY CÁC ĐƠN CHUYỂN KHO ĐÃ PHÁT HÀNH / ĐÃ NHẬN
                     if (transfer.status == "received" || transfer.status == "shipped") {
+                        const source_loc = Number(transfer.source_location_id || 0);
+                        const tf_date_str = transfer.created_on || transfer.created_at || transfer.modified_on;
+                        const tf_ts = parseSapoDate(tf_date_str);
+
                         transfer.line_items.forEach((line_item: any, idx: number) => {
-                            if (p_variants.has(line_item.variant_id)) {
-                                const sku = (p_variants.get(line_item.variant_id)?.sku || "").trim();
-                                const key = `${transfer.id}_${line_item.id || idx}_${sku}_${transfer.source_location_id}`;
+                            const variant_obj = p_variants.get(line_item.variant_id);
+                            const raw_sku = variant_obj?.sku || line_item.sku || "";
+
+                            if (raw_sku) {
+                                const sku = raw_sku.trim();
+                                const key = `TF_${transfer.id}_${line_item.id || idx}_${sku}_${source_loc}`;
 
                                 if (!existing_transfer_ids.has(key)) {
                                     transfer_records.push({
                                         transfer_id: transfer.id,
-                                        location_id: Number(transfer.source_location_id),
+                                        location_id: source_loc,
                                         sku: sku,
-                                        t_unix: parseSapoDate(transfer.created_on || transfer.created_at || transfer.modified_on),
-                                        quantity: line_item.quantity,
+                                        t_unix: tf_ts,
+                                        quantity: Number(line_item.quantity) || 0,
                                         new_record: true,
                                     });
                                     existing_transfer_ids.add(key);
