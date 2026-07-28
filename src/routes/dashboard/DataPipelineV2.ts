@@ -89,6 +89,7 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
+// 🟢 1. HÀM TÍNH TOÁN SỐ LƯỢNG BÁN 30 NGÀY CHO TOÀN BỘ BIẾN THỂ (GỐC CHUNG)
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -97,14 +98,11 @@ export function calculate_restock_data(
     records.sort((a, b) => b.t_unix - a.t_unix);
 
     let sales_by_sku = new Map<string, number>();
-    let items_need_restocking: ProductV2[] = [];
 
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id || 781327);
-
-    console.warn(`[TÍNH RESTOCK V50] Đang tính cho Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi XUẤT KHO THỰC TẾ.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -112,21 +110,16 @@ export function calculate_restock_data(
         }
     }
 
-    let matched_count = 0;
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
-        
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const clean_sku = (record.sku || "").trim();
                 const current_sales = sales_by_sku.get(clean_sku) || 0;
                 sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
-                matched_count++;
             }
         }
     }
-
-    console.warn(`[TÍNH RESTOCK V50] Khớp ${matched_count} bản ghi XUẤT KHO cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -144,23 +137,41 @@ export function calculate_restock_data(
         const clean_sku = (variant.sku || "").trim();
         const sales = sales_by_sku.get(clean_sku) ?? 0;
 
-        if (
-            variant.c_available + variant.c_incoming <= (1 / 2) * sales &&
-            sales > 0
-        ) {
-            variant.c_restock = Math.round(sales);
-            
-            const current_has = variant.c_available + variant.c_incoming;
-            
-            variant.c_restock_half = Math.max(0, Math.round(0.5 * variant.c_restock) - current_has);
-            variant.c_restock_third = Math.max(0, Math.round((1 / 3) * variant.c_restock) - current_has);
-
-            items_need_restocking.push(variant);
-        }
+        // Gán lượng bán 1 tháng cho tất cả mặt hàng
+        variant.c_restock = Math.round(sales);
     });
 
-    console.warn(`[TÍNH RESTOCK V50] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
-    return items_need_restocking;
+    return get_items_need_restock(variant_by_id, target_location_id);
+}
+
+// 🔴 2. VÙNG DỮ LIỆU CHUYÊN BIỆT CHO NÚT 1: "CẦN ĐẶT NGAY"
+export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
+    let result: ProductV2[] = [];
+    variant_by_id.forEach((variant) => {
+        const sales = variant.c_restock || 0;
+        const current_has = variant.c_available + variant.c_incoming;
+
+        // Điều kiện: Chạm ngưỡng cảnh báo hết hàng
+        if (current_has <= 0.5 * sales && sales > 0) {
+            variant.c_restock_half = Math.max(0, Math.round(0.5 * sales) - current_has);
+            variant.c_restock_third = Math.max(0, Math.round((1 / 3) * sales) - current_has);
+            result.push(variant);
+        }
+    });
+    return result;
+}
+
+// 🔵 3. VÙNG DỮ LIỆU CHUYÊN BIỆT CHO NÚT 2: "CÓ BÁN TRONG THÁNG" (GOM ĐỦ CHIẾT KHẤU)
+export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
+    let result: ProductV2[] = [];
+    variant_by_id.forEach((variant) => {
+        const sales = variant.c_restock || 0;
+        // Điều kiện: Tất cả sản phẩm có phát sinh bán (> 0)
+        if (sales > 0) {
+            result.push(variant);
+        }
+    });
+    return result;
 }
 
 export async function get_locations(): Promise<Location[]> {
@@ -423,7 +434,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 CÀO ĐƠN XUẤT BÁN VÀ CHUYỂN KHO NỘI BỘ VÀO BẢN V50 CHUẨN ĐÉC
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -436,7 +446,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let existing_keys = new Set<string>();
 
     const now_ts = new Date().getTime();
-    const min_valid_ts = now_ts - (32 * 24 * 60 * 60 * 1000); // LẤY DƯ TỚI 32 NGÀY LÀ ĐỦ CHUẨN
+    const min_valid_ts = now_ts - (32 * 24 * 60 * 60 * 1000);
 
     let page = 1;
     let running = true;
@@ -444,7 +454,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     console.warn(`[V50 CHUẨN] Bắt đầu đồng bộ 30 ngày từ Sapo (Gồm Bán + Chuyển kho)...`);
 
-    // 1️⃣ CÀO ĐƠN XUẤT BÁN (/admin/orders.json)
     while (running) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
@@ -475,7 +484,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // CHỈ LẤY ĐƠN ĐÃ XUẤT KHO
                         const is_fulfilled = order.fulfillment_status === "fulfilled" || (order.fulfillments && order.fulfillments.length > 0);
 
                         if (is_fulfilled && order_ts > 0 && order_ts >= min_valid_ts) {
@@ -529,9 +537,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    console.warn(`[V50 CHUẨN] Đã cào xong ${total_orders} đơn bán.`);
-
-    // 2️⃣ CÀO ĐƠN XUẤT CHUYỂN KHO (/admin/stock_transfers.json)
     try {
         let tf_page = 1;
         let tf_running = true;
@@ -595,8 +600,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     } catch (e) {
         console.error("[V50 CHUYỂN KHO LỖI]", e);
     }
-
-    console.warn(`[V50 CHUẨN] Hoàn tất! Tổng cộng ${all_records.length} bản ghi xuất bán + chuyển kho.`);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
