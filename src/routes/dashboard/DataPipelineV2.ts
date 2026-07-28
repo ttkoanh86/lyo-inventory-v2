@@ -81,7 +81,6 @@ export function obtain_access_token() {
 
 type Record = OrderRecordV2 | TransferRecord;
 
-// 🟢 HÀM TÍNH RESTOCK CÂN BẰNG TẤT CẢ CÁC KHO
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -109,7 +108,6 @@ export function calculate_restock_data(
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
         
-        // Match chính xác ID Kho đang chọn
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const current_sales = sales_by_sku.get(record.sku) || 0;
@@ -189,20 +187,19 @@ export async function get_locations(): Promise<Location[]> {
     return location_by_id;
 }
 
-// 🟢 NÂNG LÊN DB V22 ĐỂ XÓA SẠCH VÀ ÉP TẢI DỮ LIỆU MỚI
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v22") == null;
+    return localStorage.getItem("last_data_update_v23") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v22",
+        "last_data_update_v23",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v22"));
+    return Number(localStorage.getItem("last_data_update_v23"));
 }
 
 export function sleep(ms: number) {
@@ -341,7 +338,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V22", 3);
+        const request = indexedDB.open("LYOInventoryDB_V23", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -406,7 +403,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V22", 3);
+        const request = indexedDB.open("LYOInventoryDB_V23", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -470,7 +467,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V22", 3);
+        const request = indexedDB.open("LYOInventoryDB_V23", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -534,7 +531,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V22", 3);
+        const request = indexedDB.open("LYOInventoryDB_V23", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -582,7 +579,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN CHỦ ĐỘNG XỬ LÝ KHO KÉP VÀ LỌC CỨNG 45 NGÀY
+// 🟢 HÀM BẮT BẪY LOG CHI TIẾT TỪNG PHẢN HỒI THÔ CỦA PROXY SERVER
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -609,7 +606,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
     let total_fetched = 0;
 
-    console.log(`[SAPO RUN] Bắt đầu đồng bộ danh sách đơn hàng từ Sapo API...`);
+    console.warn(`[BẪY LỖI API] Đang gửi Request tới: ${proxyUrl}/admin/orders.json`);
 
     while (running) {
         try {
@@ -621,11 +618,24 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 },
             });
 
+            // 🟢 BẪY LOG 1: BÁO MÃ HTTP STATUS THỰC TẾ
+            console.log(`[BẪY LỖI API] Trang ${page} - HTTP Status Code:`, resp.status);
+
             if (resp.status === 200) {
-                const j = JSON.parse(resp.data);
+                // 🟢 BẪY LOG 2: IN CHUỖI DỮ LIỆU THÔ BAN ĐẦU TỪ PROXY (CẮT CẮT 300 KÝ TỰ ĐẦU)
+                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+                console.log(`[BẪY LỖI API] Dữ liệu thô từ Proxy (300 ký tự đầu):`, raw_data_str.substring(0, 300));
+
+                const j = JSON.parse(raw_data_str);
+                
+                // 🟢 BẪY LOG 3: BÁO BẤT KỲ LỖI LẤY ĐƯỢC TRONG OBJECT
+                if (j.errors || j.error) {
+                    console.error(`[BẪY LỖI API] Proxy / Sapo báo lỗi nội bộ:`, j.errors || j.error);
+                }
+
                 const orders = j.orders || [];
 
-                console.log(`[SAPO RUN] Trang ${page}: Sapo trả về ${orders.length} đơn hàng.`);
+                console.warn(`[BẪY LỖI API] Trang ${page}: Bóc tách ra ${orders.length} đơn hàng.`);
 
                 if (orders.length === 0) {
                     running = false;
@@ -641,7 +651,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     if (is_not_cancelled && is_fulfilled) {
                         const line_items = order.line_items || [];
 
-                        // 🟢 LỚP BẢO VỆ KÉP LẤY KHO XUẤT CHUẨN XÁC
                         let actual_loc_id = Number(order.location_id || 0);
                         let export_date_str = order.created_on || order.created_at || order.modified_on;
 
@@ -662,7 +671,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                         const order_ts = new Date(export_date_str).getTime();
 
-                        // CHỈ LẤY ĐƠN TRONG 45 NGÀY GẦN NHẤT
                         if (order_ts >= min_valid_ts) {
                             line_items.forEach((line_item: any) => {
                                 let fulfilled_qty = line_item.quantity;
@@ -713,11 +721,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 });
 
-                // Kiểm tra nếu đơn cuối cùng trên trang đã cũ hơn 45 ngày thì dừng
                 const last_order = orders[orders.length - 1];
                 const last_ts = new Date(last_order.created_on || last_order.created_at).getTime();
                 if (last_ts < min_valid_ts) {
-                    console.log(`[SAPO RUN] Đã quét đủ toàn bộ đơn hàng trong 45 ngày. Dừng tải tiếp.`);
+                    console.log(`[BẪY LỖI API] Đã quét xong 45 ngày đơn. Dừng.`);
                     running = false;
                     break;
                 }
@@ -725,16 +732,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(150);
             } else {
-                console.error(`[SAPO RUN] Kết nối Sapo lỗi HTTP: ${resp.status}`);
+                console.error(`[BẪY LỖI API] Response HTTP status khác 200:`, resp.status, resp.data);
                 await sleep(1000);
             }
         } catch (e) {
-            console.error(`[SAPO RUN] Lỗi ngoại lệ kết nối:`, e);
+            console.error(`[BẪY LỖI API] Bị văng Exception kết nối:`, e);
             await sleep(1000);
         }
     }
 
-    console.warn(`[SAPO RUN] Hoàn tất đồng bộ! Tổng đơn nhận về từ Sapo: ${total_fetched}. Tổng bản ghi tạo ra: ${order_records.length}`);
+    console.warn(`[BẪY LỖI API] Tổng kết thúc: ${total_fetched} đơn hàng. Tạo ${order_records.length} bản ghi.`);
 
     await updateIndexedDB(order_records.filter((v) => v.new_record));
     setLastDataUpdate();
