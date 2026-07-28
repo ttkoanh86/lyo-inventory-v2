@@ -104,7 +104,7 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id || 781327);
 
-    console.warn(`[TÍNH RESTOCK V46] Đang tính cho Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi.`);
+    console.warn(`[TÍNH RESTOCK V48] Đang tính cho Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi XUẤT KHO CHUẨN.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -126,7 +126,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[TÍNH RESTOCK V46] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
+    console.warn(`[TÍNH RESTOCK V48] Khớp ${matched_count} bản ghi ĐÃ XUẤT KHO cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -159,7 +159,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[TÍNH RESTOCK V46] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V48] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -221,13 +221,13 @@ export function isFirstTime() {
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v46",
+        "last_data_update_v48",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v46"));
+    return Number(localStorage.getItem("last_data_update_v48"));
 }
 
 export function sleep(ms: number) {
@@ -361,13 +361,13 @@ export async function get_active_products() {
             await sleep(500);
         }
     }
-    console.warn(`[V46 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
+    console.warn(`[V48 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
     return p_variant_by_ids;
 }
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V46", 3);
+        const request = indexedDB.open("LYOInventoryDB_V48", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -429,7 +429,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V46", 3);
+        const request = indexedDB.open("LYOInventoryDB_V48", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -475,7 +475,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 V46 SOI CẤU TRÚC ĐƠN HÀNG THỰC TẾ SAPO VÀ SOI SẢN PHẨM THƯỜNG
+// 🟢 V48 CHUẨN MẢNG order_line_items VÀ LỌC XUẤT KHO FULFILLED
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -495,7 +495,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let total_fetched = 0;
     let olay_found_count = 0;
 
-    console.warn(`[V46 CHUẨN THỰC TẾ] Bắt đầu đồng bộ đơn hàng Sapo...`);
+    console.warn(`[V48 CHUẨN SAPO] Bắt đầu đồng bộ đơn hàng từ order_line_items...`);
 
     while (running) {
         try {
@@ -519,11 +519,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                 total_fetched += orders.length;
 
-                // 🟢 IN MẪU 1 ĐƠN HÀNG RA CONSOLE ĐỂ SOI TRỰC TIẾP DỮ LIỆU THÔ DƯỚI BẤT KỲ ĐỊNH DẠNG NÀO
-                if (page === 1 && orders.length > 0) {
-                    console.log("🔍 [V46 SOI ĐƠN GỐC SAPO]:", orders[0]);
-                }
-
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
 
@@ -532,18 +527,23 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.created_on || order.created_at || order.modified_on;
                         const order_ts = parseSapoDate(date_str);
 
-                        if (order_ts > 0 && order_ts >= min_valid_ts) {
-                            const line_items = order.line_items || [];
+                        // 🟢 LỌC CHUẨN XUẤT KHO: CHỈ ĐẾM KHI ĐƠN ĐÃ XUẤT KHO
+                        const is_fulfilled = order.fulfillment_status === "fulfilled" || (order.fulfillments && order.fulfillments.length > 0);
+
+                        if (is_fulfilled && order_ts > 0 && order_ts >= min_valid_ts) {
+                            // 🟢 ĐỌC CHUẨN MẢNG order_line_items TỪ SAPO
+                            const line_items = order.order_line_items || order.line_items || [];
+
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
                                 if (qty > 0) {
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
-                                    const raw_sku = variant_obj?.sku || line_item.sku || "";
-                                    const item_name = (line_item.name || variant_obj?.name || "").toLowerCase();
+                                    const raw_sku = variant_obj?.sku || line_item.sku || line_item.barcode || "";
+                                    const item_name = (line_item.variant_name || line_item.product_name || variant_obj?.name || "").toLowerCase();
 
                                     if (item_name.includes("olay") || raw_sku.includes("690314836")) {
                                         olay_found_count++;
-                                        console.warn(`🔥 [BẪY V46 OLAY SẢN PHẨM THƯỜNG] Mã đơn=${order.code || order.id}, Ngày=${date_str}, SL=${qty}, Kho=${actual_loc_id}, SKU=[${raw_sku}], Tên=[${line_item.name}]`);
+                                        console.warn(`🔥 [BẪY V48 OLAY BẮT CHUẨN] Mã đơn=${order.code || order.id}, Ngày=${date_str}, SL=${qty}, Kho=${actual_loc_id}, SKU=[${raw_sku}], Tên=[${line_item.variant_name}]`);
                                     }
 
                                     if (raw_sku) {
@@ -588,7 +588,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    console.warn(`[V46 CHUẨN THỰC TẾ] Hoàn tất! Bắt được ${olay_found_count} dòng Olay từ ${total_fetched} đơn Sapo.`);
+    console.warn(`[V48 CHUẨN SAPO] Hoàn tất! Bắt được ${olay_found_count} dòng Olay ĐÃ XUẤT KHO từ ${total_fetched} đơn Sapo.`);
 
     await updateIndexedDB(order_records);
     setLastDataUpdate();
