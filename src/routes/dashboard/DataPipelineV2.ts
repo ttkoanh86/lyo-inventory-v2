@@ -81,7 +81,16 @@ export function obtain_access_token() {
 
 type Record = OrderRecordV2 | TransferRecord;
 
-// 🟢 HAM TÍNH RESTOCK CHUẨN XÁC: SO SÁNH NUMBER(LOCATION_ID) VÀ TRIM SKU
+// 🟢 HÀM XỬ LÝ NGÀY SAPO CHUẨN XÁC 100% TRÁNH LỖI NAN TRÊN CHROME
+export function parseSapoDate(dateStr: string): number {
+    if (!dateStr) return 0;
+    // Chuyển "2026-07-03 11:19:00" -> "2026-07-03T11:19:00"
+    const isoStr = dateStr.trim().replace(" ", "T");
+    const parsed = Date.parse(isoStr);
+    if (!isNaN(parsed)) return parsed;
+    return new Date(dateStr).getTime() || 0;
+}
+
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -97,7 +106,7 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id);
 
-    console.warn(`[RESTOCK V34] Tính Restock cho Kho ID: ${target_location_id}. Tổng bản ghi đơn: ${records.length}`);
+    console.warn(`[TÍNH RESTOCK V37] Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi đơn.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -109,7 +118,6 @@ export function calculate_restock_data(
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
         
-        // 🟢 SO SÁNH SO SỐ THÔNG SUỐT CẢ CHUỖI VÀ SỐ
         if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const clean_sku = (record.sku || "").trim();
@@ -120,7 +128,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[RESTOCK V34] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
+    console.warn(`[TÍNH RESTOCK V37] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -153,7 +161,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[RESTOCK V34] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V37] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -192,18 +200,18 @@ export async function get_locations(): Promise<Location[]> {
 }
 
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v34") == null;
+    return true;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v34",
+        "last_data_update_v37",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v34"));
+    return Number(localStorage.getItem("last_data_update_v37"));
 }
 
 export function sleep(ms: number) {
@@ -340,138 +348,9 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
-export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V34", 3);
-
-        request.onupgradeneeded = function (event) {
-            const db = (event.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                const store = db.createObjectStore("OrderRecordsV2", {
-                    autoIncrement: true,
-                });
-                store.createIndex("type", "type");
-            }
-        };
-
-        request.onerror = function () {
-            reject("IndexedDB connection failed");
-        };
-
-        request.onsuccess = function () {
-            const db = request.result;
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                db.close();
-                resolve([]);
-                return;
-            }
-
-            const tx = db.transaction("OrderRecordsV2", "readonly");
-            const store = tx.objectStore("OrderRecordsV2");
-            const records: OrderRecordV2[] = [];
-
-            const index = store.index("type");
-            const keyRange = IDBKeyRange.only("order");
-            const cursorRequest = index.openCursor(keyRange);
-
-            cursorRequest.onerror = function () {
-                db.close();
-                reject("Cursor error");
-            };
-
-            cursorRequest.onsuccess = function (event) {
-                const cursor = (
-                    event.target as IDBRequest<IDBCursorWithValue>
-                ).result;
-                if (cursor) {
-                    const value = cursor.value;
-                    records.push({
-                        sku: value.sku,
-                        t_unix: value.t_unix,
-                        quantity: value.quantity,
-                        location_id: Number(value.location_id),
-                        is_composite: value.is_composite,
-                        new_record: false,
-                        order_id: value.order_id,
-                        fulfillment_id: value.fulfillment_id
-                    });
-                    cursor.continue();
-                } else {
-                    db.close();
-                    resolve(records);
-                }
-            };
-        };
-    });
-}
-
-export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V34", 3);
-        let transfers: TransferRecord[] = [];
-
-        request.onupgradeneeded = function (event) {
-            const db = (event.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                const store = db.createObjectStore("OrderRecordsV2", {
-                    autoIncrement: true,
-                });
-                store.createIndex("type", "type");
-            }
-        };
-
-        request.onerror = function () {
-            reject("IndexedDB connection failed");
-        };
-
-        request.onsuccess = function () {
-            const db = request.result;
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                db.close();
-                resolve([]);
-                return;
-            }
-
-            const tx = db.transaction("OrderRecordsV2", "readonly");
-            const store = tx.objectStore("OrderRecordsV2");
-
-            const index = store.index("type");
-            const keyRange = IDBKeyRange.only("transfer");
-            const cursorRequest = index.openCursor(keyRange);
-
-            cursorRequest.onerror = function () {
-                db.close();
-                reject("Cursor error");
-            };
-
-            cursorRequest.onsuccess = function (event) {
-                const cursor = (
-                    event.target as IDBRequest<IDBCursorWithValue>
-                ).result;
-                if (cursor) {
-                    const value = cursor.value;
-                    transfers.push({
-                        sku: value.sku,
-                        t_unix: value.t_unix,
-                        quantity: value.quantity,
-                        location_id: Number(value.location_id),
-                        new_record: false,
-                        transfer_id: value.order_id,
-                    });
-
-                    cursor.continue();
-                } else {
-                    db.close();
-                    resolve(transfers);
-                }
-            };
-        };
-    });
-}
-
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V34", 3);
+        const request = indexedDB.open("LYOInventoryDB_V37", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -492,20 +371,18 @@ export async function updateIndexedDB(records: OrderRecordV2[]) {
             const tx = db.transaction("OrderRecordsV2", "readwrite");
             const store = tx.objectStore("OrderRecordsV2");
 
-            records
-                .filter((r) => r.new_record)
-                .forEach((r) => {
-                    store.put({
-                        t_unix: r.t_unix,
-                        quantity: r.quantity,
-                        sku: r.sku,
-                        location_id: Number(r.location_id),
-                        is_composite: r.is_composite,
-                        order_id: r.order_id,
-                        fulfillment_id: r.fulfillment_id,
-                        type: "order",
-                    });
+            records.forEach((r) => {
+                store.put({
+                    t_unix: r.t_unix,
+                    quantity: r.quantity,
+                    sku: r.sku,
+                    location_id: Number(r.location_id),
+                    is_composite: r.is_composite,
+                    order_id: r.order_id,
+                    fulfillment_id: r.fulfillment_id,
+                    type: "order",
                 });
+            });
 
             tx.oncomplete = function () {
                 db.close();
@@ -535,7 +412,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V34", 3);
+        const request = indexedDB.open("LYOInventoryDB_V37", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -557,17 +434,15 @@ export async function saveInventoryTransferToIndexedDB(
             const store = tx.objectStore("OrderRecordsV2");
 
             for (let r of records) {
-                if (r.new_record) {
-                    store.put({
-                        t_unix: r.t_unix,
-                        quantity: r.quantity,
-                        sku: r.sku,
-                        location_id: Number(r.location_id),
-                        is_composite: false,
-                        order_id: r.transfer_id,
-                        type: "transfer",
-                    });
-                }
+                store.put({
+                    t_unix: r.t_unix,
+                    quantity: r.quantity,
+                    sku: r.sku,
+                    location_id: Number(r.location_id),
+                    is_composite: false,
+                    order_id: r.transfer_id,
+                    type: "transfer",
+                });
             }
 
             tx.oncomplete = function () {
@@ -583,7 +458,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 QUAY VỀ DỌN SẠCH CHUẨN ĐÚNG BẢN CHẤT CỦA HUY
+// 🟢 TỰ ĐỘNG PARSE CHUỖI NGÀY SAPO SANG CHUẨN ISO CÓ CHỮ T
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -593,15 +468,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     });
 
     let order_records: OrderRecordV2[] = [];
-    if (!isFirstTime()) {
-        order_records = await fetchRecordsFromIndexedDB();
-    }
-
     let existing_fulfillment_keys = new Set<string>();
-    for (let r of order_records) {
-        const key = `${r.order_id}_${r.sku}_${r.location_id}`;
-        existing_fulfillment_keys.add(key);
-    }
 
     const now_ts = new Date().getTime();
     const min_valid_ts = now_ts - (45 * 24 * 60 * 60 * 1000);
@@ -610,7 +477,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
     let total_fetched = 0;
 
-    console.warn(`[RESTORE HUY V34] Bắt đầu đồng bộ danh sách đơn hàng...`);
+    console.warn(`[V37 PARSE NGÀY CHUẨN ISO] Bắt đầu quét đơn Sapo...`);
 
     while (running) {
         try {
@@ -626,7 +493,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`[RESTORE HUY V34] Trang ${page}: Sapo trả về ${orders.length} đơn hàng.`);
+                console.log(`[V37 PARSE NGÀY CHUẨN ISO] Trang ${page}: Sapo trả về ${orders.length} đơn.`);
 
                 if (orders.length === 0) {
                     running = false;
@@ -636,19 +503,18 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 total_fetched += orders.length;
 
                 orders.forEach((order: any) => {
-                    // Lọc bỏ đơn bị hủy
                     const is_not_cancelled = order.status !== "cancelled";
 
                     if (is_not_cancelled) {
                         const line_items = order.line_items || [];
                         const actual_loc_id = Number(order.location_id || 0);
 
-                        // Lấy mốc ngày an toàn nhất từ Sapo
                         const date_str = order.created_on || order.created_at || order.modified_on;
-                        const order_ts = Date.parse(date_str) || new Date(date_str).getTime();
+                        // 🟢 TỰ ĐỘNG CHUYỂN DẤU KHOẢNG TRẮNG NĂM-THÁNG-NGÀY THÀNH CHỮ "T" CHUẨN ISO
+                        const order_ts = parseSapoDate(date_str);
 
-                        if (!isNaN(order_ts) && order_ts >= min_valid_ts) {
-                            line_items.forEach((line_item: any) => {
+                        if (order_ts > 0 && order_ts >= min_valid_ts) {
+                            line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
 
                                 if (qty > 0) {
@@ -656,7 +522,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                     
                                     if (raw_sku) {
                                         const sku = raw_sku.trim();
-                                        const record_key = `${order.id}_${sku}_${actual_loc_id}`;
+                                        const line_id = line_item.id || index;
+                                        const record_key = `${order.id}_${line_id}_${sku}_${actual_loc_id}`;
 
                                         if (!existing_fulfillment_keys.has(record_key)) {
                                             order_records.push({
@@ -678,13 +545,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 });
 
-                // Kiểm tra đơn cuối trang để ngắt mốc 45 ngày
                 const last_order = orders[orders.length - 1];
                 const last_date_raw = last_order.created_on || last_order.created_at || last_order.modified_on;
-                const last_ts = Date.parse(last_date_raw) || new Date(last_date_raw).getTime();
+                const last_ts = parseSapoDate(last_date_raw);
 
-                if (!isNaN(last_ts) && last_ts < min_valid_ts) {
-                    console.warn(`[RESTORE HUY V34] Quét xong đơn mốc 45 ngày. Dừng.`);
+                if (last_ts > 0 && last_ts < min_valid_ts) {
+                    console.warn(`[V37 PARSE NGÀY CHUẨN ISO] Quét xong đơn ngày ${new Date(last_ts).toLocaleDateString("vi-VN")} (vượt mốc 45 ngày). Dừng.`);
                     running = false;
                     break;
                 }
@@ -692,18 +558,18 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(150);
             } else {
-                console.error(`[RESTORE HUY V34] Lỗi HTTP status:`, resp.status);
+                console.error(`[V37 PARSE NGÀY CHUẨN ISO] Lỗi HTTP status:`, resp.status);
                 await sleep(1000);
             }
         } catch (e) {
-            console.error(`[RESTORE HUY V34] Lỗi ngoại lệ:`, e);
+            console.error(`[V37 PARSE NGÀY CHUẨN ISO] Lỗi ngoại lệ:`, e);
             await sleep(1000);
         }
     }
 
-    console.warn(`[RESTORE HUY V34] Đã xong! Tổng đơn kéo về: ${total_fetched}. Tạo ${order_records.length} bản ghi.`);
+    console.warn(`[V37 PARSE NGÀY CHUẨN ISO] Hoàn tất! Bóc tách ${order_records.length} bản ghi đơn bán từ ${total_fetched} đơn Sapo!`);
 
-    await updateIndexedDB(order_records.filter((v) => v.new_record));
+    await updateIndexedDB(order_records);
     setLastDataUpdate();
     return order_records;
 }
@@ -717,14 +583,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     });
 
     let transfer_records: TransferRecord[] = [];
-    if (!isFirstTime()) {
-        transfer_records = await fetchInventoryTransferFromIndexedDB();
-    }
-
     let existing_transfer_ids = new Set<number>();
-    for (let r of transfer_records) {
-        existing_transfer_ids.add(r.transfer_id);
-    }
 
     let page = 1;
     let running = true;
@@ -758,7 +617,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                                     transfer_id: transfer.id,
                                     location_id: Number(transfer.source_location_id),
                                     sku: (p_variants.get(line_item.variant_id)?.sku || "").trim(),
-                                    t_unix: new Date(transfer.created_on || transfer.created_at || transfer.modified_on).getTime(),
+                                    t_unix: parseSapoDate(transfer.created_on || transfer.created_at || transfer.modified_on),
                                     quantity: line_item.quantity,
                                     new_record: true,
                                 });
@@ -779,7 +638,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
     }
 
     await saveInventoryTransferToIndexedDB(
-        transfer_records.filter((v) => v.new_record),
+        transfer_records,
         p_variants,
     );
 
