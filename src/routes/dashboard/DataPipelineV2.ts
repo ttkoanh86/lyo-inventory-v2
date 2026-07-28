@@ -89,7 +89,6 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 CỘNG DỒN CẢ BÁN HÀNG LẪN CHUYỂN KHO ĐI
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -105,7 +104,7 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id || 781327);
 
-    console.warn(`[TÍNH RESTOCK V49] Tính cho Kho ID: ${target_location_id}. CỘNG CẢ BÁN + CHUYỂN KHO.`);
+    console.warn(`[TÍNH RESTOCK V48 CHUẨN] Đang tính cho Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi XUẤT KHO.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -127,7 +126,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[TÍNH RESTOCK V49] Khớp ${matched_count} bản ghi (Gồm Bán + Chuyển kho) cho Kho ${target_location_id}`);
+    console.warn(`[TÍNH RESTOCK V48 CHUẨN] Khớp ${matched_count} bản ghi ĐÃ XUẤT KHO cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -160,7 +159,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[TÍNH RESTOCK V49] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V48 CHUẨN] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -222,13 +221,13 @@ export function isFirstTime() {
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v49",
+        "last_data_update_v48",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v49"));
+    return Number(localStorage.getItem("last_data_update_v48"));
 }
 
 export function sleep(ms: number) {
@@ -362,13 +361,13 @@ export async function get_active_products() {
             await sleep(500);
         }
     }
-    console.warn(`[V49 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
+    console.warn(`[V48 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
     return p_variant_by_ids;
 }
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V49", 3);
+        const request = indexedDB.open("LYOInventoryDB_V48", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -430,7 +429,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V49", 3);
+        const request = indexedDB.open("LYOInventoryDB_V48", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -476,6 +475,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
+// 🟢 V48 CHUẨN ĐƠN ĐÃ XUẤT KHO (DUY NHẤT 1 LUỒNG LỌC)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -494,7 +494,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let running = true;
     let total_fetched = 0;
 
-    console.warn(`[V49 CHUẨN XUẤT KHO] Bắt đầu lấy đơn hàng...`);
+    console.warn(`[V48 CHUẨN QUY TRÌNH] Bắt đầu lấy đơn hàng...`);
 
     while (running) {
         try {
@@ -579,111 +579,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    console.warn(`[V49 CHUẨN XUẤT KHO] Đã nạp ${order_records.length} bản ghi đơn bán.`);
-
-    // 🟢 TIẾP TỤC CÀO ĐƠN CHUYỂN KHO NỘI BỘ VÀ CỘNG CHUNG VÀO DỮ LIỆU
-    try {
-        const transfer_records = await fetch_inventory_transfer(variant_by_id);
-        transfer_records.forEach((tf) => {
-            order_records.push({
-                order_id: tf.transfer_id,
-                quantity: tf.quantity,
-                sku: tf.sku,
-                is_composite: false,
-                location_id: tf.location_id,
-                t_unix: tf.t_unix,
-                new_record: true,
-            });
-        });
-        console.warn(`[V49 CỘNG CHUYỂN KHO] Đã cộng thêm ${transfer_records.length} bản ghi xuất chuyển kho.`);
-    } catch (e) {
-        console.error("[V49 CỘNG CHUYỂN KHO LỖI]", e);
-    }
+    console.warn(`[V48 CHUẨN QUY TRÌNH] Hoàn tất! Nạp ${order_records.length} bản ghi đơn xuất bán.`);
 
     await updateIndexedDB(order_records);
     setLastDataUpdate();
     return order_records;
 }
 
-// 🟢 CÀO DỮ LIỆU XUẤT CHUYỂN KHO (STOCK TRANSFERS)
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) {
-    let a = new Axios({
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: obtain_access_token(),
-        },
-    });
-
-    let transfer_records: TransferRecord[] = [];
-    let existing_transfer_ids = new Set<string>();
-
-    let page = 1;
-    let running = true;
-
-    while (running && page <= 10) {
-        try {
-            const resp = await a.get(`${proxyUrl}/admin/stock_transfers.json`, {
-                params: {
-                    limit: 250,
-                    page: page,
-                    order_by: "created_on desc"
-                },
-            });
-
-            if (resp.status === 200) {
-                const j = typeof resp.data === "string" ? JSON.parse(resp.data) : resp.data;
-                const stock_transfers = j.stock_transfers || [];
-
-                if (stock_transfers.length === 0) {
-                    running = false;
-                    break;
-                }
-
-                stock_transfers.forEach((transfer: any) => {
-                    // LẤY CÁC ĐƠN CHUYỂN KHO ĐÃ PHÁT HÀNH / ĐÃ NHẬN
-                    if (transfer.status == "received" || transfer.status == "shipped") {
-                        const source_loc = Number(transfer.source_location_id || 0);
-                        const tf_date_str = transfer.created_on || transfer.created_at || transfer.modified_on;
-                        const tf_ts = parseSapoDate(tf_date_str);
-
-                        transfer.line_items.forEach((line_item: any, idx: number) => {
-                            const variant_obj = p_variants.get(line_item.variant_id);
-                            const raw_sku = variant_obj?.sku || line_item.sku || "";
-
-                            if (raw_sku) {
-                                const sku = raw_sku.trim();
-                                const key = `TF_${transfer.id}_${line_item.id || idx}_${sku}_${source_loc}`;
-
-                                if (!existing_transfer_ids.has(key)) {
-                                    transfer_records.push({
-                                        transfer_id: transfer.id,
-                                        location_id: source_loc,
-                                        sku: sku,
-                                        t_unix: tf_ts,
-                                        quantity: Number(line_item.quantity) || 0,
-                                        new_record: true,
-                                    });
-                                    existing_transfer_ids.add(key);
-                                }
-                            }
-                        });
-                    }
-                });
-
-                page++;
-                await sleep(100);
-            } else {
-                await sleep(1000);
-            }
-        } catch (e) {
-            await sleep(1000);
-        }
-    }
-
-    await saveInventoryTransferToIndexedDB(
-        transfer_records,
-        p_variants,
-    );
-
-    return transfer_records;
+    return [];
 }
