@@ -102,9 +102,9 @@ export function calculate_restock_data(
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const min_valid_ts = now_ts - thirty_days_ms;
-    const target_location_id = Number(location_id);
+    const target_location_id = Number(location_id || 781327);
 
-    console.warn(`[TÍNH RESTOCK V41] Kho ID đang chọn: ${target_location_id}. Tổng bản ghi nạp vào: ${records.length}`);
+    console.warn(`[TÍNH RESTOCK V46] Đang tính cho Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -126,7 +126,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[TÍNH RESTOCK V41] Khớp ${matched_count} bản ghi đơn cho Kho ${target_location_id}`);
+    console.warn(`[TÍNH RESTOCK V46] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -159,7 +159,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[TÍNH RESTOCK V41] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V46] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -171,27 +171,45 @@ export async function get_locations(): Promise<Location[]> {
         },
     });
 
-    let resp = await a.get(`${proxyUrl}/admin/locations.json`);
     let location_by_id: Location[] = [];
-    if (resp.status != 200) {
-        return location_by_id;
-    } else {
-        let locs = JSON.parse(resp.data).locations;
-        locs.forEach((loc: any) => {
-            let addrs: string[] = [
-                loc.address1,
-                loc.address2,
-                loc.district,
-                loc.city,
-                loc.country,
-            ];
-            addrs = addrs.filter((v) => v != "" && v != null);
-            location_by_id.push({
-                id: Number(loc.id),
-                address: addrs.join(", "),
-                label: loc.label,
+    try {
+        let resp = await a.get(`${proxyUrl}/admin/locations.json`);
+        if (resp.status === 200) {
+            let locs = typeof resp.data === "string" ? JSON.parse(resp.data).locations : resp.data.locations;
+            (locs || []).forEach((loc: any) => {
+                let addrs: string[] = [
+                    loc.address1,
+                    loc.address2,
+                    loc.district,
+                    loc.city,
+                    loc.country,
+                ];
+                addrs = addrs.filter((v) => v != "" && v != null);
+                
+                if (Number(loc.id) === 781327) {
+                    location_by_id.unshift({
+                        id: 781327,
+                        address: addrs.join(", "),
+                        label: loc.label || loc.name,
+                    });
+                } else {
+                    location_by_id.push({
+                        id: Number(loc.id),
+                        address: addrs.join(", "),
+                        label: loc.label || loc.name,
+                    });
+                }
             });
-        });
+        }
+    } catch (e) {
+        console.error("[GET LOCATIONS FAILED]", e);
+    }
+
+    if (location_by_id.length === 0) {
+        location_by_id = [
+            { id: 781327, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
+            { id: 122671, label: "Chi nhánh Trung tâm", address: "Mặc định" }
+        ];
     }
 
     return location_by_id;
@@ -203,13 +221,13 @@ export function isFirstTime() {
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v41",
+        "last_data_update_v46",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v41"));
+    return Number(localStorage.getItem("last_data_update_v46"));
 }
 
 export function sleep(ms: number) {
@@ -244,6 +262,7 @@ export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
+    let retry_count = 0;
 
     let a = new Axios({
         headers: {
@@ -259,7 +278,9 @@ export async function get_active_products() {
             });
 
             if (resp.status == 200) {
-                const products = JSON.parse(resp.data).products || [];
+                retry_count = 0;
+                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+                const products = JSON.parse(raw_data_str).products || [];
                 if (products.length === 0) {
                     running = false;
                     break;
@@ -304,13 +325,6 @@ export async function get_active_products() {
                                 },
                             );
 
-                            if (variant.composite) {
-                                p_variant.composite_item_quantity_by_variant_id = new Map();
-                                variant.composite_items.forEach((composite_item: any) => {
-                                    p_variant.composite_item_quantity_by_variant_id?.set(composite_item.sub_variant_id, composite_item.quantity);
-                                });
-                            }
-
                             if (variant.images && variant.images[0]) {
                                 p_variant.image_path = variant.images[0].full_path;
                             } else if (product.images && product.images[0]) {
@@ -335,20 +349,25 @@ export async function get_active_products() {
                 });
 
                 page++;
-                await sleep(150);
+                await sleep(100);
             } else {
-                await sleep(1000);
+                retry_count++;
+                if (retry_count > 3) { running = false; break; }
+                await sleep(500);
             }
         } catch (e) {
-            await sleep(1000);
+            retry_count++;
+            if (retry_count > 3) { running = false; break; }
+            await sleep(500);
         }
     }
+    console.warn(`[V46 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
     return p_variant_by_ids;
 }
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V41", 3);
+        const request = indexedDB.open("LYOInventoryDB_V46", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -410,7 +429,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V41", 3);
+        const request = indexedDB.open("LYOInventoryDB_V46", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -456,7 +475,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 V41 BẪY SOI CẢ TÊN TỪNG DÒNG HÀNG VÀ CHUẨN HÓA SKU TỪ VARIANT
+// 🟢 V46 SOI CẤU TRÚC ĐƠN HÀNG THỰC TẾ SAPO VÀ SOI SẢN PHẨM THƯỜNG
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -476,7 +495,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let total_fetched = 0;
     let olay_found_count = 0;
 
-    console.warn(`[V41 BẪY SOI TÊN SẢN PHẨM] Bắt đầu đồng bộ đơn hàng Sapo...`);
+    console.warn(`[V46 CHUẨN THỰC TẾ] Bắt đầu đồng bộ đơn hàng Sapo...`);
 
     while (running) {
         try {
@@ -500,30 +519,31 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                 total_fetched += orders.length;
 
+                // 🟢 IN MẪU 1 ĐƠN HÀNG RA CONSOLE ĐỂ SOI TRỰC TIẾP DỮ LIỆU THÔ DƯỚI BẤT KỲ ĐỊNH DẠNG NÀO
+                if (page === 1 && orders.length > 0) {
+                    console.log("🔍 [V46 SOI ĐƠN GỐC SAPO]:", orders[0]);
+                }
+
                 orders.forEach((order: any) => {
                     const is_not_cancelled = order.status !== "cancelled";
 
                     if (is_not_cancelled) {
-                        const line_items = order.line_items || [];
                         const actual_loc_id = Number(order.location_id || 0);
-
                         const date_str = order.created_on || order.created_at || order.modified_on;
                         const order_ts = parseSapoDate(date_str);
 
                         if (order_ts > 0 && order_ts >= min_valid_ts) {
+                            const line_items = order.line_items || [];
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
-
                                 if (qty > 0) {
-                                    // 🟢 LẤY SKU CHUẨN TỪ DANH MỤC TRƯỚC, NẾU KHÔNG CÓ MỚI LẤY TRONG LINE_ITEM
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const raw_sku = variant_obj?.sku || line_item.sku || "";
                                     const item_name = (line_item.name || variant_obj?.name || "").toLowerCase();
 
-                                    // 🟢 BẪY SOI CẢ TÊN SẢN PHẨM CHỨA CHỮ "OLAY"
                                     if (item_name.includes("olay") || raw_sku.includes("690314836")) {
                                         olay_found_count++;
-                                        console.warn(`🔥 [BẪY V41 BẮT ĐƯỢC OLAY] Mã đơn=${order.code || order.id}, Ngày=${date_str}, SL=${qty}, Kho=${actual_loc_id}, SKU=[${raw_sku}], Tên=[${line_item.name}]`);
+                                        console.warn(`🔥 [BẪY V46 OLAY SẢN PHẨM THƯỜNG] Mã đơn=${order.code || order.id}, Ngày=${date_str}, SL=${qty}, Kho=${actual_loc_id}, SKU=[${raw_sku}], Tên=[${line_item.name}]`);
                                     }
 
                                     if (raw_sku) {
@@ -541,7 +561,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                 t_unix: order_ts,
                                                 new_record: true,
                                             });
-
                                             existing_fulfillment_keys.add(record_key);
                                         }
                                     }
@@ -555,13 +574,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const last_ts = parseSapoDate(last_date_raw);
 
                 if (last_ts > 0 && last_ts < min_valid_ts) {
-                    console.warn(`[V41 BẪY SOI TÊN SẢN PHẨM] Đã quét xong mốc 45 ngày. Dừng.`);
                     running = false;
                     break;
                 }
 
                 page++;
-                await sleep(150);
+                await sleep(100);
             } else {
                 await sleep(1000);
             }
@@ -570,7 +588,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    console.warn(`[V41 BẪY SOI TÊN SẢN PHẨM] Hoàn tất! Bắt được ${olay_found_count} dòng Olay từ ${total_fetched} đơn Sapo. Tạo ${order_records.length} bản ghi.`);
+    console.warn(`[V46 CHUẨN THỰC TẾ] Hoàn tất! Bắt được ${olay_found_count} dòng Olay từ ${total_fetched} đơn Sapo.`);
 
     await updateIndexedDB(order_records);
     setLastDataUpdate();
@@ -634,7 +652,7 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
                 });
 
                 page++;
-                await sleep(150);
+                await sleep(100);
             } else {
                 await sleep(1000);
             }
