@@ -94,7 +94,12 @@
     let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
     setContext("updatekeys", updateKeys);
 
+    // 🟢 DỮ LIỆU TỔNG BẢO LƯU HƠN 4.100 SẢN PHẨM KHÔNG QUA LỌC
+    let raw_all_products: ProductV2[] = [];
     let datasource: ProductV2[] = $state([]);
+
+    // 🟢 STATE QUẢN LÝ 2 TAB BỘ LỌC
+    let activeTab: 'need_restock' | 'has_sales' = $state('need_restock');
 
     let variant_by_id = new Map<number, ProductV2>();
     let order_records: OrderRecordV2[] = [];
@@ -151,25 +156,46 @@
 
     function tweak_ui() {}
 
+    // 🟢 THUẬT TOÁN ĐỔI DỮ LIỆU THEO TAB RỰC RỠ
+    function applyTabFilter() {
+        if (activeTab === 'need_restock') {
+            datasource = calculate_restock_data(
+                [...order_records, ...transfer_records],
+                variant_by_id,
+                Number(c_location_id),
+            );
+        } else {
+            // TAB 2: LẤY TOÀN BỘ SẢN PHẨM CÓ BÁN TRONG THÁNG (SL BÁN > 0)
+            calculate_restock_data(
+                [...order_records, ...transfer_records],
+                variant_by_id,
+                Number(c_location_id),
+            );
+            datasource = Array.from(variant_by_id.values()).filter(p => (p.c_restock || 0) > 0);
+        }
+        rowCount = datasource.length;
+        resetPagination();
+        grid_key++;
+    }
+
+    function switchTab(tab: 'need_restock' | 'has_sales') {
+        activeTab = tab;
+        selected_skus.clear();
+        filter_by_id.clear();
+        sort_by_id.clear();
+        applyTabFilter();
+    }
+
     function handle_location_update() {
         is_loading = true;
-
-        datasource = calculate_restock_data(
-            [...order_records, ...transfer_records],
-            variant_by_id,
-            Number(c_location_id),
-        );
+        applyTabFilter();
         low_sales_skus = get_low_sales_skus(datasource);
         selected_skus.clear();
         filter_by_id.clear();
         sort_by_id.clear();
 
-        rowCount = datasource.length;
-        resetPagination(); 
-
         is_loading = false;
         c_location = locations.find((v) => Number(v.id) === Number(c_location_id)) as Location;
-        grid_key++;
     }
 
     function select_all() {
@@ -202,19 +228,11 @@
 
         c_location_id = Number(locations[0].id);
 
-        datasource = calculate_restock_data(
-            [...order_records, ...transfer_records],
-            variant_by_id,
-            c_location_id,
-        );
+        applyTabFilter();
 
         setLastDataUpdate();
 
         low_sales_skus = get_low_sales_skus(datasource);
-        rowCount = datasource.length;
-        
-        resetPagination(); 
-        grid_key++;
         is_loading = false;
         
         // @ts-ignore
@@ -226,25 +244,15 @@
 
     function enforce_filter(ukey: number) {
         data = [];
-        if (filter_by_id.size) {
-            datasource = calculate_restock_data(
-                [...order_records, ...transfer_records],
-                variant_by_id,
-                Number(c_location_id),
-            );
+        applyTabFilter();
 
+        if (filter_by_id.size) {
             filter_by_id.forEach((fval, fkey) => {
                 datasource = datasource.filter((v) => {
                     let x = fval.includes.has(v[fkey as keyof ProductV2]);
                     return x;
                 });
             });
-        } else {
-            datasource = calculate_restock_data(
-                [...order_records, ...transfer_records],
-                variant_by_id,
-                Number(c_location_id),
-            );
         }
         rowCount = datasource.length;
         resetPagination(); 
@@ -411,7 +419,6 @@
                         <Popup parent={export_popup_parent} at="bottom" oncancel={on_export_popup_cancel}>
                             <div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
                                 
-                                <!-- CỤM 1: XUẤT PHIẾU NHẬP HÀNG -->
                                 <p style="margin: 0px;"><b>1. Xuất phiếu nhập hàng</b></p>
                                 {#if selected_skus.size != 0}
                                     <Button type="primary" onclick={async () => {
@@ -445,7 +452,6 @@
 
                                 <hr style="color: #ccc; margin: 4px 0;" />
 
-                                <!-- CỤM 2: XUẤT PHIẾU KIỂM HÀNG -->
                                 <p style="margin: 0px;"><b>2. Xuất phiếu kiểm hàng</b></p>
                                 {#if selected_skus.size != 0}
                                     <Button type="block primary" onclick={async () => {
@@ -472,7 +478,6 @@
 
                                 <hr style="color: #ccc; margin: 4px 0;" />
 
-                                <!-- CỤM 3: XUẤT ĐƠN CHUYỂN HÀNG -->
                                 <p style="margin: 0px;"><b>3. Xuất phiếu chuyển hàng</b></p>
                                 <div>
                                     <Button type="block secondary" onclick={async () => {
@@ -494,6 +499,22 @@
                 <Button icon="mdi mdi-cog" onclick={() => { is_settings_open = true; }}></Button>
                 <Button icon="mdi mdi-logout" onclick={logout} type="danger"></Button>
             </div>
+        </div>
+
+        <!-- 🟢 BỔ SUNG THANH 2 TAB BỘ LỌC CỰC KỲ ĐẸP VÀ CHUYÊN NGHIỆP -->
+        <div class="tab-filter-container">
+            <button 
+                class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
+                onclick={() => switchTab('need_restock')}
+            >
+                🚨 Cần đặt ngay (Cảnh báo đứt hàng)
+            </button>
+            <button 
+                class="tab-btn {activeTab === 'has_sales' ? 'active-blue' : ''}" 
+                onclick={() => switchTab('has_sales')}
+            >
+                📊 Có bán trong tháng (Gom đủ doanh số)
+            </button>
         </div>
 
         {#if low_sales_skus.size && !viewing_low_stocks}
@@ -521,7 +542,7 @@
             </div>
         {/if}
 
-        <div style="height: calc(100dvh - 160px); overflow: hidden;">
+        <div style="height: calc(100dvh - 200px); overflow: hidden;">
             {#key grid_key}
                 <Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} rowStyle={(row: any) => row.c_restock < 20 && c_location_id === 122671 ? "lowSales" : ""} />
                 <style>
@@ -584,6 +605,39 @@
         .wx-willow-theme {
             --wx-color-primary: #0520c3;
             --wx-filter-border: 1px solid #c1c1c1;
+        }
+
+        /* 🟢 CSS CHO THANH 2 TAB MỚI */
+        .tab-filter-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .tab-btn {
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: bold;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            background: #f5f5f5;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .tab-btn:hover {
+            background: #e0e0e0;
+        }
+        .tab-btn.active-red {
+            background-color: #d92d20;
+            color: #ffffff;
+            border-color: #b42318;
+            box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .tab-btn.active-blue {
+            background-color: #026aa7;
+            color: #ffffff;
+            border-color: #004d7a;
+            box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .pagination-container {
