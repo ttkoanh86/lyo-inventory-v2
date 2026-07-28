@@ -7,6 +7,8 @@
     import { Locale } from "wx-svelte-core";
     import {
         calculate_restock_data,
+        get_items_need_restock,
+        get_items_has_sales,
         get_active_products,
         get_locations,
         fetch_order_record,
@@ -94,11 +96,9 @@
     let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
     setContext("updatekeys", updateKeys);
 
-    // 🟢 DỮ LIỆU TỔNG BẢO LƯU HƠN 4.100 SẢN PHẨM KHÔNG QUA LỌC
-    let raw_all_products: ProductV2[] = [];
     let datasource: ProductV2[] = $state([]);
 
-    // 🟢 STATE QUẢN LÝ 2 TAB BỘ LỌC
+    // 🟢 STATE QUẢN LÝ TÁCH BIỆT 2 TAB NÚT LỌC
     let activeTab: 'need_restock' | 'has_sales' = $state('need_restock');
 
     let variant_by_id = new Map<number, ProductV2>();
@@ -156,23 +156,22 @@
 
     function tweak_ui() {}
 
-    // 🟢 THUẬT TOÁN ĐỔI DỮ LIỆU THEO TAB RỰC RỠ
+    // 🟢 HÀM TRÍCH XUẤT ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG MỖI NÚT BẤM
     function applyTabFilter() {
+        calculate_restock_data(
+            [...order_records, ...transfer_records],
+            variant_by_id,
+            Number(c_location_id),
+        );
+
         if (activeTab === 'need_restock') {
-            datasource = calculate_restock_data(
-                [...order_records, ...transfer_records],
-                variant_by_id,
-                Number(c_location_id),
-            );
+            // 🔴 TRÍCH XUẤT VÙNG DỮ LIỆU NÚT 1: CHỈ LẤY CÁC MÃ ĐỨT HÀNG
+            datasource = get_items_need_restock(variant_by_id, Number(c_location_id));
         } else {
-            // TAB 2: LẤY TOÀN BỘ SẢN PHẨM CÓ BÁN TRONG THÁNG (SL BÁN > 0)
-            calculate_restock_data(
-                [...order_records, ...transfer_records],
-                variant_by_id,
-                Number(c_location_id),
-            );
-            datasource = Array.from(variant_by_id.values()).filter(p => (p.c_restock || 0) > 0);
+            // 🔵 TRÍCH XUẤT VÙNG DỮ LIỆU NÚT 2: LẤY TẤT CẢ CÁC MÃ CÓ BÁN TRONG THÁNG
+            datasource = get_items_has_sales(variant_by_id);
         }
+
         rowCount = datasource.length;
         resetPagination();
         grid_key++;
@@ -501,7 +500,7 @@
             </div>
         </div>
 
-        <!-- 🟢 BỔ SUNG THANH 2 TAB BỘ LỌC CỰC KỲ ĐẸP VÀ CHUYÊN NGHIỆP -->
+        <!-- 🟢 THANH 2 TAB ĐỔI ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG MỖI NÚT -->
         <div class="tab-filter-container">
             <button 
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
@@ -607,7 +606,6 @@
             --wx-filter-border: 1px solid #c1c1c1;
         }
 
-        /* 🟢 CSS CHO THANH 2 TAB MỚI */
         .tab-filter-container {
             display: flex;
             gap: 10px;
