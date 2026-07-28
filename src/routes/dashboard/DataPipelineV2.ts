@@ -96,7 +96,6 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id);
 
-    // BẪY LOG 1: KIỂM TRA SỐ LƯỢNG BẢN GHI NHẬN VÀO HÀM TÍNH RESTOCK
     console.warn(`[BẪY LOG 1] Đang tính Restock cho Kho ID: ${target_location_id}. Tổng số bản ghi nhận vào: ${records.length}`);
 
     // 1. Khởi tạo mảng bán = 0
@@ -106,7 +105,7 @@ export function calculate_restock_data(
         }
     }
 
-    // 2. Cộng dồn số bán/xuất kho
+    // 2. Cộng dồn số bán/xuất kho theo ĐÚNG LOCATION_ID
     let matched_count = 0;
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
@@ -191,24 +190,30 @@ export async function get_locations(): Promise<Location[]> {
 }
 
 export function isFirstTime() {
-    return localStorage.getItem("last_data_update_v13") == null;
+    return localStorage.getItem("last_data_update_v14") == null;
 }
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v13",
+        "last_data_update_v14",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v13"));
+    return Number(localStorage.getItem("last_data_update_v14"));
 }
 
+// 🟢 FIX CHUẨN ĐỊNH DẠNG NGÀY SAPO CHẤP NHẬN: YYYY-MM-DD HH:mm:ss
 export function getLastDataUpdate() {
     const now = new Date();
     now.setDate(now.getDate() - 45);
-    return now.toISOString().replace(/\.\d{3}Z$/, "Z");
+
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day} 00:00:00`;
 }
 
 export function sleep(ms: number) {
@@ -347,7 +352,7 @@ export async function get_active_products() {
 
 export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V13", 3);
+        const request = indexedDB.open("LYOInventoryDB_V14", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -412,7 +417,7 @@ export async function fetchRecordsFromIndexedDB(): Promise<OrderRecordV2[]> {
 
 export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRecord[]> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V13", 3);
+        const request = indexedDB.open("LYOInventoryDB_V14", 3);
         let transfers: TransferRecord[] = [];
 
         request.onupgradeneeded = function (event) {
@@ -476,7 +481,7 @@ export async function fetchInventoryTransferFromIndexedDB(): Promise<TransferRec
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V13", 3);
+        const request = indexedDB.open("LYOInventoryDB_V14", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -540,7 +545,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V13", 3);
+        const request = indexedDB.open("LYOInventoryDB_V14", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -588,7 +593,6 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 HÀM FETCH ĐƠN CHỦ ĐỘNG BẮT BẪY LOG
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -709,7 +713,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    // BẪY LOG 4: BÁO SỐ ĐƠN TẢI VỀ THÀNH CÔNG VÀ LƯU VÀO DB
     console.warn(`[BẪY LOG 4] Đã tải xong tổng cộng ${total_fetched} đơn hàng từ Sapo API. Tổng bản ghi tạo ra: ${order_records.length}`);
 
     await updateIndexedDB(order_records.filter((v) => v.new_record));
