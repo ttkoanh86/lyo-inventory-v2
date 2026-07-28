@@ -81,10 +81,8 @@ export function obtain_access_token() {
 
 type Record = OrderRecordV2 | TransferRecord;
 
-// 🟢 HÀM XỬ LÝ NGÀY SAPO CHUẨN XÁC 100% TRÁNH LỖI NAN TRÊN CHROME
 export function parseSapoDate(dateStr: string): number {
     if (!dateStr) return 0;
-    // Chuyển "2026-07-03 11:19:00" -> "2026-07-03T11:19:00"
     const isoStr = dateStr.trim().replace(" ", "T");
     const parsed = Date.parse(isoStr);
     if (!isNaN(parsed)) return parsed;
@@ -106,7 +104,7 @@ export function calculate_restock_data(
     const min_valid_ts = now_ts - thirty_days_ms;
     const target_location_id = Number(location_id);
 
-    console.warn(`[TÍNH RESTOCK V37] Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi đơn.`);
+    console.warn(`[TÍNH RESTOCK V39] Kho ID: ${target_location_id}. Duyệt ${records.length} bản ghi đơn.`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -128,7 +126,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[TÍNH RESTOCK V37] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
+    console.warn(`[TÍNH RESTOCK V39] Khớp ${matched_count} bản ghi đơn bán cho Kho ${target_location_id}`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -161,7 +159,7 @@ export function calculate_restock_data(
         }
     });
 
-    console.warn(`[TÍNH RESTOCK V37] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
+    console.warn(`[TÍNH RESTOCK V39] Lọc ra ${items_need_restocking.length} mặt hàng cần đặt.`);
     return items_need_restocking;
 }
 
@@ -205,13 +203,13 @@ export function isFirstTime() {
 
 export function setLastDataUpdate() {
     localStorage.setItem(
-        "last_data_update_v37",
+        "last_data_update_v39",
         new Date().getTime().toString(),
     );
 }
 
 export function getLastDataUpdateTUnix() {
-    return Number(localStorage.getItem("last_data_update_v37"));
+    return Number(localStorage.getItem("last_data_update_v39"));
 }
 
 export function sleep(ms: number) {
@@ -350,7 +348,7 @@ export async function get_active_products() {
 
 export async function updateIndexedDB(records: OrderRecordV2[]) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V37", 3);
+        const request = indexedDB.open("LYOInventoryDB_V39", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -412,7 +410,7 @@ export async function saveInventoryTransferToIndexedDB(
     products: Map<number, ProductV2>,
 ) {
     return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V37", 3);
+        const request = indexedDB.open("LYOInventoryDB_V39", 3);
 
         request.onupgradeneeded = function (event) {
             const db = (event.target as IDBOpenDBRequest).result;
@@ -458,7 +456,7 @@ export async function saveInventoryTransferToIndexedDB(
     });
 }
 
-// 🟢 TỰ ĐỘNG PARSE CHUỖI NGÀY SAPO SANG CHUẨN ISO CÓ CHỮ T
+// 🟢 V39: BẪY NHẬN DIỆN NGÀY THÁNG TRỰC TIẾP TRÊN TỪNG TRANG VÀ LỌC ĐƠN OLAY
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: {
@@ -476,15 +474,17 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
     let total_fetched = 0;
+    let olay_found_count = 0;
 
-    console.warn(`[V37 PARSE NGÀY CHUẨN ISO] Bắt đầu quét đơn Sapo...`);
+    console.warn(`[V39 BẪY DEBUG NGÀY] Mốc 45 ngày tính từ: ${new Date(min_valid_ts).toLocaleString("vi-VN")}`);
 
     while (running) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: {
                     limit: 250,
-                    page: page
+                    page: page,
+                    order_by: "created_on desc"
                 },
             });
 
@@ -493,12 +493,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`[V37 PARSE NGÀY CHUẨN ISO] Trang ${page}: Sapo trả về ${orders.length} đơn.`);
-
                 if (orders.length === 0) {
+                    console.warn(`[V39 BẪY DEBUG NGÀY] Trang ${page} rỗng. Dừng.`);
                     running = false;
                     break;
                 }
+
+                // 🟢 BẪY 1: IN NGÀY ĐƠN ĐẦU VÀ ĐƠN CUỐI CỦA TRANG
+                const first_order_date = orders[0].created_on || orders[0].created_at;
+                const last_order_date = orders[orders.length - 1].created_on || orders[orders.length - 1].created_at;
+                console.log(`[V39 BẪY DEBUG NGÀY] Trang ${page} (${orders.length} đơn): Từ ngày [${first_order_date}] -> Đến ngày [${last_order_date}]`);
 
                 total_fetched += orders.length;
 
@@ -510,7 +514,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const actual_loc_id = Number(order.location_id || 0);
 
                         const date_str = order.created_on || order.created_at || order.modified_on;
-                        // 🟢 TỰ ĐỘNG CHUYỂN DẤU KHOẢNG TRẮNG NĂM-THÁNG-NGÀY THÀNH CHỮ "T" CHUẨN ISO
                         const order_ts = parseSapoDate(date_str);
 
                         if (order_ts > 0 && order_ts >= min_valid_ts) {
@@ -524,6 +527,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                         const sku = raw_sku.trim();
                                         const line_id = line_item.id || index;
                                         const record_key = `${order.id}_${line_id}_${sku}_${actual_loc_id}`;
+
+                                        // 🟢 BẪY 2: SOI RIÊNG CÁC ĐƠN BÁN OLAY
+                                        if (sku.includes("690314836") || line_item.name?.toLowerCase().includes("olay")) {
+                                            olay_found_count++;
+                                            console.warn(`🔥 [BẪY OLAY] Bắt được đơn Olay: Đơn ID=${order.id}, Mã=${order.code || 'N/A'}, Ngày=${date_str}, SL=${qty}, Kho=${actual_loc_id}, SKU=${sku}`);
+                                        }
 
                                         if (!existing_fulfillment_keys.has(record_key)) {
                                             order_records.push({
@@ -545,12 +554,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 });
 
-                const last_order = orders[orders.length - 1];
-                const last_date_raw = last_order.created_on || last_order.created_at || last_order.modified_on;
+                const last_date_raw = orders[orders.length - 1].created_on || orders[orders.length - 1].created_at || orders[orders.length - 1].modified_on;
                 const last_ts = parseSapoDate(last_date_raw);
 
                 if (last_ts > 0 && last_ts < min_valid_ts) {
-                    console.warn(`[V37 PARSE NGÀY CHUẨN ISO] Quét xong đơn ngày ${new Date(last_ts).toLocaleDateString("vi-VN")} (vượt mốc 45 ngày). Dừng.`);
+                    console.warn(`[V39 BẪY DEBUG NGÀY] Đã chạm đơn ngày ${new Date(last_ts).toLocaleString("vi-VN")} (quá mốc 45 ngày). Dừng.`);
                     running = false;
                     break;
                 }
@@ -558,16 +566,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(150);
             } else {
-                console.error(`[V37 PARSE NGÀY CHUẨN ISO] Lỗi HTTP status:`, resp.status);
+                console.error(`[V39 BẪY DEBUG NGÀY] Lỗi HTTP status:`, resp.status);
                 await sleep(1000);
             }
         } catch (e) {
-            console.error(`[V37 PARSE NGÀY CHUẨN ISO] Lỗi ngoại lệ:`, e);
+            console.error(`[V39 BẪY DEBUG NGÀY] Lỗi ngoại lệ:`, e);
             await sleep(1000);
         }
     }
 
-    console.warn(`[V37 PARSE NGÀY CHUẨN ISO] Hoàn tất! Bóc tách ${order_records.length} bản ghi đơn bán từ ${total_fetched} đơn Sapo!`);
+    console.warn(`[V39 BẪY DEBUG NGÀY] HOÀN TẤT! Tổng đơn kéo: ${total_fetched}. Tổng bản ghi Olay bắt được: ${olay_found_count}. Tổng bản ghi tạo: ${order_records.length}`);
 
     await updateIndexedDB(order_records);
     setLastDataUpdate();
@@ -593,7 +601,8 @@ export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2
             const resp = await a.get(`${proxyUrl}/admin/stock_transfers.json`, {
                 params: {
                     limit: 250,
-                    page: page
+                    page: page,
+                    order_by: "created_on desc"
                 },
             });
 
