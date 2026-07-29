@@ -333,12 +333,9 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let existing_keys = new Set<string>();
     
     const now = new Date();
-    // 🟢 Mốc 31 ngày chuẩn
+    // Mốc 31 ngày chuẩn
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
-
-    // 🟢 Chuyển mốc thời gian sang định dạng ISO 8601 YYYY-MM-DDTHH:mm:ssZ để Sapo lọc ngay từ Server
-    const iso_min_date = min_date.toISOString();
 
     let page = 1;
     let running = true;
@@ -349,8 +346,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 params: { 
                     limit: 250, 
                     page: page, 
-                    order_by: "created_on desc",
-                    created_on_min: iso_min_date // 🟢 ÉP SAPO CHỈ TRẢ VỀ ĐƠN TRONG 31 NGÀY QUA
+                    order_by: "created_on desc"
                 },
             });
 
@@ -369,10 +365,26 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const actual_loc_id = Number(order.location_id || 0);
-                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
-                        const order_ts = parseSapoDate(date_str);
+                        
+                        // Lấy ngày tạo đơn chuẩn Sapo: created_on
+                        const date_str = order.created_on || order.created_at;
+                        // Chuyển định dạng "YYYY-MM-DD HH:mm:ss" sang ISO "YYYY-MM-DDTHH:mm:ss" để Date.parse không bị NaN
+                        const clean_date_str = date_str ? date_str.trim().replace(" ", "T") : "";
+                        const order_ts = clean_date_str ? new Date(clean_date_str).getTime() : 0;
 
+                        // LOG ĐỂ CHECK TRỰC TIẾP
+                        if (page === 1 && orders.indexOf(order) === 0) {
+                            console.log("🟢 CHECK ĐƠN ĐẦU TIÊN:", {
+                                created_on: order.created_on,
+                                parsed_ts: order_ts,
+                                min_valid_ts: min_valid_ts,
+                                is_valid: order_ts >= min_valid_ts
+                            });
+                        }
+
+                        // NGẮT NGAY VÒNG LẶP NẾU GẶP ĐƠN VƯỢT QUÁ 31 NGÀY
                         if (order_ts > 0 && order_ts < min_valid_ts) {
+                            console.log(`⛔ ĐÃ GẶP ĐƠN CŨ HƠN 31 NGÀY Ở TRANG ${page}. DỪNG CÀO!`);
                             reached_old_date = true;
                             break;
                         }
