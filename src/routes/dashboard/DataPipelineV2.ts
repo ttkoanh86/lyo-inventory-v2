@@ -89,7 +89,7 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 1. HÀM TÍNH RESTOCK - NỚI RỘNG LỌC KHO ĐỂ KHÔNG SÓT MÃ
+// 🟢 1. HÀM TÍNH RESTOCK DÙNG CHUNG - ĐẢM BẢO KHÔNG BỎ SÓT BẤT KỲ MÃ NÀO
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -114,7 +114,7 @@ export function calculate_restock_data(
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
         
-        // Nới điều kiện lọc kho: Gom toàn bộ lượt bán trong 30 ngày
+        // Nới điều kiện lọc kho chuẩn để không bỏ sót đơn bán
         if (target_location_id === 0 || rec_loc === target_location_id || rec_loc === 0) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const clean_sku = (record.sku || "").trim();
@@ -125,7 +125,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.warn(`[RESTOCK VERIFIED] Đã khớp ${matched_count} lượt xuất kho cho toàn hệ thống.`);
+    console.warn(`[RESTOCK VERIFIED] Đã khớp ${matched_count} lượt xuất kho trong 30 ngày.`);
 
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
@@ -145,7 +145,7 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
-// 🔴 2. TAB 1: CẦN ĐẶT NGAY
+// 🔴 2. TAB 1: CẦN ĐẶT NGAY (ĐỨT HÀNG / CẢNH BÁO)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -161,7 +161,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG
+// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG (GOM ĐỦ CHIẾT KHẤU / DOANH SỐ)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -222,6 +222,7 @@ export function normalizeString(input: string): string {
     return str;
 }
 
+// 🟢 NẠP DANH MỤC SẢN PHẨM ACTIVE VÀ MAPPING BÃY COMBO
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -260,6 +261,7 @@ export async function get_active_products() {
                                 composite_item_quantity_by_variant_id: new Map(),
                             };
 
+                            // Nạp các món lẻ trong combo nếu có từ Sapo API
                             const composite_items = variant.composite_items || variant.composite_item_domains || [];
                             if (variant.composite && composite_items.length > 0) {
                                 composite_items.forEach((item: any) => {
@@ -283,7 +285,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(50);
+                await sleep(30);
             } else { running = false; }
         } catch (e) { running = false; }
     }
@@ -322,7 +324,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 CÀO ĐƠN CHUẨN XẮC: NGẮN LẶP ĐÚNG 30 NGÀY NÊN CHẠY CỰC NHANH
+// 🟢 CÀO 100% ĐƠN HÀNG DÙNG THUẬT TOÁN BÃY SKU COMBO TRỰC TIẾP
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -331,11 +333,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: Record[] = [];
     let existing_keys = new Set<string>();
     const now_ts = new Date().getTime();
-    const min_valid_ts = now_ts - (30 * 24 * 60 * 60 * 1000); // ĐÚNG 30 NGÀY
+    const min_valid_ts = now_ts - (30 * 24 * 60 * 60 * 1000); // 30 NGÀY CHUẨN
     let page = 1;
     let running = true;
 
-    while (running && page <= 40) {
+    while (running) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: { limit: 250, page: page, order_by: "created_on desc" },
@@ -345,18 +347,24 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
-                if (orders.length === 0) { running = false; break; }
+                
+                if (orders.length === 0) {
+                    running = false;
+                    break;
+                }
 
-                for (let order of orders) {
+                let reached_old_date = false;
+
+                orders.forEach((order: any) => {
                     if (order.status !== "cancelled") {
                         const actual_loc_id = Number(order.location_id || 0);
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // 🛑 KIỂM TRA NGÀY ĐỂ NGẮN LẶP
+                        // Kiểm tra nếu chạm tới đơn hàng cũ hơn 30 ngày
                         if (order_ts > 0 && order_ts < min_valid_ts) {
-                            running = false;
-                            break;
+                            reached_old_date = true;
+                            return;
                         }
 
                         const is_fulfilled = order.fulfillment_status === "fulfilled" || (order.fulfillments && order.fulfillments.length > 0);
@@ -368,8 +376,29 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                 if (qty > 0) {
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const line_id = line_item.id || index;
+                                    const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
 
-                                    if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+                                    // 🟢 BẪY SKU TRỰC TIẾP: NẾU BÁN MÃ COMBO TẨY TRANG (8936231780096)
+                                    // TỰ ĐỘNG CỘNG LƯỢNG BÁN CHO SẢN PHẨM LẺ 8936231780096
+                                    if (raw_sku.includes("8936231780096")) {
+                                        const clean_sub_sku = "8936231780096";
+                                        const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+
+                                        if (!existing_keys.has(record_key)) {
+                                            all_records.push({
+                                                sku: clean_sub_sku,
+                                                t_unix: order_ts,
+                                                quantity: qty,
+                                                location_id: actual_loc_id,
+                                                is_composite: false,
+                                                new_record: true,
+                                                order_id: order.id,
+                                            } as OrderRecordV2);
+                                            existing_keys.add(record_key);
+                                        }
+                                    } 
+                                    // BUNG COMBO NẾU MẢNG COMPOSITE TỰ ĐỘNG BÌNH THƯỜNG
+                                    else if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
                                         line_item.composite_item_parts.forEach((part: any) => {
                                             const sub_variant = variant_by_id.get(part.variant_id);
                                             const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
@@ -395,13 +424,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                 }
                                             }
                                         });
-                                    } else {
-                                        const raw_sku = variant_obj?.sku || line_item.sku || line_item.barcode || "";
+                                    } 
+                                    // SẢN PHẨM LẺ THƯỜNG
+                                    else {
                                         if (raw_sku) {
-                                            const sku = raw_sku.trim();
-                                            const record_key = `ORD_${order.id}_${line_id}_${sku}_${actual_loc_id}`;
+                                            const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
                                             if (!existing_keys.has(record_key)) {
-                                                all_records.push({ sku: sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
                                                 existing_keys.add(record_key);
                                             }
                                         }
@@ -410,10 +439,15 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             });
                         }
                     }
+                });
+
+                if (reached_old_date) {
+                    running = false;
+                    break;
                 }
 
                 page++;
-                await sleep(50);
+                await sleep(30);
             } else { running = false; }
         } catch (e) { running = false; }
     }
