@@ -159,13 +159,16 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
+// 🟢 CHỈ LẤY SẢN PHẨM CÓ BÁN NHƯNG KHÔNG BỊ ĐỨT HÀNG (TÁCH BIỆT HOÀN TOÀN CẢ BẢNG VÀ BỘ LỌC VỚI TAB 1)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
         if (variant.is_composite) return;
 
         const sales = variant.c_restock || 0;
-        if (sales > 0) {
+        const current_has = variant.c_available + variant.c_incoming;
+
+        if (sales > 0 && current_has > 0.5 * sales) {
             result.push(variant);
         }
     });
