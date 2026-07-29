@@ -98,7 +98,7 @@
 
     let datasource: ProductV2[] = $state([]);
 
-    // 🟢 STATE QUẢN LÝ TÁCH BIỆT 2 TAB NÚT LỌC
+    // STATE QUẢN LÝ TÁCH BIỆT 2 TAB NÚT LỌC
     let activeTab: 'need_restock' | 'has_sales' = $state('need_restock');
 
     let variant_by_id = new Map<number, ProductV2>();
@@ -156,7 +156,7 @@
 
     function tweak_ui() {}
 
-    // 🟢 HÀM TRÍCH XUẤT ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG MỖI NÚT BẤM
+    // 🟢 HÀM TRÍCH XUẤT ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG VÀ ĐỒNG BỘ DSOURCE CHO POPUP LỌC HEADER
     function applyTabFilter() {
         calculate_restock_data(
             [...order_records, ...transfer_records],
@@ -170,17 +170,26 @@
             datasource = get_items_has_sales(variant_by_id);
         }
 
+        // 🟢 CẬP NHẬT TRỰC TIẾP DSOURCE ĐỂ BỘ LỌC CỘT SKU NẠP ĐÚNG DANH SÁCH THEO TAB
+        updateKeys.dsource = datasource as any;
+
         rowCount = datasource.length;
         resetPagination();
         grid_key++;
     }
 
+    // 🟢 HÀM ĐỔI TAB VÀ LÀM MỚI TOÀN BỘ BỘ LỌC HEADER
     function switchTab(tab: 'need_restock' | 'has_sales') {
         activeTab = tab;
         selected_skus.clear();
         filter_by_id.clear();
         sort_by_id.clear();
+        
         applyTabFilter();
+
+        // 🟢 THÔNG BÁO CHO HEADER CẬP NHẬT LẠI DANH SÁCH CHECKBOX THEO DSOURCE MỚI
+        updateKeys.headerSorterKey++;
+        filter_update_key.k += 1;
     }
 
     function handle_location_update() {
@@ -190,6 +199,9 @@
         selected_skus.clear();
         filter_by_id.clear();
         sort_by_id.clear();
+
+        updateKeys.headerSorterKey++;
+        filter_update_key.k += 1;
 
         is_loading = false;
         c_location = locations.find((v) => Number(v.id) === Number(c_location_id)) as Location;
@@ -232,10 +244,7 @@
         low_sales_skus = get_low_sales_skus(datasource);
         is_loading = false;
         
-        // @ts-ignore
-        updateKeys.dsource = datasource;
         updateKeys.headerSorterKey++;
-
         c_location = locations[0];
     }
 
