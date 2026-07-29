@@ -89,7 +89,6 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 1. TÍNH RESTOCK - CHO TẤT CẢ SẢN PHẨM TRONG THÁNG
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -125,6 +124,10 @@ export function calculate_restock_data(
 
     console.warn(`[RESTOCK VERIFIED] Đã khớp ${matched_count} lượt xuất kho trong 30 ngày.`);
 
+    // 🔎 BẪY LOG A: Kiểm tra xem SKU 8936231780096 được tính bao nhiêu lượt bán
+    const target_sku_sales = sales_by_sku.get("8936231780096");
+    console.warn(`[BẪY A - TÍNH DOANH SỐ SKU 8936231780096]:`, target_sku_sales);
+
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
                           variant.inventory_level_by_location.get(781327) ||
@@ -143,7 +146,6 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
-// 🔴 2. TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -159,7 +161,6 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -220,7 +221,6 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 NẠP SAN PHAM COMPOSITE CHUẨN XẮC TỪ STRUCT SAPO RESPONSE
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -230,11 +230,12 @@ export async function get_active_products() {
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
     });
 
+    let found_combo_count = 0;
+
     while (running) {
         try {
-            // TRUYỀN YÊU CẦU TRẢ BẢNG COMPOSITE_ITEMS TỪ SAPO API
             const resp = await a.get(`${proxyUrl}/admin/products.json`, {
-                params: { limit: 250, page: page, status: "active", composite: true, packsize: true },
+                params: { limit: 250, page: page, status: "active" },
             });
 
             if (resp.status == 200) {
@@ -262,9 +263,9 @@ export async function get_active_products() {
                                 composite_item_quantity_by_variant_id: new Map(),
                             };
 
-                            // 🟢 ĐỌC CHÍNH XÁC MẢNG COMPOSITE_ITEMS CHUẨN TỪ SAPO API
                             const comp_items = variant.composite_items || [];
                             if (p_variant.is_composite && comp_items.length > 0) {
+                                found_combo_count++;
                                 comp_items.forEach((item: any) => {
                                     const sub_variant_id = Number(item.sub_variant_id);
                                     const sub_qty = Number(item.quantity || 1);
@@ -290,7 +291,14 @@ export async function get_active_products() {
             } else { running = false; }
         } catch (e) { running = false; }
     }
-    console.warn(`[V50 SAN PHAM] Đã nạp xong ${p_variant_by_ids.size} sản phẩm.`);
+
+    // 🔎 BẪY LOG B: Kiểm tra xem API danh sách có trả về composite_items hay không
+    console.warn(`[BẪY B - BẢNG SAN PHAM]: Nạp xong ${p_variant_by_ids.size} biến thể. Tìm thấy ${found_combo_count} biến thể Combo có chứa mảng composite_items.`);
+    
+    // Kiểm tra xem biến thể mã lẻ Nước tẩy trang (ID: 425105186) có trong bộ nhớ không
+    const single_item = p_variant_by_ids.get(425105186);
+    console.warn(`[BẪY B - KIỂM TRA MÃ LẺ 425105186 TRONG MAP]:`, single_item);
+
     return p_variant_by_ids;
 }
 
@@ -326,7 +334,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 CÀO ĐƠN VÀ TỰ ĐỘNG BÓC TÁCH MỌI SẢN PHẨM LẺ TRONG COMBO
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -335,9 +342,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: Record[] = [];
     let existing_keys = new Set<string>();
     const now_ts = new Date().getTime();
-    const min_valid_ts = now_ts - (30 * 24 * 60 * 60 * 1000); // 30 NGÀY CHUẨN
+    const min_valid_ts = now_ts - (30 * 24 * 60 * 60 * 1000);
     let page = 1;
     let running = true;
+
+    let combo_order_hit = 0;
 
     while (running) {
         try {
@@ -376,8 +385,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const line_id = line_item.id || index;
 
-                                    // 🟢 1. NẾU SAPO ĐÃ BUNG SẴN DÒNG TRONG ĐƠN HÀNG
                                     if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+                                        combo_order_hit++;
                                         line_item.composite_item_parts.forEach((part: any) => {
                                             const sub_variant = variant_by_id.get(part.variant_id);
                                             const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
@@ -391,8 +400,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                             }
                                         });
                                     } 
-                                    // 🟢 2. DỰA VÀO MAP COMPOSITE_ITEMS TỪ GET_ACTIVE_PRODUCTS
                                     else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+                                        combo_order_hit++;
                                         variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
                                             const sub_variant = variant_by_id.get(comp_variant_id);
                                             if (sub_variant && sub_variant.sku) {
@@ -406,7 +415,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                             }
                                         });
                                     } 
-                                    // 🟢 3. SẢN PHẨM LẺ THƯỜNG
                                     else {
                                         const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
                                         if (raw_sku) {
@@ -430,6 +438,9 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             } else { running = false; }
         } catch (e) { running = false; }
     }
+
+    // 🔎 BẪY LOG C: Số đơn Combo bóc tách thành công
+    console.warn(`[BẪY C - BÓC TÁCH ĐƠN COMBO]: Bóc tách thành công ${combo_order_hit} dòng đơn Combo trong 30 ngày.`);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
