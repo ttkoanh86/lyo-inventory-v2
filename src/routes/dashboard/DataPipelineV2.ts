@@ -89,6 +89,7 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
+// 🟢 1. HÀM TÍNH RESTOCK - NỚI RỘNG LỌC KHO ĐỂ KHÔNG SÓT MÃ
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -101,7 +102,7 @@ export function calculate_restock_data(
     const now_ts = new Date().getTime();
     const thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     const min_valid_ts = now_ts - thirty_days_ms;
-    const target_location_id = Number(location_id || 781327);
+    const target_location_id = Number(location_id || 0);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku) {
@@ -109,21 +110,27 @@ export function calculate_restock_data(
         }
     }
 
+    let matched_count = 0;
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
         
-        if (rec_loc === target_location_id || rec_loc === 0 || !target_location_id) {
+        // Nới điều kiện lọc kho: Gom toàn bộ lượt bán trong 30 ngày
+        if (target_location_id === 0 || rec_loc === target_location_id || rec_loc === 0) {
             if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
                 const clean_sku = (record.sku || "").trim();
                 const current_sales = sales_by_sku.get(clean_sku) || 0;
                 sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+                matched_count++;
             }
         }
     }
 
+    console.warn(`[RESTOCK VERIFIED] Đã khớp ${matched_count} lượt xuất kho cho toàn hệ thống.`);
+
     variant_by_id.forEach((variant) => {
         const inventory = variant.inventory_level_by_location.get(target_location_id) || 
-                          variant.inventory_level_by_location.get(location_id as any);
+                          variant.inventory_level_by_location.get(781327) ||
+                          variant.inventory_level_by_location.get(122671);
 
         variant.c_available = Math.max(0, inventory?.available ?? 0);
         variant.c_incoming = Math.max(0, inventory?.incoming ?? 0);
@@ -131,12 +138,14 @@ export function calculate_restock_data(
 
         const clean_sku = (variant.sku || "").trim();
         const sales = sales_by_sku.get(clean_sku) ?? 0;
+
         variant.c_restock = Math.round(sales);
     });
 
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
+// 🔴 2. TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -152,6 +161,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
+// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -250,11 +260,6 @@ export async function get_active_products() {
                                 composite_item_quantity_by_variant_id: new Map(),
                             };
 
-                            // 🚨 BẪY LOG 1: KIỂM TRA SAPO TRẢ VỀ CẤU TRÚC COMBO
-                            if (variant.sku && variant.sku.includes("8936231780096")) {
-                                console.warn(`[BẪY COMBO SKU 8936231780096] Raw Variant:`, variant);
-                            }
-
                             const composite_items = variant.composite_items || variant.composite_item_domains || [];
                             if (variant.composite && composite_items.length > 0) {
                                 composite_items.forEach((item: any) => {
@@ -278,7 +283,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(100);
+                await sleep(50);
             } else { running = false; }
         } catch (e) { running = false; }
     }
@@ -317,6 +322,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
+// 🟢 CÀO ĐƠN CHUẨN XẮC: NGẮN LẶP ĐÚNG 30 NGÀY NÊN CHẠY CỰC NHANH
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -325,11 +331,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: Record[] = [];
     let existing_keys = new Set<string>();
     const now_ts = new Date().getTime();
-    const min_valid_ts = now_ts - (32 * 24 * 60 * 60 * 1000);
+    const min_valid_ts = now_ts - (30 * 24 * 60 * 60 * 1000); // ĐÚNG 30 NGÀY
     let page = 1;
     let running = true;
 
-    while (running) {
+    while (running && page <= 40) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: { limit: 250, page: page, order_by: "created_on desc" },
@@ -341,26 +347,27 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const orders = j.orders || [];
                 if (orders.length === 0) { running = false; break; }
 
-                orders.forEach((order: any) => {
+                for (let order of orders) {
                     if (order.status !== "cancelled") {
                         const actual_loc_id = Number(order.location_id || 0);
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
+
+                        // 🛑 KIỂM TRA NGÀY ĐỂ NGẮN LẶP
+                        if (order_ts > 0 && order_ts < min_valid_ts) {
+                            running = false;
+                            break;
+                        }
+
                         const is_fulfilled = order.fulfillment_status === "fulfilled" || (order.fulfillments && order.fulfillments.length > 0);
 
-                        if (is_fulfilled && order_ts > 0 && order_ts >= min_valid_ts) {
+                        if (is_fulfilled && order_ts >= min_valid_ts) {
                             const line_items = order.order_line_items || order.line_items || [];
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
                                 if (qty > 0) {
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const line_id = line_item.id || index;
-
-                                    // 🚨 BẪY LOG 2: SOI KHI BÁN MÃ 8936231780096 HOẶC BÁN COMBO
-                                    if (line_item.sku && line_item.sku.includes("8936231780096")) {
-                                        console.warn(`[BẪY ĐƠN HÀNG 8936231780096] Line Item:`, line_item);
-                                        console.warn(`[BẪY VARIANT MAP] Variant map:`, variant_obj);
-                                    }
 
                                     if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
                                         line_item.composite_item_parts.forEach((part: any) => {
@@ -403,10 +410,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             });
                         }
                     }
-                });
+                }
 
                 page++;
-                await sleep(100);
+                await sleep(50);
             } else { running = false; }
         } catch (e) { running = false; }
     }
