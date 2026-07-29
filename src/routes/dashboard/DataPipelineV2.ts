@@ -89,7 +89,7 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 1. TÍNH RESTOCK - CHỈ TÍNH DỮ LIỆU BÁN CHO SẢN PHẨM LẺ (BAO GỒM BÁN LẺ + QUY ĐỔI TỪ COMBO)
+// 🟢 1. TÍNH RESTOCK CHUẨN KHO: TÍNH CHO SẢN PHẨM LẺ (BAO GỒM BÁN LẺ + QUY ĐỔI TỪ COMBO)
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -99,7 +99,7 @@ export function calculate_restock_data(
 
     let sales_by_sku = new Map<string, number>();
 
-    // Tính mốc tròn 31 ngày (tính từ 00:00:00 đầu ngày)
+    // Mốc 31 ngày tròn (tính từ 00:00:00 đầu ngày)
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
@@ -126,7 +126,7 @@ export function calculate_restock_data(
     }
 
     variant_by_id.forEach((variant) => {
-        // Loại bỏ Vỏ Combo khỏi danh sách hiển thị bán/đặt hàng
+        // Vỏ Combo không tính lượt bán trực tiếp (đã quy đổi trọn vẹn cho mã lẻ)
         if (variant.is_composite) {
             variant.c_restock = 0;
             return;
@@ -149,7 +149,7 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
-// 🔴 2. TAB 1: CẦN ĐẶT NGAY (LỌC SẢN PHẨM LẺ SẮP HẾT)
+// 🔴 2. TAB 1: CẦN ĐẶT NGAY (LỌC SẢN PHẨM LẺ ĐỨT HÀNG)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -167,7 +167,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG (CHỈ HIỂN THỊ SẢN PHẨM LẺ)
+// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG (LẤY TẤT CẢ SẢN PHẨM LẺ CÓ BÁN)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -230,7 +230,7 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 NẠP SAN PHAM VÀ LƯU CẤU TRÚC BỔ SUNG COMBO
+// 🟢 NẠP SAN PHAM SIÊU TỐC VÀ LƯU CẤU TRÚC MAP BÓC TÁCH COMBO
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -243,7 +243,7 @@ export async function get_active_products() {
     while (running) {
         try {
             const resp = await a.get(`${proxyUrl}/admin/products.json`, {
-                params: { limit: 250, page: page, status: "active", composite: true, packsize: true },
+                params: { limit: 250, page: page, status: "active" },
             });
 
             if (resp.status == 200) {
@@ -273,7 +273,7 @@ export async function get_active_products() {
                         const comp_items = variant.composite_items || [];
                         if (p_variant.is_composite && comp_items.length > 0) {
                             comp_items.forEach((item: any) => {
-                                const sub_variant_id = Number(item.sub_variant_id);
+                                const sub_variant_id = Number(item.sub_variant_id || item.variant_id);
                                 const sub_qty = Number(item.quantity || 1);
                                 if (sub_variant_id) {
                                     p_variant.composite_item_quantity_by_variant_id?.set(sub_variant_id, sub_qty);
@@ -292,7 +292,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(30);
+                await sleep(20);
             } else { running = false; }
         } catch (e) { running = false; }
     }
@@ -331,7 +331,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 CÀO ĐƠN CHUẨN XẮC: BÓC TÁCH HOÀN TOÀN TỪ VỎ COMBO SANG SẢN PHẨM LẺ
+// 🟢 CÀO ĐƠN THEO MỐC THỜI GIAN TỰ NHIÊN: QUÉT CHUẨN ĐÚNG MỐC 31 NGÀY BẤT KỂ QUY MÔ ĐƠN
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -340,7 +340,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: Record[] = [];
     let existing_keys = new Set<string>();
     
-    // Mốc 31 ngày tròn
+    // Mốc 31 ngày tròn (tính từ 00:00:00 đầu ngày)
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
@@ -363,6 +363,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     break;
                 }
 
+                let reached_old_date = false;
+
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const actual_loc_id = Number(order.location_id || 0);
@@ -370,7 +372,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const order_ts = parseSapoDate(date_str);
 
                         if (order_ts > 0 && order_ts < min_valid_ts) {
-                            running = false;
+                            reached_old_date = true;
                             break;
                         }
 
@@ -431,10 +433,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 }
 
-                if (!running) break;
+                if (reached_old_date) {
+                    running = false;
+                    break;
+                }
 
                 page++;
-                await sleep(30);
+                await sleep(20);
             } else { running = false; }
         } catch (e) { running = false; }
     }
