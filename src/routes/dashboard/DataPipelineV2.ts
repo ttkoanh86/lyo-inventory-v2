@@ -89,7 +89,6 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 1. TÍNH RESTOCK CHUẨN KHO: TÍNH CHO SẢN PHẨM LẺ (BAO GỒM BÁN LẺ + QUY ĐỔI TỪ COMBO)
 export function calculate_restock_data(
     records: Record[],
     variant_by_id: Map<number, ProductV2>,
@@ -99,7 +98,6 @@ export function calculate_restock_data(
 
     let sales_by_sku = new Map<string, number>();
 
-    // Mốc 31 ngày tròn (tính từ 00:00:00 đầu ngày)
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
@@ -112,7 +110,6 @@ export function calculate_restock_data(
         }
     }
 
-    let matched_count = 0;
     for (let record of records) {
         const rec_loc = Number(record.location_id || 0);
         if (target_location_id === 0 || rec_loc === target_location_id || rec_loc === 0) {
@@ -120,24 +117,20 @@ export function calculate_restock_data(
                 const clean_sku = (record.sku || "").trim();
                 const current_sales = sales_by_sku.get(clean_sku) || 0;
                 sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
-                matched_count++;
             }
         }
     }
 
     variant_by_id.forEach((variant) => {
-        // Vỏ Combo không tính lượt bán trực tiếp (đã quy đổi trọn vẹn cho mã lẻ)
         if (variant.is_composite) {
             variant.c_restock = 0;
             return;
         }
 
-        const inventory = variant.inventory_level_by_location.get(target_location_id) || 
-                          variant.inventory_level_by_location.get(781327) ||
-                          variant.inventory_level_by_location.get(122671);
+        const inventory = variant.inventory_level_by_location.get(target_location_id);
 
-        variant.c_available = Math.max(0, inventory?.available ?? 0);
-        variant.c_incoming = Math.max(0, inventory?.incoming ?? 0);
+        variant.c_available = inventory ? Math.max(0, inventory.available ?? inventory.on_hand ?? 0) : 0;
+        variant.c_incoming = inventory ? Math.max(0, inventory.incoming ?? 0) : 0;
         variant.c_on_hand = variant.c_available;
 
         const clean_sku = (variant.sku || "").trim();
@@ -149,11 +142,10 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
-// 🔴 2. TAB 1: CẦN ĐẶT NGAY (LỌC SẢN PHẨM LẺ ĐỨT HÀNG)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite) return; // Ẩn vỏ Combo
+        if (variant.is_composite) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
@@ -167,11 +159,10 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🔵 3. TAB 2: CÓ BÁN TRONG THÁNG (LẤY TẤT CẢ SẢN PHẨM LẺ CÓ BÁN)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite) return; // Ẩn vỏ Combo
+        if (variant.is_composite) return;
 
         const sales = variant.c_restock || 0;
         if (sales > 0) {
@@ -230,7 +221,6 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 NẠP SAN PHAM SIÊU TỐC VÀ LƯU CẤU TRÚC MAP BÓC TÁCH COMBO
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -331,7 +321,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 CÀO ĐƠN THEO MỐC THỜI GIAN TỰ NHIÊN: QUÉT CHUẨN ĐÚNG MỐC 31 NGÀY BẤT KỂ QUY MÔ ĐƠN
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -340,7 +329,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: Record[] = [];
     let existing_keys = new Set<string>();
     
-    // Mốc 31 ngày tròn (tính từ 00:00:00 đầu ngày)
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
@@ -376,17 +364,14 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             break;
                         }
 
-                        const is_fulfilled = order.fulfillment_status === "fulfilled" || (order.fulfillments && order.fulfillments.length > 0);
-
-                        if (is_fulfilled && order_ts >= min_valid_ts) {
-                            const line_items = order.order_line_items || order.line_items || [];
+                        if (order_ts >= min_valid_ts) {
+                            const line_items = order.order_line_items || order.line_items || order.items || [];
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
                                 if (qty > 0) {
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const line_id = line_item.id || index;
 
-                                    // 🟢 1. TRƯỜNG HỢP ĐƠN COMBO ĐÃ BUNG NGUYÊN BẢN TỪ SAPO ORDER
                                     if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
                                         line_item.composite_item_parts.forEach((part: any) => {
                                             const sub_variant = variant_by_id.get(part.variant_id);
@@ -401,7 +386,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                             }
                                         });
                                     } 
-                                    // 🟢 2. BÓC TÁCH DỰA VÀO CẤU TRÚC MAP COMBO CỦA SAN PHAM
                                     else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
                                         variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
                                             const sub_variant = variant_by_id.get(comp_variant_id);
@@ -416,7 +400,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                             }
                                         });
                                     } 
-                                    // 🟢 3. ĐƠN BÁN SẢN PHẨM LẺ THƯỜNG
                                     else {
                                         const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
                                         if (raw_sku) {
