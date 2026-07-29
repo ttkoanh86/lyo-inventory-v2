@@ -64,6 +64,7 @@ export interface ProductV2 {
     unit?: string;
     suppliers_last_year?: string[];
     composite_item_quantity_by_variant_id?: Map<number, number>;
+    has_real_inventory?: boolean; // 🟢 Đánh dấu sản phẩm đã từng có biến động nhập kho thực tế
 }
 
 if (import.meta.env.MODE === "development") {
@@ -142,6 +143,7 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
+// 🟢 TAB 1: 🚨 Cần đặt ngay (Cảnh báo đứt hàng)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -159,7 +161,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 CHỈ LẤY SẢN PHẨM CÓ BÁN NHƯNG KHÔNG BỊ ĐỨT HÀNG (TÁCH BIỆT HOÀN TOÀN CẢ BẢNG VÀ BỘ LỌC VỚI TAB 1)
+// 🟢 TAB 2: 📦 Tồn kho an toàn (Cân nhắc đặt thêm)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -169,6 +171,25 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
         const current_has = variant.c_available + variant.c_incoming;
 
         if (sales > 0 && current_has > 0.5 * sales) {
+            result.push(variant);
+        }
+    });
+    return result;
+}
+
+// 🟢 TAB 3: ⚠️ Hàng bị đứt (Cần check để đặt lại)
+export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>): ProductV2[] {
+    let result: ProductV2[] = [];
+    variant_by_id.forEach((variant) => {
+        if (variant.is_composite) return;
+
+        const sales = variant.c_restock || 0;
+        const current_has = variant.c_available + variant.c_incoming;
+
+        // Sales = 0, Tồn kho = 0 VÀ ĐÃ TỪNG NHẬP KHO THỰC TẾ
+        if (sales === 0 && current_has === 0 && variant.has_real_inventory) {
+            variant.c_restock_half = 0;
+            variant.c_restock_third = 0;
             result.push(variant);
         }
     });
@@ -261,6 +282,7 @@ export async function get_active_products() {
                             import_price: variant.variant_import_price, retail_price: variant.variant_retail_price, retail_price_ecomm: 0,
                             inventory_level_by_location: new Map(),
                             composite_item_quantity_by_variant_id: new Map(),
+                            has_real_inventory: false,
                         };
 
                         const comp_items = variant.composite_items || [];
@@ -274,11 +296,20 @@ export async function get_active_products() {
                             });
                         }
 
+                        let max_mac = 0;
+                        let has_mod = false;
                         variant.inventories.forEach((inventory: any) => {
                             p_variant.inventory_level_by_location.set(Number(inventory.location_id), {
                                 on_hand: inventory.on_hand, incoming: inventory.incoming, available: inventory.available, sold: 0,
                             });
+                            if (inventory.mac && Number(inventory.mac) > 0) max_mac = Math.max(max_mac, Number(inventory.mac));
+                            if (inventory.modified_on !== null && inventory.modified_on !== undefined) has_mod = true;
                         });
+
+                        // 🟢 GHI NHẬN SẢN PHẨM ĐÃ TỪNG NHẬP KHO THỰC TẾ
+                        if (max_mac > 0 || has_mod) {
+                            p_variant.has_real_inventory = true;
+                        }
 
                         if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
                         p_variant_by_ids.set(p_variant.variant_id, p_variant);
@@ -333,7 +364,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let existing_keys = new Set<string>();
     
     const now = new Date();
-    // Mốc 31 ngày chuẩn
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
 
@@ -365,26 +395,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const actual_loc_id = Number(order.location_id || 0);
-                        
-                        // Lấy ngày tạo đơn chuẩn Sapo: created_on
-                        const date_str = order.created_on || order.created_at;
-                        // Chuyển định dạng "YYYY-MM-DD HH:mm:ss" sang ISO "YYYY-MM-DDTHH:mm:ss" để Date.parse không bị NaN
-                        const clean_date_str = date_str ? date_str.trim().replace(" ", "T") : "";
-                        const order_ts = clean_date_str ? new Date(clean_date_str).getTime() : 0;
+                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
+                        const order_ts = parseSapoDate(date_str);
 
-                        // LOG ĐỂ CHECK TRỰC TIẾP
-                        if (page === 1 && orders.indexOf(order) === 0) {
-                            console.log("🟢 CHECK ĐƠN ĐẦU TIÊN:", {
-                                created_on: order.created_on,
-                                parsed_ts: order_ts,
-                                min_valid_ts: min_valid_ts,
-                                is_valid: order_ts >= min_valid_ts
-                            });
-                        }
-
-                        // NGẮT NGAY VÒNG LẶP NẾU GẶP ĐƠN VƯỢT QUÁ 31 NGÀY
                         if (order_ts > 0 && order_ts < min_valid_ts) {
-                            console.log(`⛔ ĐÃ GẶP ĐƠN CŨ HƠN 31 NGÀY Ở TRANG ${page}. DỪNG CÀO!`);
                             reached_old_date = true;
                             break;
                         }
