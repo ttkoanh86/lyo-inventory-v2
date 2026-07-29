@@ -333,101 +333,123 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let existing_keys = new Set<string>();
     
     const now = new Date();
+    // 🟢 Đặt mốc lấy từ 00:00:00 ngày 28/06 (đảm bảo phủ trọn 30 ngày chuẩn)
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
+
+    // Định dạng ISO 8601 YYYY-MM-DD HH:mm:ss cho Sapo API
+    const min_date_str = min_date.getFullYear() + "-" + 
+        String(min_date.getMonth() + 1).padStart(2, "0") + "-" + 
+        String(min_date.getDate()).padStart(2, "0") + " 00:00:00";
+
     let page = 1;
     let running = true;
+    const BATCH_SIZE = 4; // Cào song song 4 trang/lần để tăng tốc 400%
 
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
-                params: { limit: 250, page: page, order_by: "created_on desc" },
-            });
+            // 🟢 TẠO NHÓM REQUEST CÀO SONG SONG 4 TRANG CÙNG LÚC
+            const page_promises = [];
+            for (let i = 0; i < BATCH_SIZE; i++) {
+                const currentPage = page + i;
+                page_promises.push(
+                    a.get(`${proxyUrl}/admin/orders.json`, {
+                        params: { 
+                            limit: 250, 
+                            page: currentPage, 
+                            order_by: "created_on desc",
+                            created_on_min: min_date_str // 🟢 LỌC NGAY TỪ SAPO: BỎ QUA TOÀN BỘ ĐƠN CŨ
+                        },
+                    })
+                );
+            }
 
-            if (resp.status === 200) {
-                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const j = JSON.parse(raw_data_str);
-                const orders = j.orders || [];
-                
-                if (orders.length === 0) {
-                    running = false;
-                    break;
-                }
+            const responses = await Promise.all(page_promises);
+            let has_empty_page = false;
 
-                let reached_old_date = false;
+            for (const resp of responses) {
+                if (resp.status === 200) {
+                    const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+                    const j = JSON.parse(raw_data_str);
+                    const orders = j.orders || [];
 
-                for (const order of orders) {
-                    if (order.status !== "cancelled") {
-                        const actual_loc_id = Number(order.location_id || 0);
-                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
-                        const order_ts = parseSapoDate(date_str);
+                    if (orders.length === 0) {
+                        has_empty_page = true;
+                        break;
+                    }
 
-                        if (order_ts > 0 && order_ts < min_valid_ts) {
-                            reached_old_date = true;
-                            break;
-                        }
+                    for (const order of orders) {
+                        if (order.status !== "cancelled") {
+                            const actual_loc_id = Number(order.location_id || 0);
+                            const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
+                            const order_ts = parseSapoDate(date_str);
 
-                        if (order_ts >= min_valid_ts) {
-                            const line_items = order.order_line_items || order.line_items || order.items || [];
-                            line_items.forEach((line_item: any, index: number) => {
-                                const qty = Number(line_item.quantity) || 0;
-                                if (qty > 0) {
-                                    const variant_obj = variant_by_id.get(line_item.variant_id);
-                                    const line_id = line_item.id || index;
+                            if (order_ts >= min_valid_ts) {
+                                const line_items = order.order_line_items || order.line_items || order.items || [];
+                                line_items.forEach((line_item: any, index: number) => {
+                                    const qty = Number(line_item.quantity) || 0;
+                                    if (qty > 0) {
+                                        const variant_obj = variant_by_id.get(line_item.variant_id);
+                                        const line_id = line_item.id || index;
 
-                                    if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
-                                        line_item.composite_item_parts.forEach((part: any) => {
-                                            const sub_variant = variant_by_id.get(part.variant_id);
-                                            const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
-                                            if (clean_sub_sku) {
-                                                const total_sub_qty = qty * (Number(part.quantity) || 1);
-                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+                                        if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+                                            line_item.composite_item_parts.forEach((part: any) => {
+                                                const sub_variant = variant_by_id.get(part.variant_id);
+                                                const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
+                                                if (clean_sub_sku) {
+                                                    const total_sub_qty = qty * (Number(part.quantity) || 1);
+                                                    const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+                                                    if (!existing_keys.has(record_key)) {
+                                                        all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                        existing_keys.add(record_key);
+                                                    }
+                                                }
+                                            });
+                                        } 
+                                        else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+                                            variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
+                                                const sub_variant = variant_by_id.get(comp_variant_id);
+                                                if (sub_variant && sub_variant.sku) {
+                                                    const clean_sub_sku = sub_variant.sku.trim();
+                                                    const total_sub_qty = qty * comp_qty;
+                                                    const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+                                                    if (!existing_keys.has(record_key)) {
+                                                        all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                        existing_keys.add(record_key);
+                                                    }
+                                                }
+                                            });
+                                        } 
+                                        else {
+                                            const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
+                                            if (raw_sku) {
+                                                const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
                                                 if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                    all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
                                                     existing_keys.add(record_key);
                                                 }
-                                            }
-                                        });
-                                    } 
-                                    else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
-                                        variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
-                                            const sub_variant = variant_by_id.get(comp_variant_id);
-                                            if (sub_variant && sub_variant.sku) {
-                                                const clean_sub_sku = sub_variant.sku.trim();
-                                                const total_sub_qty = qty * comp_qty;
-                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
-                                                if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                    existing_keys.add(record_key);
-                                                }
-                                            }
-                                        });
-                                    } 
-                                    else {
-                                        const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
-                                        if (raw_sku) {
-                                            const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
-                                            if (!existing_keys.has(record_key)) {
-                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                existing_keys.add(record_key);
                                             }
                                         }
                                     }
-                                }
-                            });
+                                });
+                            }
                         }
                     }
+                } else {
+                    has_empty_page = true;
                 }
+            }
 
-                if (reached_old_date) {
-                    running = false;
-                    break;
-                }
+            if (has_empty_page) {
+                running = false;
+                break;
+            }
 
-                page++;
-                await sleep(20);
-            } else { running = false; }
-        } catch (e) { running = false; }
+            page += BATCH_SIZE;
+            await sleep(20);
+        } catch (e) {
+            running = false;
+        }
     }
 
     await updateIndexedDB(all_records);
