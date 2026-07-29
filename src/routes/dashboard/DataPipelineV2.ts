@@ -64,8 +64,8 @@ export interface ProductV2 {
     unit?: string;
     suppliers_last_year?: string[];
     composite_item_quantity_by_variant_id?: Map<number, number>;
-    has_mac?: boolean; // 🟢 Cờ đánh dấu có giá vốn bình quân > 0 (đã từng nhập kho)
-    has_order_history?: boolean; // 🟢 Cờ đánh dấu đã từng có đơn bán trong quá khứ
+    has_mac?: boolean;          // Cờ đánh dấu đã từng nhập kho có giá vốn (MAC > 0)
+    has_order_history?: boolean; // Cờ đánh dấu đã từng có đơn bán trong quá khứ
 }
 
 if (import.meta.env.MODE === "development") {
@@ -82,6 +82,15 @@ export function obtain_access_token() {
 }
 
 type Record = OrderRecordV2 | TransferRecord;
+
+// 🟢 KHÔI PHỤC CHÍNH XÁC HÀM PARSE NGÀY GỐC (CÓ .replace(" ", "T") ĐỂ KHÔNG BAO GIỜ LỖI TIMESTAMP)
+export function parseSapoDate(dateStr: string): number {
+    if (!dateStr) return 0;
+    const isoStr = dateStr.trim().replace(" ", "T");
+    const parsed = Date.parse(isoStr);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+    return new Date(dateStr).getTime() || 0;
+}
 
 export function calculate_restock_data(
     records: Record[],
@@ -108,11 +117,13 @@ export function calculate_restock_data(
         const rec_loc = Number(record.location_id || 0);
         const clean_sku = (record.sku || "").trim();
 
-        // 🟢 ĐÁNH DẤU SẢN PHẨM ĐÃ TỪNG CÓ LỊCH SỬ ĐƠN BÁN
-        for (let [_, variant] of variant_by_id) {
-            if (variant.sku && variant.sku.trim() === clean_sku) {
-                variant.has_order_history = true;
-            }
+        // 🟢 ĐÁNH DẤU SẢN PHẨM ĐÃ TỪNG CÓ LỊCH SỬ BÁN HÀNG
+        if (clean_sku) {
+            variant_by_id.forEach((v) => {
+                if (v.sku && v.sku.trim() === clean_sku) {
+                    v.has_order_history = true;
+                }
+            });
         }
 
         if (target_location_id === 0 || rec_loc === target_location_id || rec_loc === 0) {
@@ -178,7 +189,8 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 TAB 3: ⚠️ Hàng bị đứt (Cần check để đặt lại) - CHỈ LẤY MÃ CŨ ĐÃ TỪNG NHẬP KHO HOẶC ĐÃ TỪNG BÁN
+// 🟢 TAB 3: ⚠️ Hàng bị đứt (Cần check để đặt lại)
+// BẮT BỤC SẢN PHẨM PHẢI ĐÃ TỪNG CÓ GIÁ VỐN MAC > 0 HOẶC ĐÃ TỪNG BÁN MỚI ĐƯỢC VÀO TAB NÀY
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -187,7 +199,6 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
 
-        // 🟢 ĐIỀU KIỆN CHUẨN ĐÉC: Sales = 0, Tồn kho = 0 VÀ (ĐÃ TỪNG CÓ MAC > 0 HOẶC ĐÃ TỪNG CÓ ĐƠN BÁN)
         const is_real_old_product = (variant.has_mac === true) || (variant.has_order_history === true);
 
         if (sales === 0 && current_has === 0 && is_real_old_product) {
@@ -308,7 +319,7 @@ export async function get_active_products() {
                             if (inventory.mac && Number(inventory.mac) > 0) max_mac = Math.max(max_mac, Number(inventory.mac));
                         });
 
-                        // 🟢 NẾU GIÁ VỐN MAC > 0 -> XÁC NHẬN ĐÃ TỪNG NHẬP KHO THỰC TẾ
+                        // 🟢 GIÁ VỐN BÌNH QUÂN MAC > 0 LÀ BẰNG CHỨNG XÁC NHẬN SẢN PHẨM ĐÃ TỪNG ĐƯỢC NHẬP KHO THỰC TẾ
                         if (max_mac > 0) {
                             p_variant.has_mac = true;
                         }
@@ -357,7 +368,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 CHUẨN HÓA CÀO ĐƠN SIÊU TỐC: BẮT CHUẨN NGÀY created_on VÀ NGẮT VÒNG LẶP DỨT ĐIỂM
+// 🟢 KHÔI PHỤC HOÀN TOÀN HÀM CÀO ĐƠN GỐC CHẠY MƯỢT MÀ VÀ TỰ ĐỘNG NGẮT THEO 31 NGÀY
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -398,13 +409,12 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const actual_loc_id = Number(order.location_id || 0);
+                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         
-                        // 🟢 LẤY NGÀY TẠO ĐƠN CHUẨN DẠNG ISO VÀ ÉP KIỂU DATE AN TOÀN TUYỆT ĐỐI
-                        const date_raw = order.created_on || order.created_at;
-                        const date_str_clean = date_raw ? String(date_raw).trim().replace(" ", "T") : "";
-                        const order_ts = date_str_clean ? new Date(date_str_clean).getTime() : 0;
+                        // 🟢 DÙNG parseSapoDate ĐÃ CHUẨN HÓA .replace(" ", "T")
+                        const order_ts = parseSapoDate(date_str);
 
-                        // 🟢 NẾU GẶP ĐƠN CŨ HƠN 31 NGÀY -> NGẮT VÒNG LẶP DỪNG CÀO NGAY
+                        // GẶP ĐƠN VƯỢT QUÁ 31 NGÀY -> NGẮT VÒNG LẶP DỪNG CÀO
                         if (order_ts > 0 && order_ts < min_valid_ts) {
                             reached_old_date = true;
                             break;
