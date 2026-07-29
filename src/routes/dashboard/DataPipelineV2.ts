@@ -253,7 +253,6 @@ export function is_promotional_item(brand: string) {
     if (
         br == "tặng" ||
         br == "sale" ||
-        br == "combo" ||
         br.includes("kđh")
     ) {
         return true;
@@ -301,7 +300,7 @@ export async function get_active_products() {
                     product.variants.forEach((variant: any) => {
                         if (!is_promotional_item(product.brand)) {
                             let p_variant: ProductV2 = {
-                                is_composite: variant.composite,
+                                is_composite: variant.composite || false,
                                 brand: product.brand ?? "<Không xác định>",
                                 variant_id: variant.id,
                                 product_id: product.id,
@@ -320,7 +319,18 @@ export async function get_active_products() {
                                 retail_price: variant.variant_retail_price,
                                 retail_price_ecomm: 0,
                                 inventory_level_by_location: new Map(),
+                                composite_item_quantity_by_variant_id: new Map(),
                             };
+
+                            // 🟢 NẠP DANH SÁCH THÀNH PHẦN LẺ CỦA COMBO TỪ SAPO API
+                            if (variant.composite && variant.composite_items) {
+                                variant.composite_items.forEach((item: any) => {
+                                    p_variant.composite_item_quantity_by_variant_id?.set(
+                                        Number(item.sub_variant_id || item.variant_id),
+                                        Number(item.quantity || 1)
+                                    );
+                                });
+                            }
 
                             variant.inventories.forEach(
                                 (inventory: any) => {
@@ -495,22 +505,49 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                     const variant_obj = variant_by_id.get(line_item.variant_id);
                                     const raw_sku = variant_obj?.sku || line_item.sku || line_item.barcode || "";
 
-                                    if (raw_sku) {
-                                        const sku = raw_sku.trim();
-                                        const line_id = line_item.id || index;
-                                        const record_key = `ORD_${order.id}_${line_id}_${sku}_${actual_loc_id}`;
+                                    const line_id = line_item.id || index;
 
-                                        if (!existing_keys.has(record_key)) {
-                                            all_records.push({
-                                                sku: sku,
-                                                t_unix: order_ts,
-                                                quantity: qty,
-                                                location_id: actual_loc_id,
-                                                is_composite: false,
-                                                new_record: true,
-                                                order_id: order.id,
-                                            } as OrderRecordV2);
-                                            existing_keys.add(record_key);
+                                    if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+                                        // 🟢 BUNG ĐƠN COMBO THÀNH CÁC SẢN PHẨM LẺ THÀNH PHẦN
+                                        variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
+                                            const sub_variant = variant_by_id.get(comp_variant_id);
+                                            if (sub_variant && sub_variant.sku) {
+                                                const clean_sub_sku = sub_variant.sku.trim();
+                                                const total_sub_qty = qty * comp_qty;
+                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+
+                                                if (!existing_keys.has(record_key)) {
+                                                    all_records.push({
+                                                        sku: clean_sub_sku,
+                                                        t_unix: order_ts,
+                                                        quantity: total_sub_qty,
+                                                        location_id: actual_loc_id,
+                                                        is_composite: false,
+                                                        new_record: true,
+                                                        order_id: order.id,
+                                                    } as OrderRecordV2);
+                                                    existing_keys.add(record_key);
+                                                }
+                                            }
+                                        });
+                                    } else {
+                                        // Sản phẩm lẻ thông thường
+                                        if (raw_sku) {
+                                            const sku = raw_sku.trim();
+                                            const record_key = `ORD_${order.id}_${line_id}_${sku}_${actual_loc_id}`;
+
+                                            if (!existing_keys.has(record_key)) {
+                                                all_records.push({
+                                                    sku: sku,
+                                                    t_unix: order_ts,
+                                                    quantity: qty,
+                                                    location_id: actual_loc_id,
+                                                    is_composite: false,
+                                                    new_record: true,
+                                                    order_id: order.id,
+                                                } as OrderRecordV2);
+                                                existing_keys.add(record_key);
+                                            }
                                         }
                                     }
                                 }
