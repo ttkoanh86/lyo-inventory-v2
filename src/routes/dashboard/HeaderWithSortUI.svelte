@@ -40,7 +40,7 @@
         { id: "!=", label: "≠" }
     ];
 
-    // 🟢 TỰ ĐỘNG LẤY DANH SÁCH DUY NHẤT MỖI KHI TAB/KHO THAY ĐỔI MÀ KHÔNG GÂY LẶP STATE
+    // 🟢 TỰ ĐỘNG LẤY DANH SÁCH DUY NHẤT THEO TAB/KHO MỚI NHẤT
     let dsource = $derived(updateKeys?.dsource || []);
     let unique_vals = $derived.by(() => {
         const s = new Set<any>();
@@ -118,30 +118,32 @@
         filter_update_key.k += 1;
     }
 
+    // 🟢 CẬP NHẬT TICK/BỎ TICK TỪNG DÒNG CÓ GÁN LẠI SET ĐỂ KÍCH HOẠT DẤU TICK
     async function handle_item_checkbox_toggling(ev: any, item: any) {
+        const nextSet = new Set(included_unique_values);
         if (ev.value === true) {
-            included_unique_values.add(item);
+            nextSet.add(item);
         } else {
-            included_unique_values.delete(item);
+            nextSet.delete(item);
         }
+        included_unique_values = nextSet;
     }
 
+    // 🟢 CẬP NHẬT CHỌN/BỎ CHỌN TẤT CẢ PHẢN ỨNG TỨC THÌ
     async function handle_selectall_toggle() {
         if (included_unique_values.size === filtered_unique_vals.size) {
-            included_unique_values.clear();
+            included_unique_values = new Set();
         } else {
-            filtered_unique_vals.forEach((v) => {
-                included_unique_values.add(v);
-            });
+            included_unique_values = new Set(filtered_unique_vals);
         }
     }
 
     async function handle_dropdown_toggle() {
         show_dropdown = !show_dropdown;
         if (show_dropdown) {
-            // Khi mở dropdown, mặc định tick chọn tất cả các giá trị đang hiển thị
-            if (included_unique_values.size === 0) {
-                filtered_unique_vals.forEach(v => included_unique_values.add(v));
+            // Mặc định chọn tất cả các giá trị khi mở popup nếu chưa có lọc
+            if (included_unique_values.size === 0 && !filter_by_id.has(column.id)) {
+                included_unique_values = new Set(filtered_unique_vals);
             }
             api.exec("resize-column", { id: column.id, width: 250 });
         } else {
@@ -154,7 +156,7 @@
         sort_by_id.delete(column.id);
         filter_by_id.delete(column.id);
         string_filtering_value = "";
-        included_unique_values.clear();
+        included_unique_values = new Set();
         api.exec("resize-column", { id: column.id, width: col_width });
         filter_update_key.k += 1;
     }
