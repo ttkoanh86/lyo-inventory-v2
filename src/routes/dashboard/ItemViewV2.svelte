@@ -9,6 +9,7 @@
         calculate_restock_data,
         get_items_need_restock,
         get_items_has_sales,
+        get_items_out_of_stock_history, // 🟢 IMPORT HÀM LỌC TAB 3
         get_active_products,
         get_locations,
         fetch_order_record,
@@ -98,8 +99,8 @@
 
     let datasource: ProductV2[] = $state([]);
 
-    // STATE QUẢN LÝ TÁCH BIỆT 2 TAB NÚT LỌC
-    let activeTab: 'need_restock' | 'has_sales' = $state('need_restock');
+    // 🟢 STATE QUẢN LÝ BỘ 3 TAB NÚT LỌC
+    let activeTab: 'need_restock' | 'has_sales' | 'out_of_stock' = $state('need_restock');
 
     let variant_by_id = new Map<number, ProductV2>();
     let order_records: OrderRecordV2[] = [];
@@ -156,7 +157,7 @@
 
     function tweak_ui() {}
 
-    // 🟢 HÀM TRÍCH XUẤT ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG VÀ ĐỒNG BỘ DSOURCE CHO POPUP LỌC HEADER
+    // 🟢 HÀM TRÍCH XUẤT ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG VỚI CẢ 3 TAB
     function applyTabFilter() {
         calculate_restock_data(
             [...order_records, ...transfer_records],
@@ -166,8 +167,11 @@
 
         if (activeTab === 'need_restock') {
             datasource = get_items_need_restock(variant_by_id, Number(c_location_id));
-        } else {
+        } else if (activeTab === 'has_sales') {
             datasource = get_items_has_sales(variant_by_id);
+        } else {
+            // 🟢 TAB 3: HÀNG BỊ ĐỨT (CẦN CHECK ĐỂ ĐẶT LẠI)
+            datasource = get_items_out_of_stock_history(variant_by_id);
         }
 
         // 🟢 CẬP NHẬT TRỰC TIẾP DSOURCE ĐỂ BỘ LỌC CỘT SKU NẠP ĐÚNG DANH SÁCH THEO TAB
@@ -179,7 +183,7 @@
     }
 
     // 🟢 HÀM ĐỔI TAB VÀ LÀM MỚI TOÀN BỘ BỘ LỌC HEADER
-    function switchTab(tab: 'need_restock' | 'has_sales') {
+    function switchTab(tab: 'need_restock' | 'has_sales' | 'out_of_stock') {
         activeTab = tab;
         selected_skus.clear();
         filter_by_id.clear();
@@ -498,7 +502,7 @@
             </div>
         </div>
 
-        <!-- 🟢 THANH 2 TAB ĐỔI ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG MỖI NÚT -->
+        <!-- 🟢 BỘ 3 TAB ĐỔI ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG MỖI NÚT -->
         <div class="tab-filter-container">
             <button 
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
@@ -506,11 +510,19 @@
             >
                 🚨 Cần đặt ngay (Cảnh báo đứt hàng)
             </button>
+
             <button 
-                class="tab-btn {activeTab === 'has_sales' ? 'active-blue' : ''}" 
+                class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
                 onclick={() => switchTab('has_sales')}
             >
-                📊 Có bán trong tháng (Gom đủ doanh số)
+                📦 Tồn kho an toàn (Cân nhắc đặt thêm)
+            </button>
+
+            <button 
+                class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
+                onclick={() => switchTab('out_of_stock')}
+            >
+                ⚠️ Hàng bị đứt (Cần check để đặt lại)
             </button>
         </div>
 
@@ -629,10 +641,16 @@
             border-color: #b42318;
             box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
         }
-        .tab-btn.active-blue {
-            background-color: #026aa7;
+        .tab-btn.active-green {
+            background-color: #059669;
             color: #ffffff;
-            border-color: #004d7a;
+            border-color: #047857;
+            box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .tab-btn.active-orange {
+            background-color: #d97706;
+            color: #ffffff;
+            border-color: #b45309;
             box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
         }
 
