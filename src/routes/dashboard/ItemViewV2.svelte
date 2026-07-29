@@ -165,10 +165,8 @@
         );
 
         if (activeTab === 'need_restock') {
-            // 🔴 TRÍCH XUẤT VÙNG DỮ LIỆU NÚT 1: CHỈ LẤY CÁC MÃ ĐỨT HÀNG
             datasource = get_items_need_restock(variant_by_id, Number(c_location_id));
         } else {
-            // 🔵 TRÍCH XUẤT VÙNG DỮ LIỆU NÚT 2: LẤY TẤT CẢ CÁC MÃ CÓ BÁN TRONG THÁNG
             datasource = get_items_has_sales(variant_by_id);
         }
 
@@ -241,15 +239,22 @@
         c_location = locations[0];
     }
 
+    // 🟢 HÀM LỌC CHUẨN HÓA TRIMMING CHUỖI VÀ CHUẨN ĐÉC KIỂU DỮ LIỆU
     function enforce_filter(ukey: number) {
         data = [];
         applyTabFilter();
 
         if (filter_by_id.size) {
             filter_by_id.forEach((fval, fkey) => {
+                const cleanIncludes = new Set<string>();
+                fval.includes.forEach((item: any) => {
+                    cleanIncludes.add(String(item ?? "").trim().toLowerCase());
+                });
+
                 datasource = datasource.filter((v) => {
-                    let x = fval.includes.has(v[fkey as keyof ProductV2]);
-                    return x;
+                    const rawVal = v[fkey as keyof ProductV2];
+                    const cleanVal = String(rawVal ?? "").trim().toLowerCase();
+                    return cleanIncludes.has(cleanVal);
                 });
             });
         }
@@ -257,37 +262,21 @@
         resetPagination(); 
     }
 
+    // 🟢 HÀM SẮP XẾP CHUẨN AN TOÀN CHO CẢ SỐ VÀ CHUỖI
     function enforce_sorting(ukey: number) {
         if (sort_by_id.size) {
             sort_by_id.forEach((sval, skey) => {
                 datasource.sort((a, b) => {
-                    if (typeof a[skey as keyof ProductV2] == "number") {
-                        if (sval.order == 1) {
-                            return (
-                                (a[skey as keyof ProductV2] as number) -
-                                (b[skey as keyof ProductV2] as number)
-                            );
-                        } else {
-                            return (
-                                (b[skey as keyof ProductV2] as number) -
-                                (a[skey as keyof ProductV2] as number)
-                            );
-                        }
-                    } else if (typeof a[skey as keyof ProductV2] == "string") {
-                        const cmp_a = normalizeToEnglish(
-                            a[skey as keyof ProductV2] as string,
-                        );
-                        const cmp_b = normalizeToEnglish(
-                            b[skey as keyof ProductV2] as string,
-                        );
-                        if (sval.order == 1) {
-                            return cmp_a.localeCompare(cmp_b);
-                        } else if (sval.order == -1) {
-                            return cmp_b.localeCompare(cmp_a);
-                        } else {
-                            return 0;
-                        }
+                    const valA = a[skey as keyof ProductV2];
+                    const valB = b[skey as keyof ProductV2];
+
+                    if (typeof valA === "number" && typeof valB === "number") {
+                        return sval.order === 1 ? valA - valB : valB - valA;
                     } else {
+                        const cmp_a = normalizeToEnglish(String(valA ?? ""));
+                        const cmp_b = normalizeToEnglish(String(valB ?? ""));
+                        if (sval.order === 1) return cmp_a.localeCompare(cmp_b);
+                        if (sval.order === -1) return cmp_b.localeCompare(cmp_a);
                         return 0;
                     }
                 });
