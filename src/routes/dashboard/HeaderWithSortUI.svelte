@@ -40,7 +40,7 @@
         { id: "!=", label: "≠" }
     ];
 
-    // 🟢 TỰ ĐỘNG LẤY DANH SÁCH DUY NHẤT THEO TAB/KHO MỚI NHẤT
+    // 🟢 TỰ ĐỘNG LẤY DANH SÁCH DUY NHẤT THEO TAB MỚI NHẤT
     let dsource = $derived(updateKeys?.dsource || []);
     let unique_vals = $derived.by(() => {
         const s = new Set<any>();
@@ -118,7 +118,7 @@
         filter_update_key.k += 1;
     }
 
-    // 🟢 CẬP NHẬT TICK/BỎ TICK TỪNG DÒNG CÓ GÁN LẠI SET ĐỂ KÍCH HOẠT DẤU TICK
+    // 🟢 CẬP NHẬT TICK/BỎ TICK TỪNG DÒNG
     async function handle_item_checkbox_toggling(ev: any, item: any) {
         const nextSet = new Set(included_unique_values);
         if (ev.value === true) {
@@ -141,7 +141,6 @@
     async function handle_dropdown_toggle() {
         show_dropdown = !show_dropdown;
         if (show_dropdown) {
-            // Mặc định chọn tất cả các giá trị khi mở popup nếu chưa có lọc
             if (included_unique_values.size === 0 && !filter_by_id.has(column.id)) {
                 included_unique_values = new Set(filtered_unique_vals);
             }
@@ -213,12 +212,11 @@
                         <div style="min-width: 250px; padding: 10px; padding-top: 0px">
                             <p style="margin-bottom: 5px; margin-top: 10px">Sắp xếp</p>
                             <div style="display: flex; gap: 5px">
-                                <button onclick={handle_dropdown_toggle} style="background: transparent; border: transparent">
-                                    <Segmented onchange={handle_sorter_toggle} bind:value={sort_direction} options={[
-                                        {id: 1, label:"A đến Z", icon:"mdi mdi-sort-alphabetical-ascending"},
-                                        {id: -1, label:"Z đến A", icon:"mdi mdi-sort-alphabetical-descending"}
-                                    ]}></Segmented>
-                                </button>
+                                <!-- 🟢 BỎ THẺ BUTTON BỌC BÊN NGOÀI ĐỂ TRÁNH ĐÓNG POPUP ĐỘT NGỘT -->
+                                <Segmented onchange={handle_sorter_toggle} bind:value={sort_direction} options={[
+                                    {id: 1, label:"A đến Z", icon:"mdi mdi-sort-alphabetical-ascending"},
+                                    {id: -1, label:"Z đến A", icon:"mdi mdi-sort-alphabetical-descending"}
+                                ]}></Segmented>
                             </div>
 
                             <p style="margin-bottom: 5px; margin-top: 10px">Lọc</p>
@@ -248,12 +246,11 @@
                         <div style="min-width: 250px; padding: 10px; padding-top: 0px">
                             <p style="margin-bottom: 5px; margin-top: 10px">Sắp xếp</p>
                             <div style="display: flex; gap: 5px">
-                                <button onclick={handle_dropdown_toggle} style="background: transparent; border: transparent">
-                                    <Segmented onchange={handle_sorter_toggle} bind:value={sort_direction} options={[
-                                        {id: 1, label:"Tăng dần", icon:"mdi mdi-arrow-up"},
-                                        {id: -1, label:"Giảm dần", icon:"mdi mdi-arrow-down"}
-                                    ]}></Segmented>
-                                </button>
+                                <!-- 🟢 BỎ THẺ BUTTON BỌC BÊN NGOÀI ĐỂ TRÁNH ĐÓNG POPUP ĐỘT NGỘT -->
+                                <Segmented onchange={handle_sorter_toggle} bind:value={sort_direction} options={[
+                                    {id: 1, label:"Tăng dần", icon:"mdi mdi-arrow-up"},
+                                    {id: -1, label:"Giảm dần", icon:"mdi mdi-arrow-down"}
+                                ]}></Segmented>
                             </div>
 
                             <p style="margin-bottom: 5px; margin-top: 10px">Lọc</p>
