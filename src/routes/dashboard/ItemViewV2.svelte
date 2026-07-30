@@ -511,21 +511,21 @@
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
                 onclick={() => switchTab('need_restock')}
             >
-                🚨 Tab 1: Cần đặt ngay (Cảnh báo đứt hàng) ({tab1_items.length})
+                🚨 Cần đặt ngay (Cảnh báo đứt hàng) ({tab1_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
                 onclick={() => switchTab('has_sales')}
             >
-                📦 Tab 2: Tồn kho an toàn (Cân nhắc đặt thêm) ({tab2_items.length})
+                📦 Tồn kho an toàn (Cân nhắc đặt thêm) ({tab2_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
                 onclick={() => switchTab('out_of_stock')}
             >
-                ⚠️ Tab 3: Hàng bị đứt (Cần check để đặt lại) ({tab3_items.length})
+                ⚠️ Hàng bị đứt (Cần check để đặt lại) ({tab3_items.length})
             </button>
         </div>
 
