@@ -505,26 +505,27 @@
             </div>
         </div>
 
+        <!-- 🟢 NGUYÊN VĂN TÊN 3 TAB CHUẨN XÁC THEO CHỐT CỦA DÌ -->
         <div class="tab-filter-container">
             <button 
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
                 onclick={() => switchTab('need_restock')}
             >
-                🚨 Sản phẩm cần đặt ngay (Tồn kho &lt;= 50% sản lượng bán) ({tab1_items.length})
+                🚨 Tab 1: Cần đặt ngay (Cảnh báo đứt hàng) ({tab1_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
                 onclick={() => switchTab('has_sales')}
             >
-                📦 Sản phẩm tồn kho an toàn (Tồn kho &gt; 50% sản lượng bán) ({tab2_items.length})
+                📦 Tab 2: Tồn kho an toàn (Cân nhắc đặt thêm) ({tab2_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
                 onclick={() => switchTab('out_of_stock')}
             >
-                ⚠️ Sản phẩm có lịch sử bán hàng nhưng bị đứt tồn kho ({tab3_items.length})
+                ⚠️ Tab 3: Hàng bị đứt (Cần check để đặt lại) ({tab3_items.length})
             </button>
         </div>
 
