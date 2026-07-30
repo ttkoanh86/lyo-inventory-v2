@@ -29,6 +29,7 @@ interface InventoryLevel {
     incoming: number;
     available: number;
     sold: number;
+    mac?: number;
     lot_no?: string;
     lot_mfg?: Date;
     lot_exp?: Date;
@@ -60,13 +61,8 @@ export interface ProductV2 {
     retail_price: number;
     retail_price_ecomm: number;
     inventory_level_by_location: Map<number, InventoryLevel>;
-    category?: string;
-    unit?: string;
-    suppliers_last_year?: string[];
     composite_item_quantity_by_variant_id?: Map<number, number>;
-    has_mac?: boolean;
-    has_order_history?: boolean;
-    raw_inventory_debug?: any; // Đặt vết soi dữ liệu gốc Sapo
+    order_history_by_location: Set<number>;
 }
 
 if (import.meta.env.MODE === "development") {
@@ -97,7 +93,6 @@ export function calculate_restock_data(
     variant_by_id: Map<number, ProductV2>,
     location_id: number,
 ) {
-    console.time("⏱️ [CHECK] Thời gian chạy calculate_restock_data");
     records.sort((a, b) => b.t_unix - a.t_unix);
 
     let sales_by_sku = new Map<string, number>();
@@ -118,10 +113,10 @@ export function calculate_restock_data(
         const rec_loc = Number(record.location_id || 0);
         const clean_sku = (record.sku || "").trim();
 
-        if (clean_sku) {
+        if (clean_sku && rec_loc > 0) {
             variant_by_id.forEach((v) => {
                 if (v.sku && v.sku.trim() === clean_sku) {
-                    v.has_order_history = true;
+                    v.order_history_by_location.add(rec_loc);
                 }
             });
         }
@@ -152,10 +147,10 @@ export function calculate_restock_data(
         variant.c_restock = Math.round(sales);
     });
 
-    console.timeEnd("⏱️ [CHECK] Thời gian chạy calculate_restock_data");
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
+// 🟢 TAB 1: CẦN ĐẶT NGAY (HÀNG ĐANG BÁN VÀ TỒN KHO <= 50% SALES)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -173,6 +168,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
+// 🟢 TAB 2: TỒN KHO AN TOÀN (HÀNG ĐANG BÁN VÀ TỒN KHO > 50% SALES)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -188,10 +184,9 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 BẪY SOI CHI TIẾT TAB 3
-export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>): ProductV2[] {
+// 🟢 TAB 3: HÀNG BỊ ĐỨT (SẢN PHẨM ĐANG GIAO DỊCH CÓ SALES = 0 VÀ TỒN KHO = 0)
+export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
-    let count_ignored_new = 0;
 
     variant_by_id.forEach((variant) => {
         if (variant.is_composite) return;
@@ -199,19 +194,13 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
 
-        // BẮT BỤC: Sales (30 ngày) = 0, Tồn + Đang về = 0, VÀ phải từng có đơn bán trong lịch sử
         if (sales === 0 && current_has === 0) {
-            if (variant.has_order_history === true) {
-                variant.c_restock_half = 0;
-                variant.c_restock_third = 0;
-                result.push(variant);
-            } else {
-                count_ignored_new++;
-            }
+            variant.c_restock_half = 0;
+            variant.c_restock_third = 0;
+            result.push(variant);
         }
     });
 
-    console.log(`📊 [CHECK TAB 3] Tìm thấy ${result.length} mã đứt hàng thực tế đã từng bán. Đã lọc bỏ ${count_ignored_new} mã mới chưa từng bán.`);
     return result;
 }
 
@@ -264,7 +253,6 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 BẪY SOI CẤU TRÚC KHO VẬT LÝ SAPO NHẢ VỀ BỞI SKU 6979009300395
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -276,6 +264,7 @@ export async function get_active_products() {
 
     while (running) {
         try {
+            // 🟢 TRUY VẤN LỌC CHỈ SẢN PHẨM ĐANG GIAO DỊCH (status = "active")
             const resp = await a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
             });
@@ -286,9 +275,15 @@ export async function get_active_products() {
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
+                    // Lớp bảo vệ 1: Sản phẩm phải đang active
+                    if (product.status !== "active") return;
+
                     const is_prod_composite = product.product_type === "composite";
 
                     product.variants.forEach((variant: any) => {
+                        // 🟢 Lớp bảo vệ 2: Variant con phải đang cho phép bán (sellable !== false và status !== "inactive")
+                        if (variant.sellable === false || variant.status === "inactive") return;
+
                         let p_variant: ProductV2 = {
                             is_composite: variant.composite || is_prod_composite || false,
                             brand: product.brand ?? "<Không xác định>",
@@ -302,33 +297,32 @@ export async function get_active_products() {
                             import_price: variant.variant_import_price, retail_price: variant.variant_retail_price, retail_price_ecomm: 0,
                             inventory_level_by_location: new Map(),
                             composite_item_quantity_by_variant_id: new Map(),
-                            has_mac: false,
-                            has_order_history: false,
-                            raw_inventory_debug: variant.inventories
+                            order_history_by_location: new Set<number>()
                         };
 
-                        let max_mac = 0;
+                        const comp_items = variant.composite_items || [];
+                        if (p_variant.is_composite && comp_items.length > 0) {
+                            comp_items.forEach((item: any) => {
+                                const sub_variant_id = Number(item.sub_variant_id || item.variant_id);
+                                const sub_qty = Number(item.quantity || 1);
+                                if (sub_variant_id) {
+                                    p_variant.composite_item_quantity_by_variant_id?.set(sub_variant_id, sub_qty);
+                                }
+                            });
+                        }
+
                         variant.inventories.forEach((inventory: any) => {
-                            p_variant.inventory_level_by_location.set(Number(inventory.location_id), {
-                                on_hand: inventory.on_hand, incoming: inventory.incoming, available: inventory.available, sold: 0,
+                            const loc_id = Number(inventory.location_id);
+                            const mac_val = Number(inventory.mac || 0);
+
+                            p_variant.inventory_level_by_location.set(loc_id, {
+                                on_hand: inventory.on_hand,
+                                incoming: inventory.incoming,
+                                available: inventory.available,
+                                sold: 0,
+                                mac: mac_val
                             });
-                            if (inventory.mac && Number(inventory.mac) > 0) max_mac = Math.max(max_mac, Number(inventory.mac));
                         });
-
-                        if (max_mac > 0) {
-                            p_variant.has_mac = true;
-                        }
-
-                        // 🔍 SOI BẪY ĐẶC BIỆT MÃ 6979009300395
-                        if (p_variant.sku === "6979009300395") {
-                            console.log("🔍 [CHECK BẪY SAPO SKU 6979009300395]:", {
-                                sku: p_variant.sku,
-                                name: p_variant.name,
-                                has_mac: p_variant.has_mac,
-                                max_mac: max_mac,
-                                inventories_raw: variant.inventories
-                            });
-                        }
 
                         if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
                         p_variant_by_ids.set(p_variant.variant_id, p_variant);
@@ -375,8 +369,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    console.log("🚀 [CHECK] BẮT ĐẦU CHẠY FETCH_ORDER_RECORD");
-    
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
     });
@@ -420,7 +412,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const order_ts = parseSapoDate(date_str);
 
                         if (order_ts > 0 && order_ts < min_valid_ts) {
-                            console.log(`⛔ [CHECK] DỪNG CÀO Ở TRANG ${page}. Đã gặp đơn ngày ${date_str} (nhỏ hơn 31 ngày).`);
                             reached_old_date = true;
                             break;
                         }
