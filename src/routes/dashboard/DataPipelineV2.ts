@@ -157,6 +157,7 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
+// 🟢 TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -174,6 +175,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
+// 🟢 TAB 2: TỒN KHO AN TOÀN
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -189,19 +191,20 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 TAB 3 CHUẨN XÁC: SẢN PHẨM CÓ ĐƠN BÁN TẠI KHO NÀY NHƯNG HÃY BỊ ĐỨT TỒN KHO (TỒN = 0, SALES = 0)
+// 🟢 TAB 3 CHUẨN XÁC: HÀNG BỊ ĐỨT TẠI KHO DÀNH CHO CÁC SẢN PHẨM ĐANG KINH DOANH
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
-    const loc_id = Number(target_location_id || 0);
 
     variant_by_id.forEach((variant) => {
         if (variant.is_composite || is_promotional_item(variant.brand)) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
-        const has_sold_at_this_loc = variant.order_history_by_location.has(loc_id);
 
-        if (sales === 0 && current_has === 0 && has_sold_at_this_loc) {
+        // BẮT BỤC: Là sản phẩm chuẩn đang kinh doanh (có giá bán lẻ > 0 và có ảnh)
+        const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
+
+        if (sales === 0 && current_has === 0 && is_valid_product) {
             variant.c_restock_half = 0;
             variant.c_restock_third = 0;
             result.push(variant);
@@ -278,7 +281,7 @@ export async function get_active_products() {
                     if (product.status !== "active") return;
 
                     const brand_name = (product.brand || "").trim();
-                    // 🟢 CHẶN HÀNG KHUYẾN MÃI / KĐH TỪ CẤP BẰNG PRODUCT
+                    // 🟢 CHẶN HÀNG KHUYẾN MÃI / KĐH / SALE TỪ CẤP PRODUCT
                     if (is_promotional_item(brand_name)) return;
 
                     const is_prod_composite = product.product_type === "composite";
