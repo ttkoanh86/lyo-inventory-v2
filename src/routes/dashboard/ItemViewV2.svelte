@@ -9,7 +9,7 @@
         calculate_restock_data,
         get_items_need_restock,
         get_items_has_sales,
-        get_items_out_of_stock_history, // 🟢 IMPORT HÀM LỌC TAB 3
+        get_items_out_of_stock_history,
         get_active_products,
         get_locations,
         fetch_order_record,
@@ -30,7 +30,6 @@
         type Location,
         type Sorting,
     } from "./Template";
-    import { applyAction } from "$app/forms";
     import { lazyLoadStylesheets } from "./lazyLoadScript";
     import LoadingThrobber from "./LoadingThrobber.svelte";
     import SettingsModal from "./SettingsModal.svelte";
@@ -45,7 +44,6 @@
         export_selected_to_xlsx,
         export_kiem_hang_to_xlsx,
         export_transfer_sheet_to_xlsx,
-        _actual_export_handler,
     } from "./Export2Excel";
 
     const columns = [
@@ -97,9 +95,10 @@
     let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
     setContext("updatekeys", updateKeys);
 
+    let base_tab_items: ProductV2[] = [];
     let datasource: ProductV2[] = $state([]);
 
-    // 🟢 STATE QUẢN LÝ BỘ 3 TAB NÚT LỌC
+    // STATE BỘ 3 TAB
     let activeTab: 'need_restock' | 'has_sales' | 'out_of_stock' = $state('need_restock');
 
     let variant_by_id = new Map<number, ProductV2>();
@@ -155,9 +154,6 @@
         goto("/authentication");
     }
 
-    function tweak_ui() {}
-
-    // 🟢 HÀM TRÍCH XUẤT ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG VỚI CẢ 3 TAB
     function applyTabFilter() {
         calculate_restock_data(
             [...order_records, ...transfer_records],
@@ -166,23 +162,20 @@
         );
 
         if (activeTab === 'need_restock') {
-            datasource = get_items_need_restock(variant_by_id, Number(c_location_id));
+            base_tab_items = get_items_need_restock(variant_by_id, Number(c_location_id));
         } else if (activeTab === 'has_sales') {
-            datasource = get_items_has_sales(variant_by_id);
+            base_tab_items = get_items_has_sales(variant_by_id);
         } else {
-            // 🟢 TAB 3: HÀNG BỊ ĐỨT (CẦN CHECK ĐỂ ĐẶT LẠI)
-            datasource = get_items_out_of_stock_history(variant_by_id);
+            base_tab_items = get_items_out_of_stock_history(variant_by_id);
         }
 
-        // 🟢 CẬP NHẬT TRỰC TIẾP DSOURCE ĐỂ BỘ LỌC CỘT SKU NẠP ĐÚNG DANH SÁCH THEO TAB
+        datasource = [...base_tab_items];
         updateKeys.dsource = datasource as any;
-
         rowCount = datasource.length;
         resetPagination();
         grid_key++;
     }
 
-    // 🟢 HÀM ĐỔI TAB VÀ LÀM MỚI TOÀN BỘ BỘ LỌC HEADER
     function switchTab(tab: 'need_restock' | 'has_sales' | 'out_of_stock') {
         activeTab = tab;
         selected_skus.clear();
@@ -191,7 +184,6 @@
         
         applyTabFilter();
 
-        // 🟢 THÔNG BÁO CHO HEADER CẬP NHẬT LẠI DANH SÁCH CHECKBOX THEO DSOURCE MỚI
         updateKeys.headerSorterKey++;
         filter_update_key.k += 1;
     }
@@ -242,7 +234,6 @@
         c_location_id = Number(locations[0].id);
 
         applyTabFilter();
-
         setLastDataUpdate();
 
         low_sales_skus = get_low_sales_skus(datasource);
@@ -252,10 +243,9 @@
         c_location = locations[0];
     }
 
-    // 🟢 HÀM LỌC CHUẨN HÓA TRIMMING CHUỖI VÀ CHUẨN ĐÉC KIỂU DỮ LIỆU
-    function enforce_filter(ukey: number) {
-        data = [];
-        applyTabFilter();
+    // 🟢 HÀM LỌC SẠCH SẼ - KHÔNG GỌI LẠI applyTabFilter ĐỂ TRÁNH TRÀN VÒNG LẶP
+    function enforce_filter() {
+        let list = [...base_tab_items];
 
         if (filter_by_id.size) {
             filter_by_id.forEach((fval, fkey) => {
@@ -264,19 +254,19 @@
                     cleanIncludes.add(String(item ?? "").trim().toLowerCase());
                 });
 
-                datasource = datasource.filter((v) => {
+                list = list.filter((v) => {
                     const rawVal = v[fkey as keyof ProductV2];
                     const cleanVal = String(rawVal ?? "").trim().toLowerCase();
                     return cleanIncludes.has(cleanVal);
                 });
             });
         }
+        datasource = list;
         rowCount = datasource.length;
         resetPagination(); 
     }
 
-    // 🟢 HÀM SẮP XẾP CHUẨN AN TOÀN CHO CẢ SỐ VÀ CHUỖI
-    function enforce_sorting(ukey: number) {
+    function enforce_sorting() {
         if (sort_by_id.size) {
             sort_by_id.forEach((sval, skey) => {
                 datasource.sort((a, b) => {
@@ -378,10 +368,10 @@
 
     let last_filter_update_key = 0;
     $effect(() => {
-        if (last_filter_update_key != filter_update_key.k) {
-            enforce_filter(filter_update_key.k);
-            enforce_sorting(filter_update_key.k);
+        if (last_filter_update_key !== filter_update_key.k) {
             last_filter_update_key = filter_update_key.k;
+            enforce_filter();
+            enforce_sorting();
             grid_key += 1;
         }
     });
@@ -391,7 +381,6 @@
             "https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css",
         );
         await initialize();
-        tweak_ui();
     });
 </script>
 
@@ -419,7 +408,6 @@
                     <Portal>
                         <Popup parent={export_popup_parent} at="bottom" oncancel={on_export_popup_cancel}>
                             <div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
-                                
                                 <p style="margin: 0px;"><b>1. Xuất phiếu nhập hàng</b></p>
                                 {#if selected_skus.size != 0}
                                     <Button type="primary" onclick={async () => {
@@ -491,7 +479,6 @@
                                         <i>(Bao gồm hàng tồn kho trong chi nhánh trung tâm)</i>
                                     </p>
                                 </div>
-
                             </div>
                         </Popup>
                     </Portal>
@@ -502,7 +489,7 @@
             </div>
         </div>
 
-        <!-- 🟢 BỘ 3 TAB ĐỔI ĐÚNG VÙNG DỮ LIỆU TƯƠNG ỨNG MỖI NÚT -->
+        <!-- BỘ 3 TAB DỄ BẤM, PHẢN HỒI LẬP TỨC -->
         <div class="tab-filter-container">
             <button 
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
