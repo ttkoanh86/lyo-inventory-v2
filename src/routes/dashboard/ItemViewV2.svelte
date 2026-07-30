@@ -95,10 +95,12 @@
     let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
     setContext("updatekeys", updateKeys);
 
-    let base_tab_items: ProductV2[] = [];
     let datasource: ProductV2[] = $state([]);
 
-    // STATE BỘ 3 TAB
+    let tab1_items: ProductV2[] = [];
+    let tab2_items: ProductV2[] = [];
+    let tab3_items: ProductV2[] = [];
+
     let activeTab: 'need_restock' | 'has_sales' | 'out_of_stock' = $state('need_restock');
 
     let variant_by_id = new Map<number, ProductV2>();
@@ -155,37 +157,58 @@
     }
 
     function applyTabFilter() {
+        console.time("⏱️ [ITEMVIEW BẪY 1] Thời gian chạy applyTabFilter");
         calculate_restock_data(
             [...order_records, ...transfer_records],
             variant_by_id,
             Number(c_location_id),
         );
 
+        tab1_items = get_items_need_restock(variant_by_id, Number(c_location_id));
+        tab2_items = get_items_has_sales(variant_by_id);
+        tab3_items = get_items_out_of_stock_history(variant_by_id);
+
         if (activeTab === 'need_restock') {
-            base_tab_items = get_items_need_restock(variant_by_id, Number(c_location_id));
+            datasource = [...tab1_items];
         } else if (activeTab === 'has_sales') {
-            base_tab_items = get_items_has_sales(variant_by_id);
+            datasource = [...tab2_items];
         } else {
-            base_tab_items = get_items_out_of_stock_history(variant_by_id);
+            datasource = [...tab3_items];
         }
 
-        datasource = [...base_tab_items];
         updateKeys.dsource = datasource as any;
         rowCount = datasource.length;
         resetPagination();
         grid_key++;
+        console.timeEnd("⏱️ [ITEMVIEW BẪY 1] Thời gian chạy applyTabFilter");
     }
 
+    // 🟢 BẪY SOI THỜI GIAN BẤM CHUYỂN TAB
     function switchTab(tab: 'need_restock' | 'has_sales' | 'out_of_stock') {
+        const label = `⏱️ [ITEMVIEW BẪY 2] Thời gian xử lý Click Tab từ ${activeTab} -> ${tab}`;
+        console.time(label);
+
         activeTab = tab;
         selected_skus.clear();
         filter_by_id.clear();
         sort_by_id.clear();
         
-        applyTabFilter();
+        if (activeTab === 'need_restock') {
+            datasource = [...tab1_items];
+        } else if (activeTab === 'has_sales') {
+            datasource = [...tab2_items];
+        } else {
+            datasource = [...tab3_items];
+        }
+
+        updateKeys.dsource = datasource as any;
+        rowCount = datasource.length;
+        resetPagination();
 
         updateKeys.headerSorterKey++;
-        filter_update_key.k += 1;
+        grid_key++;
+
+        console.timeEnd(label);
     }
 
     function handle_location_update() {
@@ -243,9 +266,10 @@
         c_location = locations[0];
     }
 
-    // 🟢 HÀM LỌC SẠCH SẼ - KHÔNG GỌI LẠI applyTabFilter ĐỂ TRÁNH TRÀN VÒNG LẶP
     function enforce_filter() {
-        let list = [...base_tab_items];
+        console.time("⏱️ [ITEMVIEW BẪY 3] Thời gian chạy enforce_filter");
+        let baseList = activeTab === 'need_restock' ? tab1_items : (activeTab === 'has_sales' ? tab2_items : tab3_items);
+        let list = [...baseList];
 
         if (filter_by_id.size) {
             filter_by_id.forEach((fval, fkey) => {
@@ -264,6 +288,7 @@
         datasource = list;
         rowCount = datasource.length;
         resetPagination(); 
+        console.timeEnd("⏱️ [ITEMVIEW BẪY 3] Thời gian chạy enforce_filter");
     }
 
     function enforce_sorting() {
@@ -367,8 +392,10 @@
     }
 
     let last_filter_update_key = 0;
+    // 🟢 BẪY SOI XEM EFFECT NÀY CÓ BỊ TRÍCH XUẤT NỀN KHI BẤM CHUYỂN TAB KHÔNG
     $effect(() => {
         if (last_filter_update_key !== filter_update_key.k) {
+            console.log("⚡ [ITEMVIEW BẪY 4] $effect kích hoạt với key:", filter_update_key.k);
             last_filter_update_key = filter_update_key.k;
             enforce_filter();
             enforce_sorting();
@@ -489,27 +516,26 @@
             </div>
         </div>
 
-        <!-- BỘ 3 TAB DỄ BẤM, PHẢN HỒI LẬP TỨC -->
         <div class="tab-filter-container">
             <button 
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
                 onclick={() => switchTab('need_restock')}
             >
-                🚨 Cần đặt ngay (Cảnh báo đứt hàng)
+                🚨 Cần đặt ngay ({tab1_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
                 onclick={() => switchTab('has_sales')}
             >
-                📦 Tồn kho an toàn (Cân nhắc đặt thêm)
+                📦 Tồn kho an toàn ({tab2_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
                 onclick={() => switchTab('out_of_stock')}
             >
-                ⚠️ Hàng bị đứt (Cần check để đặt lại)
+                ⚠️ Hàng bị đứt ({tab3_items.length})
             </button>
         </div>
 
