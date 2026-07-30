@@ -22,6 +22,7 @@
     } from "./DataPipelineV2";
     import SelectionCheckboxCell from "./SelectionCheckboxCell.svelte";
     import ImageCell from "./ImageCell.svelte";
+    import NameCell from "./NameCell.svelte";
     import { vi } from "./Localization";
     import { onMount, setContext } from "svelte";
     import {
@@ -46,12 +47,11 @@
         export_transfer_sheet_to_xlsx,
     } from "./Export2Excel";
 
-    // 🟢 MỞ RỘNG CỘT TÊN SẢN PHẨM LÊN 280PX VÀ BẬT RESIZE
     const columns = [
         { id: "id", hidden: true },
         { id: "selected", cell: SelectionCheckboxCell, width: 36 },
         { id: "sku", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "SKU" }] },
-        { id: "name", resize: true, width: 280, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
+        { id: "name", resize: true, width: 260, cell: NameCell, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
         { id: "image", header: "Ảnh", cell: ImageCell },
         { id: "image_path", hidden: true },
         { id: "c_restock_third", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/3 tháng)" }] },
@@ -510,21 +510,21 @@
                 class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
                 onclick={() => switchTab('need_restock')}
             >
-                🚨 Cần đặt ngay ({tab1_items.length})
+                🚨 Sản phẩm cần đặt ngay (Tồn kho &lt;= 50% sản lượng bán) ({tab1_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
                 onclick={() => switchTab('has_sales')}
             >
-                📦 Tồn kho an toàn ({tab2_items.length})
+                📦 Sản phẩm tồn kho an toàn (Tồn kho &gt; 50% sản lượng bán) ({tab2_items.length})
             </button>
 
             <button 
                 class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
                 onclick={() => switchTab('out_of_stock')}
             >
-                ⚠️ Hàng bị đứt ({tab3_items.length})
+                ⚠️ Sản phẩm có lịch sử bán hàng nhưng bị đứt tồn kho ({tab3_items.length})
             </button>
         </div>
 
@@ -619,7 +619,6 @@
             --wx-filter-border: 1px solid #c1c1c1;
         }
 
-        /* 🟢 BẮT BỤC TỰ ĐỘNG XUỐNG DÒNG CHO CẢ MÀN HÌNH BẢNG */
         :global(.wx-grid .wx-cell) {
             white-space: normal !important;
             word-break: break-word !important;
