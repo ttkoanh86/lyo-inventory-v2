@@ -66,6 +66,7 @@ export interface ProductV2 {
     composite_item_quantity_by_variant_id?: Map<number, number>;
     has_mac?: boolean;
     has_order_history?: boolean;
+    raw_inventory_debug?: any; // Đặt vết soi dữ liệu gốc Sapo
 }
 
 if (import.meta.env.MODE === "development") {
@@ -81,7 +82,6 @@ export function obtain_access_token() {
     return "Bearer " + token.replace("Bearer ", "");
 }
 
-// 🟢 KHAI BÁO KIỂU DỮ LIỆU CHUẨN
 export type RecordItem = OrderRecordV2 | TransferRecord;
 
 export function parseSapoDate(dateStr: string): number {
@@ -97,6 +97,7 @@ export function calculate_restock_data(
     variant_by_id: Map<number, ProductV2>,
     location_id: number,
 ) {
+    console.time("⏱️ [CHECK] Thời gian chạy calculate_restock_data");
     records.sort((a, b) => b.t_unix - a.t_unix);
 
     let sales_by_sku = new Map<string, number>();
@@ -151,6 +152,7 @@ export function calculate_restock_data(
         variant.c_restock = Math.round(sales);
     });
 
+    console.timeEnd("⏱️ [CHECK] Thời gian chạy calculate_restock_data");
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
@@ -186,8 +188,11 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
+// 🟢 BẪY SOI CHI TIẾT TAB 3
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
+    let count_ignored_new = 0;
+
     variant_by_id.forEach((variant) => {
         if (variant.is_composite) return;
 
@@ -196,12 +201,18 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
 
         const is_real_old_product = (variant.has_mac === true) || (variant.has_order_history === true);
 
-        if (sales === 0 && current_has === 0 && is_real_old_product) {
-            variant.c_restock_half = 0;
-            variant.c_restock_third = 0;
-            result.push(variant);
+        if (sales === 0 && current_has === 0) {
+            if (is_real_old_product) {
+                variant.c_restock_half = 0;
+                variant.c_restock_third = 0;
+                result.push(variant);
+            } else {
+                count_ignored_new++;
+            }
         }
     });
+
+    console.log(`📊 [CHECK TAB 3] Tìm thấy ${result.length} mã đứt hàng cũ. Đã lọc bỏ ${count_ignored_new} mã mới chưa từng bán/nhập kho.`);
     return result;
 }
 
@@ -254,6 +265,7 @@ export function normalizeString(input: string): string {
     return str;
 }
 
+// 🟢 BẪY SOI CẤU TRÚC KHO VẬT LÝ SAPO NHẢ VỀ BỞI SKU 6979009300395
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -293,18 +305,8 @@ export async function get_active_products() {
                             composite_item_quantity_by_variant_id: new Map(),
                             has_mac: false,
                             has_order_history: false,
+                            raw_inventory_debug: variant.inventories
                         };
-
-                        const comp_items = variant.composite_items || [];
-                        if (p_variant.is_composite && comp_items.length > 0) {
-                            comp_items.forEach((item: any) => {
-                                const sub_variant_id = Number(item.sub_variant_id || item.variant_id);
-                                const sub_qty = Number(item.quantity || 1);
-                                if (sub_variant_id) {
-                                    p_variant.composite_item_quantity_by_variant_id?.set(sub_variant_id, sub_qty);
-                                }
-                            });
-                        }
 
                         let max_mac = 0;
                         variant.inventories.forEach((inventory: any) => {
@@ -316,6 +318,17 @@ export async function get_active_products() {
 
                         if (max_mac > 0) {
                             p_variant.has_mac = true;
+                        }
+
+                        // 🔍 SOI BẪY ĐẶC BIỆT MÃ 6979009300395
+                        if (p_variant.sku === "6979009300395") {
+                            console.log("🔍 [CHECK BẪY SAPO SKU 6979009300395]:", {
+                                sku: p_variant.sku,
+                                name: p_variant.name,
+                                has_mac: p_variant.has_mac,
+                                max_mac: max_mac,
+                                inventories_raw: variant.inventories
+                            });
                         }
 
                         if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
@@ -362,9 +375,8 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM CÀO ĐƠN CÓ ĐẶT BẪY LOG TRUY VẾT LỖI
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    console.log("🚀 [DEBUG] BẮT ĐẦU CHẠY FETCH_ORDER_RECORD");
+    console.log("🚀 [CHECK] BẮT ĐẦU CHẠY FETCH_ORDER_RECORD");
     
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -377,17 +389,11 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
 
-    console.log("📅 [DEBUG] MỐC THỜI GIAN LỌC (31 NGÀY TRƯỚC):", {
-        min_date_str: min_date.toLocaleString(),
-        min_valid_ts: min_valid_ts
-    });
-
     let page = 1;
     let running = true;
 
     while (running) {
         try {
-            console.log(`📡 [DEBUG] Bắt đầu gọi API Trang ${page}...`);
             const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: { 
                     limit: 250, 
@@ -401,21 +407,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`📦 [DEBUG] Trang ${page} trả về ${orders.length} đơn hàng.`);
-
                 if (orders.length === 0) {
-                    console.log("🛑 [DEBUG] Hết đơn hàng từ API -> DỪNG.");
                     running = false;
                     break;
                 }
-
-                const first_order = orders[0];
-                const last_order = orders[orders.length - 1];
-                
-                const first_ts = parseSapoDate(first_order.completed_on || first_order.finalized_on || first_order.created_on);
-                const last_ts = parseSapoDate(last_order.completed_on || last_order.finalized_on || last_order.created_on);
-
-                console.log(`🔎 [DEBUG] Trang ${page} - Đơn đầu: ${first_order.created_on} (TS: ${first_ts}) | Đơn cuối: ${last_order.created_on} (TS: ${last_ts})`);
 
                 let reached_old_date = false;
 
@@ -426,7 +421,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const order_ts = parseSapoDate(date_str);
 
                         if (order_ts > 0 && order_ts < min_valid_ts) {
-                            console.log(`⛔ [DEBUG] ĐÃ PHÁT HIỆN ĐƠN CŨ HƠN 31 NGÀY VÀO LÚC: ${date_str} (TS: ${order_ts} < Min: ${min_valid_ts}). KÍCH HOẠT DỪNG!`);
+                            console.log(`⛔ [CHECK] DỪNG CÀO Ở TRANG ${page}. Đã gặp đơn ngày ${date_str} (nhỏ hơn 31 ngày).`);
                             reached_old_date = true;
                             break;
                         }
@@ -484,7 +479,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 }
 
                 if (reached_old_date) {
-                    console.log(`✅ [DEBUG] Dừng cào thành công ở Trang ${page}. Tổng số record cào được: ${all_records.length}`);
                     running = false;
                     break;
                 }
@@ -492,11 +486,9 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(10);
             } else { 
-                console.log("❌ [DEBUG] Lỗi HTTP status:", resp.status);
                 running = false; 
             }
         } catch (e) { 
-            console.log("❌ [DEBUG] Lỗi Exception:", e);
             running = false; 
         }
     }
