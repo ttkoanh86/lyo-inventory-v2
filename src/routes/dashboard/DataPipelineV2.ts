@@ -97,6 +97,7 @@ export function calculate_restock_data(
 
     let sales_by_sku = new Map<string, number>();
 
+    // 🟢 MỐC CHUẨN TRÒN THỜI GIAN: 31 NGÀY GẦN NHẤT
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
@@ -150,7 +151,6 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, target_location_id);
 }
 
-// 🟢 TAB 1: CẦN ĐẶT NGAY (HÀNG ĐANG BÁN VÀ TỒN KHO <= 50% SALES)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -168,7 +168,6 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN (HÀNG ĐANG BÁN VÀ TỒN KHO > 50% SALES)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -184,20 +183,26 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 TAB 3: HÀNG BỊ ĐỨT (SẢN PHẨM ĐANG GIAO DỊCH CÓ SALES = 0 VÀ TỒN KHO = 0)
+// 🟢 TAB 3 CHUẨN XÉT 31 NGÀY VÀ LỌC CÁC SẢN PHẨM ĐẦY ĐỦ THÔNG TIN KINH DOANH
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
 
     variant_by_id.forEach((variant) => {
         if (variant.is_composite) return;
 
-        const sales = variant.c_restock || 0;
+        const sales = variant.c_restock || 0; // Đã được tính toán trong vòng 31 ngày gần nhất
         const current_has = variant.c_available + variant.c_incoming;
 
+        // Sản phẩm chuẩn đang giao dịch (Có giá bán lẻ > 0 và có ảnh đại diện)
+        const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
+
+        // BẮT BỤC TRONG 31 NGÀY GẦN NHẤT: Sales (31 ngày) = 0 VÀ Tồn kho = 0
         if (sales === 0 && current_has === 0) {
-            variant.c_restock_half = 0;
-            variant.c_restock_third = 0;
-            result.push(variant);
+            if (is_valid_product) {
+                variant.c_restock_half = 0;
+                variant.c_restock_third = 0;
+                result.push(variant);
+            }
         }
     });
 
@@ -264,7 +269,6 @@ export async function get_active_products() {
 
     while (running) {
         try {
-            // 🟢 TRUY VẤN LỌC CHỈ SẢN PHẨM ĐANG GIAO DỊCH (status = "active")
             const resp = await a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
             });
@@ -275,13 +279,11 @@ export async function get_active_products() {
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
-                    // Lớp bảo vệ 1: Sản phẩm phải đang active
                     if (product.status !== "active") return;
 
                     const is_prod_composite = product.product_type === "composite";
 
                     product.variants.forEach((variant: any) => {
-                        // 🟢 Lớp bảo vệ 2: Variant con phải đang cho phép bán (sellable !== false và status !== "inactive")
                         if (variant.sellable === false || variant.status === "inactive") return;
 
                         let p_variant: ProductV2 = {
@@ -376,6 +378,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: RecordItem[] = [];
     let existing_keys = new Set<string>();
     
+    // 🟢 MỐC LỌC ĐƠN BÁN TRÒN 31 NGÀY GẦN NHẤT
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
