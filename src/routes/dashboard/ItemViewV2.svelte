@@ -157,7 +157,6 @@
     }
 
     function applyTabFilter() {
-        console.time("⏱️ [ITEMVIEW BẪY 1] Thời gian chạy applyTabFilter");
         calculate_restock_data(
             [...order_records, ...transfer_records],
             variant_by_id,
@@ -166,7 +165,7 @@
 
         tab1_items = get_items_need_restock(variant_by_id, Number(c_location_id));
         tab2_items = get_items_has_sales(variant_by_id);
-        tab3_items = get_items_out_of_stock_history(variant_by_id);
+        tab3_items = get_items_out_of_stock_history(variant_by_id, Number(c_location_id));
 
         if (activeTab === 'need_restock') {
             datasource = [...tab1_items];
@@ -180,14 +179,9 @@
         rowCount = datasource.length;
         resetPagination();
         grid_key++;
-        console.timeEnd("⏱️ [ITEMVIEW BẪY 1] Thời gian chạy applyTabFilter");
     }
 
-    // 🟢 BẪY SOI THỜI GIAN BẤM CHUYỂN TAB
     function switchTab(tab: 'need_restock' | 'has_sales' | 'out_of_stock') {
-        const label = `⏱️ [ITEMVIEW BẪY 2] Thời gian xử lý Click Tab từ ${activeTab} -> ${tab}`;
-        console.time(label);
-
         activeTab = tab;
         selected_skus.clear();
         filter_by_id.clear();
@@ -207,8 +201,6 @@
 
         updateKeys.headerSorterKey++;
         grid_key++;
-
-        console.timeEnd(label);
     }
 
     function handle_location_update() {
@@ -267,7 +259,6 @@
     }
 
     function enforce_filter() {
-        console.time("⏱️ [ITEMVIEW BẪY 3] Thời gian chạy enforce_filter");
         let baseList = activeTab === 'need_restock' ? tab1_items : (activeTab === 'has_sales' ? tab2_items : tab3_items);
         let list = [...baseList];
 
@@ -288,7 +279,6 @@
         datasource = list;
         rowCount = datasource.length;
         resetPagination(); 
-        console.timeEnd("⏱️ [ITEMVIEW BẪY 3] Thời gian chạy enforce_filter");
     }
 
     function enforce_sorting() {
@@ -392,10 +382,8 @@
     }
 
     let last_filter_update_key = 0;
-    // 🟢 BẪY SOI XEM EFFECT NÀY CÓ BỊ TRÍCH XUẤT NỀN KHI BẤM CHUYỂN TAB KHÔNG
     $effect(() => {
         if (last_filter_update_key !== filter_update_key.k) {
-            console.log("⚡ [ITEMVIEW BẪY 4] $effect kích hoạt với key:", filter_update_key.k);
             last_filter_update_key = filter_update_key.k;
             enforce_filter();
             enforce_sorting();
