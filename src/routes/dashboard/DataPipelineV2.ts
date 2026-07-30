@@ -199,10 +199,9 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
 
-        const is_real_old_product = (variant.has_mac === true) || (variant.has_order_history === true);
-
+        // BẮT BỤC: Sales (30 ngày) = 0, Tồn + Đang về = 0, VÀ phải từng có đơn bán trong lịch sử
         if (sales === 0 && current_has === 0) {
-            if (is_real_old_product) {
+            if (variant.has_order_history === true) {
                 variant.c_restock_half = 0;
                 variant.c_restock_third = 0;
                 result.push(variant);
@@ -212,7 +211,7 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
         }
     });
 
-    console.log(`📊 [CHECK TAB 3] Tìm thấy ${result.length} mã đứt hàng cũ. Đã lọc bỏ ${count_ignored_new} mã mới chưa từng bán/nhập kho.`);
+    console.log(`📊 [CHECK TAB 3] Tìm thấy ${result.length} mã đứt hàng thực tế đã từng bán. Đã lọc bỏ ${count_ignored_new} mã mới chưa từng bán.`);
     return result;
 }
 
