@@ -46,11 +46,12 @@
         export_transfer_sheet_to_xlsx,
     } from "./Export2Excel";
 
+    // 🟢 MỞ RỘNG CỘT TÊN SẢN PHẨM LÊN 280PX VÀ BẬT RESIZE
     const columns = [
         { id: "id", hidden: true },
         { id: "selected", cell: SelectionCheckboxCell, width: 36 },
         { id: "sku", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "SKU" }] },
-        { id: "name", resize: true, width: 240, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
+        { id: "name", resize: true, width: 280, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
         { id: "image", header: "Ảnh", cell: ImageCell },
         { id: "image_path", hidden: true },
         { id: "c_restock_third", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/3 tháng)" }] },
@@ -611,10 +612,20 @@
             </Portal>
         {/if}
     </Willow>
+
     <style>
         .wx-willow-theme {
             --wx-color-primary: #0520c3;
             --wx-filter-border: 1px solid #c1c1c1;
+        }
+
+        /* 🟢 BẮT BỤC TỰ ĐỘNG XUỐNG DÒNG CHO CẢ MÀN HÌNH BẢNG */
+        :global(.wx-grid .wx-cell) {
+            white-space: normal !important;
+            word-break: break-word !important;
+            line-height: 1.4 !important;
+            display: flex !important;
+            align-items: center !important;
         }
 
         .tab-filter-container {
