@@ -88,6 +88,13 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
+// 🟢 HAM KIEM TRA HANG KHUYEN MAI / KHONG BAN (SALE, TANG, KDH)
+export function is_promotional_item(brand: string) {
+    if (!brand) return false;
+    const br = brand.trim().toLowerCase();
+    return br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh";
+}
+
 export function calculate_restock_data(
     records: RecordItem[],
     variant_by_id: Map<number, ProductV2>,
@@ -97,7 +104,6 @@ export function calculate_restock_data(
 
     let sales_by_sku = new Map<string, number>();
 
-    // 🟢 MỐC CHUẨN TRÒN THỜI GIAN: 31 NGÀY GẦN NHẤT
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
@@ -131,7 +137,7 @@ export function calculate_restock_data(
     }
 
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite) {
+        if (variant.is_composite || is_promotional_item(variant.brand)) {
             variant.c_restock = 0;
             return;
         }
@@ -154,7 +160,7 @@ export function calculate_restock_data(
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite) return;
+        if (variant.is_composite || is_promotional_item(variant.brand)) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
@@ -171,7 +177,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite) return;
+        if (variant.is_composite || is_promotional_item(variant.brand)) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
@@ -183,26 +189,22 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 TAB 3 CHUẨN XÉT 31 NGÀY VÀ LỌC CÁC SẢN PHẨM ĐẦY ĐỦ THÔNG TIN KINH DOANH
+// 🟢 TAB 3 CHUẨN XÁC: SẢN PHẨM CÓ ĐƠN BÁN TẠI KHO NÀY NHƯNG HÃY BỊ ĐỨT TỒN KHO (TỒN = 0, SALES = 0)
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
+    const loc_id = Number(target_location_id || 0);
 
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite) return;
+        if (variant.is_composite || is_promotional_item(variant.brand)) return;
 
-        const sales = variant.c_restock || 0; // Đã được tính toán trong vòng 31 ngày gần nhất
+        const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
+        const has_sold_at_this_loc = variant.order_history_by_location.has(loc_id);
 
-        // Sản phẩm chuẩn đang giao dịch (Có giá bán lẻ > 0 và có ảnh đại diện)
-        const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
-
-        // BẮT BỤC TRONG 31 NGÀY GẦN NHẤT: Sales (31 ngày) = 0 VÀ Tồn kho = 0
-        if (sales === 0 && current_has === 0) {
-            if (is_valid_product) {
-                variant.c_restock_half = 0;
-                variant.c_restock_third = 0;
-                result.push(variant);
-            }
+        if (sales === 0 && current_has === 0 && has_sold_at_this_loc) {
+            variant.c_restock_half = 0;
+            variant.c_restock_third = 0;
+            result.push(variant);
         }
     });
 
@@ -247,12 +249,6 @@ export function setLastDataUpdate() { localStorage.setItem("last_data_update_v50
 export function getLastDataUpdateTUnix() { return Number(localStorage.getItem("last_data_update_v50")); }
 export function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-export function is_promotional_item(brand: string) {
-    if (!brand) return false;
-    const br = brand.toLowerCase();
-    return br == "tặng" || br == "sale" || br.includes("kđh");
-}
-
 export function normalizeString(input: string): string {
     let str = input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
     return str;
@@ -281,14 +277,18 @@ export async function get_active_products() {
                 products.forEach((product: any) => {
                     if (product.status !== "active") return;
 
+                    const brand_name = (product.brand || "").trim();
+                    // 🟢 CHẶN HÀNG KHUYẾN MÃI / KĐH TỪ CẤP BẰNG PRODUCT
+                    if (is_promotional_item(brand_name)) return;
+
                     const is_prod_composite = product.product_type === "composite";
 
                     product.variants.forEach((variant: any) => {
-                        if (variant.sellable === false || variant.status === "inactive") return;
+                        if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
 
                         let p_variant: ProductV2 = {
-                            is_composite: variant.composite || is_prod_composite || false,
-                            brand: product.brand ?? "<Không xác định>",
+                            is_composite: false,
+                            brand: brand_name || "<Không xác định>",
                             variant_id: variant.id,
                             product_id: product.id,
                             sku: (variant.sku || "").trim(),
@@ -301,17 +301,6 @@ export async function get_active_products() {
                             composite_item_quantity_by_variant_id: new Map(),
                             order_history_by_location: new Set<number>()
                         };
-
-                        const comp_items = variant.composite_items || [];
-                        if (p_variant.is_composite && comp_items.length > 0) {
-                            comp_items.forEach((item: any) => {
-                                const sub_variant_id = Number(item.sub_variant_id || item.variant_id);
-                                const sub_qty = Number(item.quantity || 1);
-                                if (sub_variant_id) {
-                                    p_variant.composite_item_quantity_by_variant_id?.set(sub_variant_id, sub_qty);
-                                }
-                            });
-                        }
 
                         variant.inventories.forEach((inventory: any) => {
                             const loc_id = Number(inventory.location_id);
@@ -378,7 +367,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let all_records: RecordItem[] = [];
     let existing_keys = new Set<string>();
     
-    // 🟢 MỐC LỌC ĐƠN BÁN TRÒN 31 NGÀY GẦN NHẤT
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
