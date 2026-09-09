@@ -1,6 +1,17 @@
 import { Axios } from "axios";
 import { type Location } from "./Template";
 
+let proxyUrl: string;
+let baseUrl: string;
+
+if (import.meta.env.MODE === "development") {
+    proxyUrl = "http://localhost:8080/api";
+    baseUrl = "http://localhost:8080";
+} else {
+    proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
+    baseUrl = "https://lyo-inventory-proxy-x79b.onrender.com";
+}
+
 export interface OrderRecordV2 {
     sku: string;
     t_unix: number;
@@ -62,17 +73,10 @@ export interface ProductV2 {
     order_history_by_location: Set<number>;
 }
 
-// =========================================================================
-// 🎯 CẤU HÌNH THÔNG TIN 2 SITE SAPO CỦA LYO
-// =========================================================================
-const OLD_SAPO_DOMAIN = "lyochuyenhanghanquoc.mysapogo.com";
-const OLD_SAPO_TOKEN  = "42cd092e162a446ca26b6ae8c9902d78";
+// 🎯 ID KHO LYO GROUP TRÊN SITE MỚI
+const TARGET_LOCATION_ID = 789505;
 
-const NEW_SAPO_DOMAIN       = "lyovn.mysapogo.com";
-const NEW_SAPO_TOKEN        = "b3e0a88853e2496c9641800adb465097";
-const NEW_SAPO_LOCATION_ID  = 789505; // ID Kho LYO GROUP trên site mới
-
-// Mốc bàn giao dữ liệu: 01/09/2026
+// Mốc chuyển đổi dữ liệu 01/09/2026
 const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
 
 export function obtain_access_token() {
@@ -109,7 +113,7 @@ export function calculate_restock_data(
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
     const now_ts = now.getTime();
-    const target_loc = Number(location_id || NEW_SAPO_LOCATION_ID);
+    const target_loc = Number(location_id || TARGET_LOCATION_ID);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku && !variant.is_composite) {
@@ -210,7 +214,7 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
 
 export async function get_locations(): Promise<Location[]> {
     return [
-        { id: NEW_SAPO_LOCATION_ID, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" }
+        { id: TARGET_LOCATION_ID, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" }
     ];
 }
 
@@ -224,7 +228,7 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 TẢI DANH SÁCH SẢN PHẨM & TỒN KHO TỪ SITE MỚI (LYOVN.MYSAPOGO.COM)
+// 🟢 TẢI SẢN PHẨM QUA PROXY KHÔNG BỊ LỖI CORS
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -233,17 +237,17 @@ export async function get_active_products() {
     let a = new Axios({
         headers: { 
             "Content-Type": "application/json", 
-            "X-Sapo-Access-Token": NEW_SAPO_TOKEN 
+            Authorization: obtain_access_token() 
         },
     });
 
     while (running) {
         try {
-            const resp = await a.get(`https://${NEW_SAPO_DOMAIN}/admin/products.json`, {
+            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
             });
 
-            if (resp.status == 200) {
+            if (resp.status === 200) {
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
                 const products = JSON.parse(raw_data_str).products || [];
                 if (products.length === 0) { running = false; break; }
@@ -277,8 +281,8 @@ export async function get_active_products() {
 
                         variant.inventories.forEach((inventory: any) => {
                             const loc_id = Number(inventory.location_id);
-                            if (loc_id === NEW_SAPO_LOCATION_ID || loc_id === 0) {
-                                p_variant.inventory_level_by_location.set(NEW_SAPO_LOCATION_ID, {
+                            if (loc_id === TARGET_LOCATION_ID || loc_id === 0) {
+                                p_variant.inventory_level_by_location.set(TARGET_LOCATION_ID, {
                                     on_hand: inventory.on_hand,
                                     incoming: inventory.incoming,
                                     available: inventory.available,
@@ -332,94 +336,95 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM LẤY ĐƠN HÀNG TỪ VÙNG BẢO ĐẢM TỐC ĐỘ THEO TRANG
-async function fetchOrdersHelper(domain: string, token: string, locationId: number | null, minTs: number, maxTs: number | null) {
-    let records: RecordItem[] = [];
+// 🟢 TẢI ĐƠN HÀNG QUA PROXY (LOẠI BỎ CHỜ ĐỜI CORS)
+export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+    let a = new Axios({
+        headers: { 
+            "Content-Type": "application/json", 
+            Authorization: obtain_access_token() 
+        },
+    });
+
+    let all_records: RecordItem[] = [];
+    let existing_keys = new Set<string>();
+    
+    const now = new Date();
+    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
+    const min_valid_ts = min_date.getTime();
+
     let page = 1;
     let running = true;
 
-    let axiosClient = new Axios({
-        headers: { "Content-Type": "application/json", "X-Sapo-Access-Token": token },
-    });
-
     while (running) {
         try {
-            let params: any = { limit: 250, page: page, order_by: "created_on desc" };
-            if (locationId) params.location_id = locationId;
-
-            const resp = await axiosClient.get(`https://${domain}/admin/orders.json`, { params });
+            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
+                params: { 
+                    limit: 250, 
+                    page: page, 
+                    location_id: TARGET_LOCATION_ID,
+                    order_by: "created_on desc"
+                },
+            });
 
             if (resp.status === 200) {
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const orders = JSON.parse(raw_data_str).orders || [];
+                const j = JSON.parse(raw_data_str);
+                const orders = j.orders || [];
 
-                if (orders.length === 0) { running = false; break; }
+                if (orders.length === 0) {
+                    running = false;
+                    break;
+                }
 
-                let reached_old = false;
+                let reached_old_date = false;
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
+                        const actual_loc_id = Number(order.location_id || 0);
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // Bỏ qua đơn chưa đủ thời gian hoặc quá cũ
-                        if (order_ts > 0 && order_ts < minTs) {
-                            reached_old = true;
+                        if (order_ts > 0 && order_ts < min_valid_ts) {
+                            reached_old_date = true;
                             break;
                         }
 
-                        if (maxTs && order_ts > maxTs) continue;
-
-                        if (order_ts >= minTs) {
+                        if (order_ts >= min_valid_ts) {
                             const line_items = order.order_line_items || order.line_items || order.items || [];
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
-                                const raw_sku = (line_item.sku || line_item.barcode || "").trim();
-                                if (qty > 0 && raw_sku) {
-                                    records.push({
-                                        sku: raw_sku,
-                                        t_unix: order_ts,
-                                        quantity: qty,
-                                        location_id: NEW_SAPO_LOCATION_ID,
-                                        is_composite: false,
-                                        new_record: true,
-                                        order_id: order.id
-                                    } as OrderRecordV2);
+                                if (qty > 0) {
+                                    const variant_obj = variant_by_id.get(line_item.variant_id);
+                                    const line_id = line_item.id || index;
+
+                                    const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
+                                    if (raw_sku) {
+                                        const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
+                                        if (!existing_keys.has(record_key)) {
+                                            all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                            existing_keys.add(record_key);
+                                        }
+                                    }
                                 }
                             });
                         }
                     }
                 }
 
-                if (reached_old) { running = false; break; }
+                if (reached_old_date) {
+                    running = false;
+                    break;
+                }
+
                 page++;
                 await sleep(10);
-            } else { running = false; }
-        } catch (e) { running = false; }
+            } else { 
+                running = false; 
+            }
+        } catch (e) { 
+            running = false; 
+        }
     }
-    return records;
-}
-
-// 🟢 THUẬT TOÁN KẾT HỢP DỮ LIỆU ĐA SITE (SITE CỦ < 01/09 + SITE MỚI >= 01/09)
-export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
-    const min_valid_ts = min_date.getTime();
-
-    let all_records: RecordItem[] = [];
-
-    // 1. LẤY ĐƠN SITE CŨ (Cho khoảng thời gian từ 31 ngày trước đến hết ngày 31/08/2026)
-    if (min_valid_ts < CUTOFF_TIMESTAMP) {
-        console.log("⏳ Tải đơn lịch sử từ Site Cũ (lyochuyenhanghanquoc)...");
-        const oldRecords = await fetchOrdersHelper(OLD_SAPO_DOMAIN, OLD_SAPO_TOKEN, null, min_valid_ts, CUTOFF_TIMESTAMP);
-        all_records = all_records.concat(oldRecords);
-    }
-
-    // 2. LẤY ĐƠN SITE MỚI (Cho khoảng thời gian từ 01/09/2026 đến nay)
-    console.log("⏳ Tải đơn thời gian thực từ Site Mới (lyovn)...");
-    const newMinTs = Math.max(min_valid_ts, CUTOFF_TIMESTAMP);
-    const newRecords = await fetchOrdersHelper(NEW_SAPO_DOMAIN, NEW_SAPO_TOKEN, NEW_SAPO_LOCATION_ID, newMinTs, null);
-    all_records = all_records.concat(newRecords);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
