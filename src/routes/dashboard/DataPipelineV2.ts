@@ -8,8 +8,9 @@ if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
-    baseUrl = "https://lyo-inventory-proxy-x79b.onrender.com";
+    // 🎯 Đã cập nhật Server Proxy Singapore siêu tốc
+    proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
+    baseUrl = "https://lyo-inventory-proxy-sg.onrender.com";
 }
 
 export interface OrderRecordV2 {
@@ -76,7 +77,7 @@ export interface ProductV2 {
 // 🎯 ID KHO LYO GROUP TRÊN SITE MỚI
 const TARGET_LOCATION_ID = 789505;
 
-// Mốc chuyển đổi dữ liệu 01/09/2026
+// Mốc bắt đầu bàn giao dữ liệu sang Site Mới: 01/09/2026
 const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
 
 export function obtain_access_token() {
@@ -228,7 +229,7 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 TẢI SẢN PHẨM QUA PROXY KHÔNG BỊ LỖI CORS
+// 🟢 TẢI SẢN PHẨM & TỒN KHO TỪ SITE MỚI QUA PROXY SINGAPORE
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -336,45 +337,35 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 TẢI ĐƠN HÀNG QUA PROXY (LOẠI BỎ CHỜ ĐỜI CORS)
-export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let a = new Axios({
-        headers: { 
-            "Content-Type": "application/json", 
-            Authorization: obtain_access_token() 
-        },
-    });
-
-    let all_records: RecordItem[] = [];
+// 🟢 HÀM PHỤ TRỢ TẢI ĐƠN THEO TỪNG SITE SAPO
+async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old", minTs: number, maxTs?: number) {
+    let records: RecordItem[] = [];
     let existing_keys = new Set<string>();
-    
-    const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
-    const min_valid_ts = min_date.getTime();
-
     let page = 1;
     let running = true;
 
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
-                params: { 
-                    limit: 250, 
-                    page: page, 
-                    location_id: TARGET_LOCATION_ID,
-                    order_by: "created_on desc"
-                },
-            });
+            let params: any = { 
+                limit: 250, 
+                page: page, 
+                order_by: "created_on desc"
+            };
+
+            if (siteType === "new") {
+                params.location_id = TARGET_LOCATION_ID;
+            } else {
+                params.site = "old"; // Tham số báo Proxy chuyển hướng sang Site Cũ
+            }
+
+            const resp = await axiosClient.get(`${proxyUrl}/admin/orders.json`, { params });
 
             if (resp.status === 200) {
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                if (orders.length === 0) {
-                    running = false;
-                    break;
-                }
+                if (orders.length === 0) { running = false; break; }
 
                 let reached_old_date = false;
 
@@ -384,26 +375,33 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        if (order_ts > 0 && order_ts < min_valid_ts) {
+                        // Bỏ qua đơn cũ hơn mốc cần lấy
+                        if (order_ts > 0 && order_ts < minTs) {
                             reached_old_date = true;
                             break;
                         }
 
-                        if (order_ts >= min_valid_ts) {
+                        // Nếu có mốc giới hạn trên maxTs thì bỏ qua đơn nằm ngoài khoảng
+                        if (maxTs && order_ts > maxTs) continue;
+
+                        if (order_ts >= minTs) {
                             const line_items = order.order_line_items || order.line_items || order.items || [];
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
-                                if (qty > 0) {
-                                    const variant_obj = variant_by_id.get(line_item.variant_id);
-                                    const line_id = line_item.id || index;
-
-                                    const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
-                                    if (raw_sku) {
-                                        const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
-                                        if (!existing_keys.has(record_key)) {
-                                            all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                            existing_keys.add(record_key);
-                                        }
+                                const raw_sku = (line_item.sku || line_item.barcode || "").trim();
+                                if (qty > 0 && raw_sku) {
+                                    const record_key = `ORD_${order.id}_${index}_${raw_sku}_${actual_loc_id}`;
+                                    if (!existing_keys.has(record_key)) {
+                                        records.push({
+                                            sku: raw_sku,
+                                            t_unix: order_ts,
+                                            quantity: qty,
+                                            location_id: TARGET_LOCATION_ID,
+                                            is_composite: false,
+                                            new_record: true,
+                                            order_id: order.id
+                                        } as OrderRecordV2);
+                                        existing_keys.add(record_key);
                                     }
                                 }
                             });
@@ -411,19 +409,39 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 }
 
-                if (reached_old_date) {
-                    running = false;
-                    break;
-                }
-
+                if (reached_old_date) { running = false; break; }
                 page++;
                 await sleep(10);
-            } else { 
-                running = false; 
-            }
-        } catch (e) { 
-            running = false; 
-        }
+            } else { running = false; }
+        } catch (e) { running = false; }
+    }
+    return records;
+}
+
+// 🟢 TỰ ĐỘNG CHUYỂN ĐỔI SITE THEO THỜI GIAN
+export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+    let a = new Axios({
+        headers: { 
+            "Content-Type": "application/json", 
+            Authorization: obtain_access_token() 
+        },
+    });
+
+    let all_records: RecordItem[] = [];
+    
+    const now = new Date();
+    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
+    const min_valid_ts = min_date.getTime();
+
+    // 1. Tải đơn từ Site Mới (cho các đơn phát sinh từ 01/09/2026 đến nay)
+    const newSiteMinTs = Math.max(min_valid_ts, CUTOFF_TIMESTAMP);
+    const newSiteRecords = await fetchOrdersFromProxy(a, "new", newSiteMinTs);
+    all_records = all_records.concat(newSiteRecords);
+
+    // 2. Chỉ tải từ Site Cũ khi mốc 31 ngày vượt qua 01/09/2026 (Chưa đủ 31 ngày dữ liệu ở site mới)
+    if (min_valid_ts < CUTOFF_TIMESTAMP) {
+        const oldSiteRecords = await fetchOrdersFromProxy(a, "old", min_valid_ts, CUTOFF_TIMESTAMP);
+        all_records = all_records.concat(oldSiteRecords);
     }
 
     await updateIndexedDB(all_records);
