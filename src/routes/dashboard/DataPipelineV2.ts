@@ -1,4 +1,3 @@
-import { Axios } from "axios";
 import { type Location } from "./Template";
 
 let proxyUrl: string;
@@ -105,7 +104,6 @@ export function is_promotional_item(brand: string, name: string = "") {
     return false;
 }
 
-// 🟢 HÀM TÍNH RESTOCK NGUYÊN BẢN (CHỈ CỘNG DỒN ĐƠN TRONG 31 NGÀY GẦN NHẤT)
 export function calculate_restock_data(
     records: RecordItem[],
     variant_by_id: Map<number, ProductV2>,
@@ -138,7 +136,6 @@ export function calculate_restock_data(
             });
         }
 
-        // 🎯 ĐIỀU KIỆN CỐT LÕI: Chỉ tính các đơn thực sự có t_unix nằm trong dải 31 ngày gần đây
         if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
             const current_sales = sales_by_sku.get(clean_sku) || 0;
             sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
@@ -241,23 +238,17 @@ export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
-
-    let a = new Axios({
-        headers: { 
-            "Content-Type": "application/json", 
-            Authorization: obtain_access_token() 
-        },
-    });
+    const token = obtain_access_token();
 
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
-                params: { limit: 250, page: page, status: "active" },
+            const resp = await fetch(`${proxyUrl}/admin/products.json?limit=250&page=${page}&status=active`, {
+                headers: { "Authorization": token, "Content-Type": "application/json" }
             });
 
-            if (resp.status === 200) {
-                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const products = JSON.parse(raw_data_str).products || [];
+            if (resp.ok) {
+                const j = await resp.json();
+                const products = j.products || [];
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
@@ -349,29 +340,30 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🎯 NGUYÊN BẢN CƠ CHẾ KÉO ĐƠN SÁNG NAY (CHỈ TRUYỀN PARAM NGUYÊN BẢN)
-async function fetchOrdersFromSingleSite(axiosClient: Axios, isOldSite: boolean = false) {
+// 🟢 CHUYỂN SANG DÙNG FETCH CHUẨN ĐỂ ĐẢM BẢO PROXY KHÔNG BỊ TRUYỀN LỖI HEADER
+async function fetchOrdersFromSingleSite(isOldSite: boolean = false) {
     let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
+    const token = obtain_access_token();
 
     while (running) {
         try {
-            let params: any = { 
-                limit: 250, 
-                page: page, 
-                order_by: "created_on desc" 
-            };
-            
+            let url = `${proxyUrl}/admin/orders.json?limit=250&page=${page}&order_by=created_on+desc`;
             if (isOldSite) {
-                params.site = "old";
+                url += `&site=old`;
             }
 
-            const resp = await axiosClient.get(`${proxyUrl}/admin/orders.json`, { params });
+            const resp = await fetch(url, {
+                method: "GET",
+                headers: {
+                    "Authorization": token,
+                    "Content-Type": "application/json"
+                }
+            });
 
-            if (resp.status === 200) {
-                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const j = JSON.parse(raw_data_str);
+            if (resp.ok) {
+                const j = await resp.json();
                 const orders = j.orders || [];
 
                 console.log(`[CONSOLE LOG] [${isOldSite ? "SITE CỦ" : "SITE MỚI"}] Trang ${page}: Trả về ${orders.length} đơn`);
@@ -379,9 +371,7 @@ async function fetchOrdersFromSingleSite(axiosClient: Axios, isOldSite: boolean 
                 if (orders.length === 0) { running = false; break; }
 
                 for (const order of orders) {
-                    // TẦNG LỌC 1: Bỏ đơn hủy
                     if (order.status !== "cancelled") {
-                        // TẦNG LỌC 2: Bóc tách chính xác mốc thời gian hoàn thành xuất kho
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
@@ -412,21 +402,14 @@ async function fetchOrdersFromSingleSite(axiosClient: Axios, isOldSite: boolean 
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let a = new Axios({
-        headers: { 
-            "Content-Type": "application/json", 
-            Authorization: obtain_access_token() 
-        },
-    });
-
     let all_records: OrderRecordV2[] = [];
 
     // 1. Kéo Site Mới
-    const newSiteRecords = await fetchOrdersFromSingleSite(a, false);
+    const newSiteRecords = await fetchOrdersFromSingleSite(false);
     all_records = all_records.concat(newSiteRecords);
 
     // 2. Kéo Site Cũ
-    const oldSiteRecords = await fetchOrdersFromSingleSite(a, true);
+    const oldSiteRecords = await fetchOrdersFromSingleSite(true);
     all_records = all_records.concat(oldSiteRecords);
 
     console.log(`[CONSOLE LOG] TỔNG BẢN GHI ĐƠN XUẤT KHO THU ĐƯỢC 2 SITE: ${all_records.length}`);
