@@ -114,7 +114,8 @@ export function calculate_restock_data(
     variant_by_id: Map<number, ProductV2>,
     location_id: number,
 ) {
-    console.log(`[DEBUG] calculate_restock_data với ${records.length} bản ghi đơn hàng và ${variant_by_id.size} sản phẩm`);
+    console.log(`====================================================`);
+    console.log(`[BƯỚC 3: TỔNG HỢP] Đang cộng dồn ${records.length} bản ghi đơn từ cả 2 site...`);
 
     records.sort((a, b) => b.t_unix - a.t_unix);
 
@@ -150,7 +151,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.log(`[DEBUG] Số đơn hàng khớp SKU trong 31 ngày qua: ${matched_records_count}`);
+    console.log(`[LOG TỔNG HỢP] Khớp thành công ${matched_records_count} chi tiết đơn vào danh sách SKU`);
 
     let count_has_sales = 0;
     variant_by_id.forEach((variant) => {
@@ -172,7 +173,8 @@ export function calculate_restock_data(
         if (variant.c_restock > 0) count_has_sales++;
     });
 
-    console.log(`[DEBUG] Tổng số sản phẩm có doanh số (c_restock > 0): ${count_has_sales}`);
+    console.log(`[LOG TỔNG HỢP] SỐ SẢN PHẨM CÓ DOANH SỐ (c_restock > 0): ${count_has_sales}`);
+    console.log(`====================================================`);
 
     return get_items_need_restock(variant_by_id, TARGET_LOCATION_ID_NEW);
 }
@@ -191,7 +193,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
             result.push(variant);
         }
     });
-    console.log(`[DEBUG] Tab 1 (Cần đặt ngay): ${result.length} sản phẩm`);
+    console.log(`[KẾT QUẢ TAB 1] Cần đặt ngay: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -207,7 +209,7 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
             result.push(variant);
         }
     });
-    console.log(`[DEBUG] Tab 2 (Tồn kho an toàn): ${result.length} sản phẩm`);
+    console.log(`[KẾT QUẢ TAB 2] Tồn kho an toàn: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -226,7 +228,7 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
             result.push(variant);
         }
     });
-    console.log(`[DEBUG] Tab 3 (Hàng bị đứt): ${result.length} sản phẩm`);
+    console.log(`[KẾT QUẢ TAB 3] Hàng bị đứt: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -301,22 +303,23 @@ export async function get_active_products() {
                             order_history_by_location: new Set<number>()
                         };
 
-                        let total_on_hand = 0;
-                        let total_incoming = 0;
-                        let total_available = 0;
+                        let loc_on_hand = 0;
+                        let loc_incoming = 0;
+                        let loc_available = 0;
 
                         if (variant.inventories && variant.inventories.length > 0) {
-                            variant.inventories.forEach((inventory: any) => {
-                                total_on_hand += Number(inventory.on_hand || 0);
-                                total_incoming += Number(inventory.incoming || 0);
-                                total_available += Number(inventory.available ?? inventory.on_hand ?? 0);
-                            });
+                            const target_inv = variant.inventories.find((inv: any) => Number(inv.location_id) === TARGET_LOCATION_ID_NEW) || variant.inventories[0];
+                            if (target_inv) {
+                                loc_on_hand = Number(target_inv.on_hand || 0);
+                                loc_incoming = Number(target_inv.incoming || 0);
+                                loc_available = Number(target_inv.available ?? target_inv.on_hand ?? 0);
+                            }
                         }
 
                         p_variant.inventory_level_by_location.set(TARGET_LOCATION_ID_NEW, {
-                            on_hand: total_on_hand,
-                            incoming: total_incoming,
-                            available: total_available,
+                            on_hand: loc_on_hand,
+                            incoming: loc_incoming,
+                            available: loc_available,
                             sold: 0,
                             mac: Number(variant.inventories?.[0]?.mac || 0)
                         });
@@ -330,7 +333,6 @@ export async function get_active_products() {
             } else { running = false; }
         } catch (e) { running = false; }
     }
-    console.log(`[DEBUG] Tổng số sản phẩm active lấy về: ${p_variant_by_ids.size}`);
     return p_variant_by_ids;
 }
 
@@ -366,28 +368,24 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 TẢI ĐƠN QUA PROXY RENDER (PROXỴ SẼ TỰ GẮN TOKEN CHUẨN TƯƠNG ỨNG MỖI SITE)
-async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old", minTs: number, maxTs?: number) {
+// 🟢 HÀM LẤY ĐƠN ĐƠN LẺ CHO TỪNG SITE
+async function fetchOrdersSingleSite(axiosClient: Axios, siteType: "new" | "old", locationId: number, minTs: number, maxTs?: number) {
     let records: RecordItem[] = [];
-    let existing_keys = new Set<string>();
     let page = 1;
     let running = true;
 
-    console.log(`[DEBUG] Gọi Proxy tải đơn site [${siteType.toUpperCase()}]. minTs: ${new Date(minTs).toLocaleString()}`);
+    console.log(`----------------------------------------------------`);
+    console.log(`[BẮT ĐẦU KÉO SITE ${siteType.toUpperCase()}] Dải thời gian: ${new Date(minTs).toLocaleDateString()} -> ${maxTs ? new Date(maxTs).toLocaleDateString() : 'Hôm nay'}`);
 
-    while (running) {
+    while (running && page <= 10) { // Giới hạn 10 trang trang đầu để test siêu nhanh
         try {
             let params: any = { 
                 limit: 250, 
-                page: page, 
-                order_by: "created_on desc"
+                page: page
             };
 
-            if (siteType === "new") {
-                params.location_id = TARGET_LOCATION_ID_NEW;
-            } else {
-                params.site = "old"; // Proxy Render thấy param site=old sẽ tự lấy OLD_SAPO_ACCESS_TOKEN & OLD_SAPO_STORE_NAME
-                params.location_id = TARGET_LOCATION_ID_OLD;
+            if (siteType === "old") {
+                params.site = "old";
             }
 
             const resp = await axiosClient.get(`${proxyUrl}/admin/orders.json`, { params });
@@ -397,66 +395,49 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`[DEBUG] Site [${siteType.toUpperCase()}] Trang ${page}: Trả về ${orders.length} đơn`);
+                console.log(`  └─ Trang ${page}: Sapo trả về ${orders.length} đơn hàng`);
 
                 if (orders.length === 0) { running = false; break; }
 
-                let reached_old_date = false;
-
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
-                        const actual_loc_id = Number(order.location_id || 0);
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        if (order_ts > 0 && order_ts < minTs) {
-                            reached_old_date = true;
-                            break;
-                        }
-
-                        if (maxTs && order_ts > maxTs) continue;
-
-                        if (order_ts >= minTs) {
-                            const line_items = order.order_line_items || order.line_items || order.items || [];
-                            line_items.forEach((line_item: any, index: number) => {
-                                const qty = Number(line_item.quantity) || 0;
-                                const raw_sku = (line_item.sku || line_item.barcode || "").trim();
-                                if (qty > 0 && raw_sku) {
-                                    const record_key = `ORD_${order.id}_${index}_${raw_sku}_${actual_loc_id}`;
-                                    if (!existing_keys.has(record_key)) {
-                                        records.push({
-                                            sku: raw_sku,
-                                            t_unix: order_ts,
-                                            quantity: qty,
-                                            location_id: TARGET_LOCATION_ID_NEW,
-                                            is_composite: false,
-                                            new_record: true,
-                                            order_id: order.id
-                                        } as OrderRecordV2);
-                                        existing_keys.add(record_key);
-                                    }
-                                }
-                            });
-                        }
+                        const line_items = order.order_line_items || order.line_items || order.items || [];
+                        line_items.forEach((line_item: any, index: number) => {
+                            const qty = Number(line_item.quantity) || 0;
+                            const raw_sku = (line_item.sku || line_item.barcode || "").trim();
+                            if (qty > 0 && raw_sku) {
+                                records.push({
+                                    sku: raw_sku,
+                                    t_unix: order_ts,
+                                    quantity: qty,
+                                    location_id: TARGET_LOCATION_ID_NEW,
+                                    is_composite: false,
+                                    new_record: true,
+                                    order_id: order.id
+                                } as OrderRecordV2);
+                            }
+                        });
                     }
                 }
-
-                if (reached_old_date) { running = false; break; }
                 page++;
                 await sleep(10);
             } else { 
-                console.error(`[ERROR] Site [${siteType.toUpperCase()}] lỗi status code: ${resp.status}`);
+                console.error(`  └─ LỖI HTTP Status: ${resp.status}`);
                 running = false; 
             }
         } catch (e: any) { 
-            console.error(`[ERROR] Site [${siteType.toUpperCase()}] exception:`, e?.message || e);
+            console.error(`  └─ LỖI Exception:`, e?.message || e);
             running = false; 
         }
     }
-    console.log(`[DEBUG] Hoàn tất site [${siteType.toUpperCase()}]: Thu được ${records.length} chi tiết đơn`);
+    console.log(`[HOÀN TẤT SITE ${siteType.toUpperCase()}] Thu thập được tổng cộng ${records.length} chi tiết sản phẩm bán ra.`);
     return records;
 }
 
+// 🟢 CHẠY ĐỘC LẬP TỪNG BƯỚC ĐỂ SOI TRONG CONSOLE
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { 
@@ -471,24 +452,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     const today_start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
     const target_31_days_ago = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0).getTime();
 
-    const ms_per_day = 24 * 60 * 60 * 1000;
-    const days_on_new_site = Math.max(0, Math.floor((today_start - CUTOFF_TIMESTAMP) / ms_per_day));
-
-    console.log(`[DEBUG] Ngày hôm nay: ${now.toLocaleDateString()}, Site mới đã chạy: ${days_on_new_site} ngày`);
-
+    // 1. TẢI ĐỘC LẬP SITE MỚI
     const newSiteMinTs = Math.max(target_31_days_ago, CUTOFF_TIMESTAMP);
-    const newSiteRecords = await fetchOrdersFromProxy(a, "new", newSiteMinTs);
+    const newSiteRecords = await fetchOrdersSingleSite(a, "new", TARGET_LOCATION_ID_NEW, newSiteMinTs);
     all_records = all_records.concat(newSiteRecords);
 
-    if (days_on_new_site < 31) {
-        const oldSiteMinTs = target_31_days_ago;
-        const oldSiteMaxTs = OLD_SITE_MAX_TIMESTAMP;
-
-        const oldSiteRecords = await fetchOrdersFromProxy(a, "old", oldSiteMinTs, oldSiteMaxTs);
-        all_records = all_records.concat(oldSiteRecords);
-    }
-
-    console.log(`[DEBUG] TỔNG BẢN GHI ĐƠN HÀNG THU ĐƯỢC CẢ 2 SITE: ${all_records.length}`);
+    // 2. TẢI ĐỘC LẬP SITE CỦ (TẢI BÙ THÁNG 8)
+    const oldSiteMinTs = target_31_days_ago;
+    const oldSiteMaxTs = OLD_SITE_MAX_TIMESTAMP;
+    const oldSiteRecords = await fetchOrdersSingleSite(a, "old", TARGET_LOCATION_ID_OLD, oldSiteMinTs, oldSiteMaxTs);
+    all_records = all_records.concat(oldSiteRecords);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
