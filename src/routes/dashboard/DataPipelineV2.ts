@@ -1,11 +1,16 @@
+import { Axios } from "axios";
 import { type Location } from "./Template";
 
 let proxyUrl: string;
+let baseUrl: string;
 
 if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
+    baseUrl = "http://localhost:8080";
 } else {
-    proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
+    // 🟢 DÙNG PROXY US CỦ
+    proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
+    baseUrl = "https://lyo-inventory-proxy.onrender.com";
 }
 
 export interface OrderRecordV2 {
@@ -71,20 +76,10 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 ÉP LẤY TOKEN MỚI TỪ RENDER ENVIRONMENT (ƯU TIÊN HÀNG ĐẦU)
-export function obtain_raw_token(isOldSite: boolean = false) {
-    let token = "";
-    if (isOldSite) {
-        token = import.meta.env.VITE_OLD_SAPO_ACCESS_TOKEN || import.meta.env.OLD_SAPO_ACCESS_TOKEN || import.meta.env.OLD_TOKEN || "";
-    } else {
-        token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || import.meta.env.TOKEN || "";
-    }
-    
-    // Nếu Render chưa có thì mới fallback lấy trong storage
-    if (!token) {
-        token = sessionStorage.getItem(isOldSite ? "old_token" : "token") || localStorage.getItem(isOldSite ? "old_token" : "token") || "";
-    }
-    return token.replace("Bearer ", "").trim();
+// 🟢 LẤY TOKEN NGUYÊN BẢN BAN ĐẦU
+export function obtain_access_token() {
+    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || import.meta.env.TOKEN || sessionStorage.getItem("token") || localStorage.getItem("token") || "";
+    return "Bearer " + token.replace("Bearer ", "").trim();
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -245,21 +240,23 @@ export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
-    const rawToken = obtain_raw_token(false);
+
+    let a = new Axios({
+        headers: { 
+            "Content-Type": "application/json", 
+            Authorization: obtain_access_token() 
+        },
+    });
 
     while (running) {
         try {
-            const resp = await fetch(`${proxyUrl}/admin/products.json?limit=250&page=${page}&status=active`, {
-                headers: { 
-                    "Authorization": `Bearer ${rawToken}`,
-                    "X-Sapo-Access-Token": rawToken,
-                    "Content-Type": "application/json" 
-                }
+            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
+                params: { limit: 250, page: page, status: "active" },
             });
 
-            if (resp.ok) {
-                const j = await resp.json();
-                const products = j.products || [];
+            if (resp.status === 200) {
+                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+                const products = JSON.parse(raw_data_str).products || [];
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
@@ -351,33 +348,28 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-async function fetchOrdersFromSingleSite(isOldSite: boolean = false) {
+// 🎯 KÉO DATA TỪ PROXY US VỚI CẤU HÌNH CỦ
+export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+    let a = new Axios({
+        headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
+    });
+
     let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
-    const rawToken = obtain_raw_token(isOldSite);
 
     while (running) {
         try {
-            let url = `${proxyUrl}/admin/orders.json?limit=250&page=${page}&order_by=created_on+desc`;
-            if (isOldSite) {
-                url += `&site=old`;
-            }
-
-            const resp = await fetch(url, {
-                method: "GET",
-                headers: {
-                    "Authorization": `Bearer ${rawToken}`,
-                    "X-Sapo-Access-Token": rawToken,
-                    "Content-Type": "application/json"
-                }
+            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
+                params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
-            if (resp.ok) {
-                const j = await resp.json();
+            if (resp.status === 200) {
+                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+                const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`[CONSOLE LOG] [${isOldSite ? "SITE CỦ" : "SITE MỚI"}] Trang ${page}: Trả về ${orders.length} đơn hàng`);
+                console.log(`[CONSOLE LOG] [PROXY US NGUYÊN BẢN] Trang ${page}: Trả về ${orders.length} đơn`);
 
                 if (orders.length === 0) { running = false; break; }
 
@@ -409,25 +401,12 @@ async function fetchOrdersFromSingleSite(isOldSite: boolean = false) {
             } else { running = false; }
         } catch (e) { running = false; }
     }
-    return records;
-}
 
-export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let all_records: OrderRecordV2[] = [];
+    console.log(`[CONSOLE LOG] TỔNG BẢN GHI KÉO TỪ PROXY US CỦ: ${records.length}`);
 
-    // 1. Kéo Site Mới
-    const newSiteRecords = await fetchOrdersFromSingleSite(false);
-    all_records = all_records.concat(newSiteRecords);
-
-    // 2. Kéo Site Cũ
-    const oldSiteRecords = await fetchOrdersFromSingleSite(true);
-    all_records = all_records.concat(oldSiteRecords);
-
-    console.log(`[CONSOLE LOG] TỔNG BẢN GHI THU ĐƯỢC 2 SITE: ${all_records.length}`);
-
-    await updateIndexedDB(all_records);
+    await updateIndexedDB(records);
     setLastDataUpdate();
-    return all_records;
+    return records;
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
