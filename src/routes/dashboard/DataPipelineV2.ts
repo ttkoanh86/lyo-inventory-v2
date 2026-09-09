@@ -74,8 +74,6 @@ export interface ProductV2 {
 }
 
 const TARGET_LOCATION_ID_NEW = 789505;
-const TARGET_LOCATION_ID_OLD = 781327;
-
 const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
 const OLD_SITE_MAX_TIMESTAMP = CUTOFF_TIMESTAMP - 1;
 
@@ -115,7 +113,7 @@ export function calculate_restock_data(
     location_id: number,
 ) {
     console.log(`====================================================`);
-    console.log(`[BƯỚC 3: TỔNG HỢP] Đang cộng dồn ${records.length} bản ghi đơn từ cả 2 site...`);
+    console.log(`[TỔNG HỢP] Nhận tổng cộng ${records.length} đơn hàng từ cả 2 site để tính restock.`);
 
     records.sort((a, b) => b.t_unix - a.t_unix);
 
@@ -151,7 +149,7 @@ export function calculate_restock_data(
         }
     }
 
-    console.log(`[LOG TỔNG HỢP] Khớp thành công ${matched_records_count} chi tiết đơn vào danh sách SKU`);
+    console.log(`[TỔNG HỢP] Đã khớp ${matched_records_count} chi tiết đơn vào danh sách SKU.`);
 
     let count_has_sales = 0;
     variant_by_id.forEach((variant) => {
@@ -173,7 +171,7 @@ export function calculate_restock_data(
         if (variant.c_restock > 0) count_has_sales++;
     });
 
-    console.log(`[LOG TỔNG HỢP] SỐ SẢN PHẨM CÓ DOANH SỐ (c_restock > 0): ${count_has_sales}`);
+    console.log(`[TỔNG HỢP] Tổng số sản phẩm có c_restock > 0: ${count_has_sales}`);
     console.log(`====================================================`);
 
     return get_items_need_restock(variant_by_id, TARGET_LOCATION_ID_NEW);
@@ -193,7 +191,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
             result.push(variant);
         }
     });
-    console.log(`[KẾT QUẢ TAB 1] Cần đặt ngay: ${result.length} sản phẩm`);
+    console.log(`[TAB 1] Cần đặt ngay: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -209,7 +207,7 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
             result.push(variant);
         }
     });
-    console.log(`[KẾT QUẢ TAB 2] Tồn kho an toàn: ${result.length} sản phẩm`);
+    console.log(`[TAB 2] Tồn kho an toàn: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -228,7 +226,7 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
             result.push(variant);
         }
     });
-    console.log(`[KẾT QUẢ TAB 3] Hàng bị đứt: ${result.length} sản phẩm`);
+    console.log(`[TAB 3] Hàng bị đứt: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -368,20 +366,21 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM LẤY ĐƠN ĐƠN LẺ CHO TỪNG SITE
-async function fetchOrdersSingleSite(axiosClient: Axios, siteType: "new" | "old", locationId: number, minTs: number, maxTs?: number) {
-    let records: RecordItem[] = [];
+// 🟢 TẢI ĐƠN SITE CÓ BẮT MỐC THỜI GIAN VÀ CHÂN THỰC THEO TỪNG TRANG
+async function fetchOrdersForSite(axiosClient: Axios, siteType: "new" | "old", minTs: number, maxTs?: number) {
+    let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
 
     console.log(`----------------------------------------------------`);
-    console.log(`[BẮT ĐẦU KÉO SITE ${siteType.toUpperCase()}] Dải thời gian: ${new Date(minTs).toLocaleDateString()} -> ${maxTs ? new Date(maxTs).toLocaleDateString() : 'Hôm nay'}`);
+    console.log(`[KÉO ĐƠN ${siteType.toUpperCase()}] Dải thời gian: ${new Date(minTs).toLocaleString()} -> ${maxTs ? new Date(maxTs).toLocaleString() : 'Hôm nay'}`);
 
-    while (running && page <= 10) { // Giới hạn 10 trang trang đầu để test siêu nhanh
+    while (running) {
         try {
             let params: any = { 
                 limit: 250, 
-                page: page
+                page: page, 
+                order_by: "created_on desc"
             };
 
             if (siteType === "old") {
@@ -395,17 +394,33 @@ async function fetchOrdersSingleSite(axiosClient: Axios, siteType: "new" | "old"
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`  └─ Trang ${page}: Sapo trả về ${orders.length} đơn hàng`);
+                console.log(`  └─ Trang ${page}: Trả về ${orders.length} đơn`);
 
-                if (orders.length === 0) { running = false; break; }
+                if (orders.length === 0) { 
+                    running = false; 
+                    break; 
+                }
+
+                let should_stop_after_page = false;
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
+                        // Ngắt nếu đơn đã trôi qua mốc thời gian tối thiểu
+                        if (order_ts > 0 && order_ts < minTs) {
+                            should_stop_after_page = true;
+                            continue;
+                        }
+
+                        // Bỏ qua đơn vượt mốc maxTs (dành cho Site Cũ tránh lấy đơn tháng 9)
+                        if (maxTs && order_ts > maxTs) {
+                            continue;
+                        }
+
                         const line_items = order.order_line_items || order.line_items || order.items || [];
-                        line_items.forEach((line_item: any, index: number) => {
+                        line_items.forEach((line_item: any) => {
                             const qty = Number(line_item.quantity) || 0;
                             const raw_sku = (line_item.sku || line_item.barcode || "").trim();
                             if (qty > 0 && raw_sku) {
@@ -417,27 +432,35 @@ async function fetchOrdersSingleSite(axiosClient: Axios, siteType: "new" | "old"
                                     is_composite: false,
                                     new_record: true,
                                     order_id: order.id
-                                } as OrderRecordV2);
+                                });
                             }
                         });
                     }
                 }
+
+                if (should_stop_after_page) {
+                    console.log(`  └─ Đã chạm mốc ngày cũ nhất (${new Date(minTs).toLocaleDateString()}). Dừng kéo thêm.`);
+                    running = false;
+                    break;
+                }
+
                 page++;
-                await sleep(10);
+                await sleep(15);
             } else { 
-                console.error(`  └─ LỖI HTTP Status: ${resp.status}`);
+                console.error(`  └─ Lỗi HTTP Status: ${resp.status}`);
                 running = false; 
             }
         } catch (e: any) { 
-            console.error(`  └─ LỖI Exception:`, e?.message || e);
+            console.error(`  └─ Lỗi Exception:`, e?.message || e);
             running = false; 
         }
     }
-    console.log(`[HOÀN TẤT SITE ${siteType.toUpperCase()}] Thu thập được tổng cộng ${records.length} chi tiết sản phẩm bán ra.`);
+
+    console.log(`[KẾT QUẢ ${siteType.toUpperCase()}] Thu thập được ${records.length} chi tiết mặt hàng bán ra.`);
     return records;
 }
 
-// 🟢 CHẠY ĐỘC LẬP TỪNG BƯỚC ĐỂ SOI TRONG CONSOLE
+// 🟢 THỰC HIỆN TÍNH THỜI GIAN THIẾU VÀ KÉO ĐƠN 2 SITE CHUẨN XÁC
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { 
@@ -446,26 +469,41 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         },
     });
 
-    let all_records: RecordItem[] = [];
+    let all_records: OrderRecordV2[] = [];
     
+    // 1. Lấy mốc thời gian ngày hôm nay (0h00)
     const now = new Date();
     const today_start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
     const target_31_days_ago = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0).getTime();
 
-    // 1. TẢI ĐỘC LẬP SITE MỚI
+    // 2. Tính số ngày Site Mới đã chạy (kể từ 01/09/2026)
+    const ms_per_day = 24 * 60 * 60 * 1000;
+    const days_on_new_site = Math.max(0, Math.floor((today_start - CUTOFF_TIMESTAMP) / ms_per_day));
+
+    console.log(`[THỜI GIAN HÔM NAY]: ${now.toLocaleDateString()} | Site Mới đã chạy: ${days_on_new_site} ngày`);
+
+    // 3. KÉO ĐƠN SITE MỚI (Từ 01/09/2026 -> Hôm nay)
     const newSiteMinTs = Math.max(target_31_days_ago, CUTOFF_TIMESTAMP);
-    const newSiteRecords = await fetchOrdersSingleSite(a, "new", TARGET_LOCATION_ID_NEW, newSiteMinTs);
+    const newSiteRecords = await fetchOrdersForSite(a, "new", newSiteMinTs);
     all_records = all_records.concat(newSiteRecords);
 
-    // 2. TẢI ĐỘC LẬP SITE CỦ (TẢI BÙ THÁNG 8)
-    const oldSiteMinTs = target_31_days_ago;
-    const oldSiteMaxTs = OLD_SITE_MAX_TIMESTAMP;
-    const oldSiteRecords = await fetchOrdersSingleSite(a, "old", TARGET_LOCATION_ID_OLD, oldSiteMinTs, oldSiteMaxTs);
-    all_records = all_records.concat(oldSiteRecords);
+    // 4. KÉO ĐƠN SITE CỦ (Tải bù phần ngày còn thiếu, tối đa đến 31/08/2026 23:59:59)
+    if (days_on_new_site < 31) {
+        const missing_days = 31 - days_on_new_site;
+        console.log(`[THỜI GIAN CẦN BÙ]: Thiếu ${missing_days} ngày. Tiến hành kéo bù từ Site Cũ...`);
+
+        const oldSiteMinTs = target_31_days_ago;
+        const oldSiteMaxTs = OLD_SITE_MAX_TIMESTAMP;
+
+        const oldSiteRecords = await fetchOrdersForSite(a, "old", oldSiteMinTs, oldSiteMaxTs);
+        all_records = all_records.concat(oldSiteRecords);
+    }
+
+    console.log(`[TỔNG CỘNG 2 SITE] Số chi tiết đơn thu về: ${all_records.length}`);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
-    return all_records as OrderRecordV2[];
+    return all_records;
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
