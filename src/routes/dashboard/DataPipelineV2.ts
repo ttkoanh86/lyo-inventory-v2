@@ -1,9 +1,6 @@
 import { Axios } from "axios";
 import { type Location } from "./Template";
 
-let proxyUrl: string;
-let baseUrl: string;
-
 export interface OrderRecordV2 {
     sku: string;
     t_unix: number;
@@ -65,13 +62,18 @@ export interface ProductV2 {
     order_history_by_location: Set<number>;
 }
 
-if (import.meta.env.MODE === "development") {
-    proxyUrl = "http://localhost:8080/api";
-    baseUrl = "http://localhost:8080";
-} else {
-    proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
-    baseUrl = "https://lyo-inventory-proxy-x79b.onrender.com";
-}
+// =========================================================================
+// 🎯 CẤU HÌNH THÔNG TIN 2 SITE SAPO CỦA LYO
+// =========================================================================
+const OLD_SAPO_DOMAIN = "lyochuyenhanghanquoc.mysapogo.com";
+const OLD_SAPO_TOKEN  = "42cd092e162a446ca26b6ae8c9902d78";
+
+const NEW_SAPO_DOMAIN       = "lyovn.mysapogo.com";
+const NEW_SAPO_TOKEN        = "b3e0a88853e2496c9641800adb465097";
+const NEW_SAPO_LOCATION_ID  = 789505; // ID Kho LYO GROUP trên site mới
+
+// Mốc bàn giao dữ liệu: 01/09/2026
+const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
 
 export function obtain_access_token() {
     const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || "";
@@ -88,7 +90,6 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 HAM KIEM TRA HANG KHUYEN MAI / KHONG BAN (SALE, TANG, KDH)
 export function is_promotional_item(brand: string) {
     if (!brand) return false;
     const br = brand.trim().toLowerCase();
@@ -108,7 +109,7 @@ export function calculate_restock_data(
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
     const now_ts = now.getTime();
-    const target_location_id = Number(location_id || 0);
+    const target_loc = Number(location_id || NEW_SAPO_LOCATION_ID);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku && !variant.is_composite) {
@@ -117,22 +118,19 @@ export function calculate_restock_data(
     }
 
     for (let record of records) {
-        const rec_loc = Number(record.location_id || 0);
         const clean_sku = (record.sku || "").trim();
 
-        if (clean_sku && rec_loc > 0) {
+        if (clean_sku) {
             variant_by_id.forEach((v) => {
                 if (v.sku && v.sku.trim() === clean_sku) {
-                    v.order_history_by_location.add(rec_loc);
+                    v.order_history_by_location.add(target_loc);
                 }
             });
         }
 
-        if (target_location_id === 0 || rec_loc === target_location_id || rec_loc === 0) {
-            if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-                const current_sales = sales_by_sku.get(clean_sku) || 0;
-                sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
-            }
+        if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
+            const current_sales = sales_by_sku.get(clean_sku) || 0;
+            sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
         }
     }
 
@@ -142,7 +140,7 @@ export function calculate_restock_data(
             return;
         }
 
-        const inventory = variant.inventory_level_by_location.get(target_location_id);
+        const inventory = variant.inventory_level_by_location.get(target_loc);
 
         variant.c_available = inventory ? Math.max(0, inventory.available ?? inventory.on_hand ?? 0) : 0;
         variant.c_incoming = inventory ? Math.max(0, inventory.incoming ?? 0) : 0;
@@ -154,10 +152,9 @@ export function calculate_restock_data(
         variant.c_restock = Math.round(sales);
     });
 
-    return get_items_need_restock(variant_by_id, target_location_id);
+    return get_items_need_restock(variant_by_id, target_loc);
 }
 
-// 🟢 TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -175,7 +172,6 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -191,7 +187,6 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 TAB 3 CHUẨN XÁC: HÀNG BỊ ĐỨT TẠI KHO DÀNH CHO CÁC SẢN PHẨM ĐANG KINH DOANH
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
 
@@ -201,7 +196,6 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
 
-        // BẮT BỤC: Là sản phẩm chuẩn đang kinh doanh (có giá bán lẻ > 0 và có ảnh)
         const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
 
         if (sales === 0 && current_has === 0 && is_valid_product) {
@@ -215,36 +209,9 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
 }
 
 export async function get_locations(): Promise<Location[]> {
-    let a = new Axios({
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: obtain_access_token(),
-        },
-    });
-
-    let location_by_id: Location[] = [];
-    try {
-        let resp = await a.get(`${proxyUrl}/admin/locations.json`);
-        if (resp.status === 200) {
-            let locs = typeof resp.data === "string" ? JSON.parse(resp.data).locations : resp.data.locations;
-            (locs || []).forEach((loc: any) => {
-                let addrs: string[] = [loc.address1, loc.address2, loc.district, loc.city, loc.country].filter((v) => v != "" && v != null);
-                if (Number(loc.id) === 781327) {
-                    location_by_id.unshift({ id: 781327, address: addrs.join(", "), label: loc.label || loc.name });
-                } else {
-                    location_by_id.push({ id: Number(loc.id), address: addrs.join(", "), label: loc.label || loc.name });
-                }
-            });
-        }
-    } catch (e) {}
-
-    if (location_by_id.length === 0) {
-        location_by_id = [
-            { id: 781327, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
-            { id: 122671, label: "Chi nhánh Trung tâm", address: "Mặc định" }
-        ];
-    }
-    return location_by_id;
+    return [
+        { id: NEW_SAPO_LOCATION_ID, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" }
+    ];
 }
 
 export function isFirstTime() { return true; }
@@ -257,18 +224,22 @@ export function normalizeString(input: string): string {
     return str;
 }
 
+// 🟢 TẢI DANH SÁCH SẢN PHẨM & TỒN KHO TỪ SITE MỚI (LYOVN.MYSAPOGO.COM)
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
 
     let a = new Axios({
-        headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
+        headers: { 
+            "Content-Type": "application/json", 
+            "X-Sapo-Access-Token": NEW_SAPO_TOKEN 
+        },
     });
 
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
+            const resp = await a.get(`https://${NEW_SAPO_DOMAIN}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
             });
 
@@ -281,7 +252,6 @@ export async function get_active_products() {
                     if (product.status !== "active") return;
 
                     const brand_name = (product.brand || "").trim();
-                    // 🟢 CHẶN HÀNG KHUYẾN MÃI / KĐH / SALE TỪ CẤP PRODUCT
                     if (is_promotional_item(brand_name)) return;
 
                     const is_prod_composite = product.product_type === "composite";
@@ -307,15 +277,15 @@ export async function get_active_products() {
 
                         variant.inventories.forEach((inventory: any) => {
                             const loc_id = Number(inventory.location_id);
-                            const mac_val = Number(inventory.mac || 0);
-
-                            p_variant.inventory_level_by_location.set(loc_id, {
-                                on_hand: inventory.on_hand,
-                                incoming: inventory.incoming,
-                                available: inventory.available,
-                                sold: 0,
-                                mac: mac_val
-                            });
+                            if (loc_id === NEW_SAPO_LOCATION_ID || loc_id === 0) {
+                                p_variant.inventory_level_by_location.set(NEW_SAPO_LOCATION_ID, {
+                                    on_hand: inventory.on_hand,
+                                    incoming: inventory.incoming,
+                                    available: inventory.available,
+                                    sold: 0,
+                                    mac: Number(inventory.mac || 0)
+                                });
+                            }
                         });
 
                         if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
@@ -323,7 +293,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(20);
+                await sleep(15);
             } else { running = false; }
         } catch (e) { running = false; }
     }
@@ -362,120 +332,94 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let a = new Axios({
-        headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
-    });
-
-    let all_records: RecordItem[] = [];
-    let existing_keys = new Set<string>();
-    
-    const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
-    const min_valid_ts = min_date.getTime();
-
+// 🟢 HÀM LẤY ĐƠN HÀNG TỪ VÙNG BẢO ĐẢM TỐC ĐỘ THEO TRANG
+async function fetchOrdersHelper(domain: string, token: string, locationId: number | null, minTs: number, maxTs: number | null) {
+    let records: RecordItem[] = [];
     let page = 1;
     let running = true;
 
+    let axiosClient = new Axios({
+        headers: { "Content-Type": "application/json", "X-Sapo-Access-Token": token },
+    });
+
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
-                params: { 
-                    limit: 250, 
-                    page: page, 
-                    order_by: "created_on desc"
-                },
-            });
+            let params: any = { limit: 250, page: page, order_by: "created_on desc" };
+            if (locationId) params.location_id = locationId;
+
+            const resp = await axiosClient.get(`https://${domain}/admin/orders.json`, { params });
 
             if (resp.status === 200) {
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const j = JSON.parse(raw_data_str);
-                const orders = j.orders || [];
+                const orders = JSON.parse(raw_data_str).orders || [];
 
-                if (orders.length === 0) {
-                    running = false;
-                    break;
-                }
+                if (orders.length === 0) { running = false; break; }
 
-                let reached_old_date = false;
+                let reached_old = false;
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
-                        const actual_loc_id = Number(order.location_id || 0);
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        if (order_ts > 0 && order_ts < min_valid_ts) {
-                            reached_old_date = true;
+                        // Bỏ qua đơn chưa đủ thời gian hoặc quá cũ
+                        if (order_ts > 0 && order_ts < minTs) {
+                            reached_old = true;
                             break;
                         }
 
-                        if (order_ts >= min_valid_ts) {
+                        if (maxTs && order_ts > maxTs) continue;
+
+                        if (order_ts >= minTs) {
                             const line_items = order.order_line_items || order.line_items || order.items || [];
                             line_items.forEach((line_item: any, index: number) => {
                                 const qty = Number(line_item.quantity) || 0;
-                                if (qty > 0) {
-                                    const variant_obj = variant_by_id.get(line_item.variant_id);
-                                    const line_id = line_item.id || index;
-
-                                    if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
-                                        line_item.composite_item_parts.forEach((part: any) => {
-                                            const sub_variant = variant_by_id.get(part.variant_id);
-                                            const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
-                                            if (clean_sub_sku) {
-                                                const total_sub_qty = qty * (Number(part.quantity) || 1);
-                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
-                                                if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                    existing_keys.add(record_key);
-                                                }
-                                            }
-                                        });
-                                    } 
-                                    else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
-                                        variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
-                                            const sub_variant = variant_by_id.get(comp_variant_id);
-                                            if (sub_variant && sub_variant.sku) {
-                                                const clean_sub_sku = sub_variant.sku.trim();
-                                                const total_sub_qty = qty * comp_qty;
-                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
-                                                if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                    existing_keys.add(record_key);
-                                                }
-                                            }
-                                        });
-                                    } 
-                                    else {
-                                        const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
-                                        if (raw_sku) {
-                                            const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
-                                            if (!existing_keys.has(record_key)) {
-                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                existing_keys.add(record_key);
-                                            }
-                                        }
-                                    }
+                                const raw_sku = (line_item.sku || line_item.barcode || "").trim();
+                                if (qty > 0 && raw_sku) {
+                                    records.push({
+                                        sku: raw_sku,
+                                        t_unix: order_ts,
+                                        quantity: qty,
+                                        location_id: NEW_SAPO_LOCATION_ID,
+                                        is_composite: false,
+                                        new_record: true,
+                                        order_id: order.id
+                                    } as OrderRecordV2);
                                 }
                             });
                         }
                     }
                 }
 
-                if (reached_old_date) {
-                    running = false;
-                    break;
-                }
-
+                if (reached_old) { running = false; break; }
                 page++;
                 await sleep(10);
-            } else { 
-                running = false; 
-            }
-        } catch (e) { 
-            running = false; 
-        }
+            } else { running = false; }
+        } catch (e) { running = false; }
     }
+    return records;
+}
+
+// 🟢 THUẬT TOÁN KẾT HỢP DỮ LIỆU ĐA SITE (SITE CỦ < 01/09 + SITE MỚI >= 01/09)
+export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+    const now = new Date();
+    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
+    const min_valid_ts = min_date.getTime();
+
+    let all_records: RecordItem[] = [];
+
+    // 1. LẤY ĐƠN SITE CŨ (Cho khoảng thời gian từ 31 ngày trước đến hết ngày 31/08/2026)
+    if (min_valid_ts < CUTOFF_TIMESTAMP) {
+        console.log("⏳ Tải đơn lịch sử từ Site Cũ (lyochuyenhanghanquoc)...");
+        const oldRecords = await fetchOrdersHelper(OLD_SAPO_DOMAIN, OLD_SAPO_TOKEN, null, min_valid_ts, CUTOFF_TIMESTAMP);
+        all_records = all_records.concat(oldRecords);
+    }
+
+    // 2. LẤY ĐƠN SITE MỚI (Cho khoảng thời gian từ 01/09/2026 đến nay)
+    console.log("⏳ Tải đơn thời gian thực từ Site Mới (lyovn)...");
+    const newMinTs = Math.max(min_valid_ts, CUTOFF_TIMESTAMP);
+    const newRecords = await fetchOrdersHelper(NEW_SAPO_DOMAIN, NEW_SAPO_TOKEN, NEW_SAPO_LOCATION_ID, newMinTs, null);
+    all_records = all_records.concat(newRecords);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
