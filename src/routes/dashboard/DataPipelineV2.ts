@@ -8,7 +8,6 @@ if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    // Proxy Singapore
     proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
     baseUrl = "https://lyo-inventory-proxy-sg.onrender.com";
 }
@@ -74,14 +73,10 @@ export interface ProductV2 {
     order_history_by_location: Set<number>;
 }
 
-// 🎯 ID KHO VÀ MỐC THỜI GIAN
-const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới
-const TARGET_LOCATION_ID_OLD = 781327; // ID Kho Site Cũ
+const TARGET_LOCATION_ID_NEW = 789505;
+const TARGET_LOCATION_ID_OLD = 781327;
 
-// Mốc bắt đầu dùng Site Mới: 01/09/2026 00:00:00
 const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
-
-// Mốc kết thúc lấy đơn Site Cũ: 31/08/2026 23:59:59 (Tránh lấy dữ liệu tháng 9 bị sai ở Site Cũ)
 const OLD_SITE_MAX_TIMESTAMP = CUTOFF_TIMESTAMP - 1;
 
 export function obtain_access_token() {
@@ -99,7 +94,6 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 LOẠI BỎ HÀNG SALE / TẶNG / KĐH
 export function is_promotional_item(brand: string, name: string = "") {
     const br = (brand || "").trim().toLowerCase();
     const nm = (name || "").trim().toLowerCase();
@@ -120,6 +114,8 @@ export function calculate_restock_data(
     variant_by_id: Map<number, ProductV2>,
     location_id: number,
 ) {
+    console.log(`[DEBUG] calculate_restock_data với ${records.length} bản ghi đơn hàng và ${variant_by_id.size} sản phẩm`);
+
     records.sort((a, b) => b.t_unix - a.t_unix);
 
     let sales_by_sku = new Map<string, number>();
@@ -135,6 +131,7 @@ export function calculate_restock_data(
         }
     }
 
+    let matched_records_count = 0;
     for (let record of records) {
         const clean_sku = (record.sku || "").trim().toLowerCase();
 
@@ -149,9 +146,13 @@ export function calculate_restock_data(
         if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
             const current_sales = sales_by_sku.get(clean_sku) || 0;
             sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+            matched_records_count++;
         }
     }
 
+    console.log(`[DEBUG] Số đơn hàng khớp SKU trong 31 ngày qua: ${matched_records_count}`);
+
+    let count_has_sales = 0;
     variant_by_id.forEach((variant) => {
         if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) {
             variant.c_restock = 0;
@@ -168,7 +169,10 @@ export function calculate_restock_data(
         const sales = sales_by_sku.get(clean_sku) ?? 0;
 
         variant.c_restock = Math.round(sales);
+        if (variant.c_restock > 0) count_has_sales++;
     });
+
+    console.log(`[DEBUG] Tổng số sản phẩm có doanh số (c_restock > 0): ${count_has_sales}`);
 
     return get_items_need_restock(variant_by_id, TARGET_LOCATION_ID_NEW);
 }
@@ -187,6 +191,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
             result.push(variant);
         }
     });
+    console.log(`[DEBUG] Tab 1 (Cần đặt ngay): ${result.length} sản phẩm`);
     return result;
 }
 
@@ -202,6 +207,7 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
             result.push(variant);
         }
     });
+    console.log(`[DEBUG] Tab 2 (Tồn kho an toàn): ${result.length} sản phẩm`);
     return result;
 }
 
@@ -220,7 +226,7 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
             result.push(variant);
         }
     });
-
+    console.log(`[DEBUG] Tab 3 (Hàng bị đứt): ${result.length} sản phẩm`);
     return result;
 }
 
@@ -324,6 +330,7 @@ export async function get_active_products() {
             } else { running = false; }
         } catch (e) { running = false; }
     }
+    console.log(`[DEBUG] Tổng số sản phẩm active lấy về: ${p_variant_by_ids.size}`);
     return p_variant_by_ids;
 }
 
@@ -359,12 +366,14 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 TẢI ĐƠN TỪ PROXY VỚI MỐC THỜI GIAN LỌC TỐI ƯU
+// 🟢 TẢI ĐƠN QUA PROXY RENDER (PROXỴ SẼ TỰ GẮN TOKEN CHUẨN TƯƠNG ỨNG MỖI SITE)
 async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old", minTs: number, maxTs?: number) {
     let records: RecordItem[] = [];
     let existing_keys = new Set<string>();
     let page = 1;
     let running = true;
+
+    console.log(`[DEBUG] Gọi Proxy tải đơn site [${siteType.toUpperCase()}]. minTs: ${new Date(minTs).toLocaleString()}`);
 
     while (running) {
         try {
@@ -377,7 +386,7 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
             if (siteType === "new") {
                 params.location_id = TARGET_LOCATION_ID_NEW;
             } else {
-                params.site = "old";
+                params.site = "old"; // Proxy Render thấy param site=old sẽ tự lấy OLD_SAPO_ACCESS_TOKEN & OLD_SAPO_STORE_NAME
                 params.location_id = TARGET_LOCATION_ID_OLD;
             }
 
@@ -387,6 +396,8 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
+
+                console.log(`[DEBUG] Site [${siteType.toUpperCase()}] Trang ${page}: Trả về ${orders.length} đơn`);
 
                 if (orders.length === 0) { running = false; break; }
 
@@ -398,13 +409,11 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // Dừng lại nếu đơn đã nhỏ hơn mốc thời gian tối thiểu
                         if (order_ts > 0 && order_ts < minTs) {
                             reached_old_date = true;
                             break;
                         }
 
-                        // Bỏ qua nếu đơn nằm ngoài mốc maxTs (dành cho Site Cũ)
                         if (maxTs && order_ts > maxTs) continue;
 
                         if (order_ts >= minTs) {
@@ -435,13 +444,19 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
                 if (reached_old_date) { running = false; break; }
                 page++;
                 await sleep(10);
-            } else { running = false; }
-        } catch (e) { running = false; }
+            } else { 
+                console.error(`[ERROR] Site [${siteType.toUpperCase()}] lỗi status code: ${resp.status}`);
+                running = false; 
+            }
+        } catch (e: any) { 
+            console.error(`[ERROR] Site [${siteType.toUpperCase()}] exception:`, e?.message || e);
+            running = false; 
+        }
     }
+    console.log(`[DEBUG] Hoàn tất site [${siteType.toUpperCase()}]: Thu được ${records.length} chi tiết đơn`);
     return records;
 }
 
-// 🟢 THUẬT TOÁN TÍNH THỜI GIAN THEO ĐÚNG CHUẨN ĐỀ XUẤT
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { 
@@ -452,34 +467,28 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     let all_records: RecordItem[] = [];
     
-    // 1. Mốc thời gian ngày hôm nay (0h00)
     const now = new Date();
     const today_start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
-    
-    // Mốc thời gian lùi lại đúng 31 ngày
     const target_31_days_ago = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0).getTime();
 
-    // 2. Tính số ngày Site Mới đã chạy (kể từ 01/09/2026)
     const ms_per_day = 24 * 60 * 60 * 1000;
     const days_on_new_site = Math.max(0, Math.floor((today_start - CUTOFF_TIMESTAMP) / ms_per_day));
 
-    // 3. TẢI ĐƠN SITE MỚI: Từ 01/09/2026 đến nay
+    console.log(`[DEBUG] Ngày hôm nay: ${now.toLocaleDateString()}, Site mới đã chạy: ${days_on_new_site} ngày`);
+
     const newSiteMinTs = Math.max(target_31_days_ago, CUTOFF_TIMESTAMP);
     const newSiteRecords = await fetchOrdersFromProxy(a, "new", newSiteMinTs);
     all_records = all_records.concat(newSiteRecords);
 
-    // 4. KIỂM TRA THIẾU BAO NHIÊU NGÀY THÌ TẢI BÙ SITE CỦ (Tối đa đến hết 31/08/2026 23:59:59)
     if (days_on_new_site < 31) {
-        const missing_days = 31 - days_on_new_site;
-
-        // Mốc bắt đầu tải từ Site Cũ (Bù cho đủ 31 ngày)
         const oldSiteMinTs = target_31_days_ago;
-        // Mốc kết thúc tải từ Site Cũ: Chặn đúng 31/08/2026 23:59:59
         const oldSiteMaxTs = OLD_SITE_MAX_TIMESTAMP;
 
         const oldSiteRecords = await fetchOrdersFromProxy(a, "old", oldSiteMinTs, oldSiteMaxTs);
         all_records = all_records.concat(oldSiteRecords);
     }
+
+    console.log(`[DEBUG] TỔNG BẢN GHI ĐƠN HÀNG THU ĐƯỢC CẢ 2 SITE: ${all_records.length}`);
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
