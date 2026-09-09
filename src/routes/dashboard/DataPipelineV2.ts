@@ -77,8 +77,13 @@ const TARGET_LOCATION_ID_NEW = 789505;
 const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
 const OLD_SITE_MAX_TIMESTAMP = CUTOFF_TIMESTAMP - 1;
 
+// 🟢 ĐỘC BỐ TRÍ MỞ RỘNG: TÌM TOKEN Ở CẢ LOCALSTORAGE VÀ SESSIONSTORAGE
 export function obtain_access_token() {
-    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || "";
+    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || 
+                  import.meta.env.SAPO_ACCESS_TOKEN || 
+                  localStorage.getItem("token") || 
+                  sessionStorage.getItem("token") || 
+                  "";
     return "Bearer " + token.replace("Bearer ", "");
 }
 
@@ -266,7 +271,8 @@ export async function get_active_products() {
 
             if (resp.status === 200) {
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const products = JSON.parse(raw_data_str).products || [];
+                const parsed = JSON.parse(raw_data_str);
+                const products = parsed.products || parsed.data?.products || [];
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
@@ -366,7 +372,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 TẢI ĐƠN SITE CÓ BẮT MỐC THỜI GIAN VÀ CHÂN THỰC THEO TỪNG TRANG
 async function fetchOrdersForSite(axiosClient: Axios, siteType: "new" | "old", minTs: number, maxTs?: number) {
     let records: OrderRecordV2[] = [];
     let page = 1;
@@ -391,10 +396,10 @@ async function fetchOrdersForSite(axiosClient: Axios, siteType: "new" | "old", m
 
             if (resp.status === 200) {
                 const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const j = JSON.parse(raw_data_str);
-                const orders = j.orders || [];
+                const parsed = JSON.parse(raw_data_str);
+                const orders = parsed.orders || parsed.data?.orders || parsed.result?.orders || [];
 
-                console.log(`  └─ Trang ${page}: Trả về ${orders.length} đơn`);
+                console.log(`  └─ Trang ${page}: Trả về ${orders.length} đơn hàng`);
 
                 if (orders.length === 0) { 
                     running = false; 
@@ -408,13 +413,11 @@ async function fetchOrdersForSite(axiosClient: Axios, siteType: "new" | "old", m
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // Ngắt nếu đơn đã trôi qua mốc thời gian tối thiểu
                         if (order_ts > 0 && order_ts < minTs) {
                             should_stop_after_page = true;
                             continue;
                         }
 
-                        // Bỏ qua đơn vượt mốc maxTs (dành cho Site Cũ tránh lấy đơn tháng 9)
                         if (maxTs && order_ts > maxTs) {
                             continue;
                         }
@@ -439,7 +442,7 @@ async function fetchOrdersForSite(axiosClient: Axios, siteType: "new" | "old", m
                 }
 
                 if (should_stop_after_page) {
-                    console.log(`  └─ Đã chạm mốc ngày cũ nhất (${new Date(minTs).toLocaleDateString()}). Dừng kéo thêm.`);
+                    console.log(`  └─ Đã chạm mốc ngày cũ nhất (${new Date(minTs).toLocaleDateString()}). Dừng kéo.`);
                     running = false;
                     break;
                 }
@@ -456,11 +459,10 @@ async function fetchOrdersForSite(axiosClient: Axios, siteType: "new" | "old", m
         }
     }
 
-    console.log(`[KẾT QUẢ ${siteType.toUpperCase()}] Thu thập được ${records.length} chi tiết mặt hàng bán ra.`);
+    console.log(`[KẾT QUẢ ${siteType.toUpperCase()}] Thu thập được ${records.length} chi tiết đơn.`);
     return records;
 }
 
-// 🟢 THỰC HIỆN TÍNH THỜI GIAN THIẾU VÀ KÉO ĐƠN 2 SITE CHUẨN XÁC
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { 
@@ -471,23 +473,21 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     let all_records: OrderRecordV2[] = [];
     
-    // 1. Lấy mốc thời gian ngày hôm nay (0h00)
     const now = new Date();
     const today_start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
     const target_31_days_ago = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0).getTime();
 
-    // 2. Tính số ngày Site Mới đã chạy (kể từ 01/09/2026)
     const ms_per_day = 24 * 60 * 60 * 1000;
     const days_on_new_site = Math.max(0, Math.floor((today_start - CUTOFF_TIMESTAMP) / ms_per_day));
 
     console.log(`[THỜI GIAN HÔM NAY]: ${now.toLocaleDateString()} | Site Mới đã chạy: ${days_on_new_site} ngày`);
 
-    // 3. KÉO ĐƠN SITE MỚI (Từ 01/09/2026 -> Hôm nay)
+    // 1. KÉO ĐƠN SITE MỚI
     const newSiteMinTs = Math.max(target_31_days_ago, CUTOFF_TIMESTAMP);
     const newSiteRecords = await fetchOrdersForSite(a, "new", newSiteMinTs);
     all_records = all_records.concat(newSiteRecords);
 
-    // 4. KÉO ĐƠN SITE CỦ (Tải bù phần ngày còn thiếu, tối đa đến 31/08/2026 23:59:59)
+    // 2. KÉO ĐƠN SITE CỦ (KÉO BÙ CHO ĐỦ 31 NGÀY)
     if (days_on_new_site < 31) {
         const missing_days = 31 - days_on_new_site;
         console.log(`[THỜI GIAN CẦN BÙ]: Thiếu ${missing_days} ngày. Tiến hành kéo bù từ Site Cũ...`);
