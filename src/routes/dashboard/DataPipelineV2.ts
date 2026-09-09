@@ -59,7 +59,7 @@ export interface ProductV2 {
 }
 
 export function obtain_access_token() {
-    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || localStorage.getItem("token") || "";
+    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || import.meta.env.TOKEN || sessionStorage.getItem("token") || localStorage.getItem("token") || "";
     return "Bearer " + token.replace("Bearer ", "");
 }
 
@@ -80,15 +80,13 @@ export async function get_active_products() { return new Map<number, ProductV2>(
 export async function updateIndexedDB(records: RecordItem[]) {}
 export function get_low_sales_skus(p_variants: ProductV2[]) { return new Set<string>(); }
 
-// 🧪 KIỂM TRA SITE MỚI VỚI BỘ LỌC KHO 789505 VÀ STATUS=ANY
+// 🎯 BẮT ĐẦU TEST BẰNG VIỆC "XÂM NHẬP" SITE MỚI TRƯỚC
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     const token = obtain_access_token();
-    
-    // Thêm location_ids=789505 và status=any
-    const testUrl = `${proxyUrl}/admin/orders.json?limit=10&page=1&location_ids=789505&status=any`;
+    const testUrl = `${proxyUrl}/admin/orders.json?limit=10&page=1`;
 
     console.log(`====================================================`);
-    console.log(`🚀 [TEST SITE MỚI + KHO 789505] URL: ${testUrl}`);
+    console.log(`🚀 [BUỚC 1: TEST SITE MỚI] Đang gọi URL...`);
 
     try {
         const res = await fetch(testUrl, {
@@ -99,14 +97,19 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             }
         });
 
+        console.log(`📡 Status Code: ${res.status}`);
         const bodyText = await res.text();
-        console.log(`📦 Body Trả Về:`, bodyText);
-
         const j = JSON.parse(bodyText);
-        console.log(`🎯 TOTAL ĐƠN TÌM THẤY = ${j.metadata?.total ?? 0}`);
+        
+        console.log(`📦 Số lượng đơn SITE MỚI lấy về được: ${j.orders?.length ?? 0}`);
+        if (j.orders && j.orders.length > 0) {
+            console.log(`✅ THÀNH CÔNG! Đã xâm nhập thành công Site Mới!`);
+        } else {
+            console.warn(`⚠️ Vẫn trả về 0 đơn. Cần kiểm tra lại Token Site Mới!`);
+        }
 
     } catch (e: any) {
-        console.error(`💥 Lỗi:`, e?.message || e);
+        console.error(`💥 Lỗi kết nối Site Mới:`, e?.message || e);
     }
 
     console.log(`====================================================`);
