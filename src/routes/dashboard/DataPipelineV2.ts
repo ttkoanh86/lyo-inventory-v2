@@ -80,13 +80,15 @@ export async function get_active_products() { return new Map<number, ProductV2>(
 export async function updateIndexedDB(records: RecordItem[]) {}
 export function get_low_sales_skus(p_variants: ProductV2[]) { return new Set<string>(); }
 
-// 🧪 CHỈ THỬ DUY NHẤT 1 SITE MỚI
+// 🧪 KIỂM TRA SITE MỚI VỚI BỘ LỌC KHO 789505 VÀ STATUS=ANY
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     const token = obtain_access_token();
-    const testUrl = `${proxyUrl}/admin/orders.json?limit=10&page=1`;
+    
+    // Thêm location_ids=789505 và status=any
+    const testUrl = `${proxyUrl}/admin/orders.json?limit=10&page=1&location_ids=789505&status=any`;
 
     console.log(`====================================================`);
-    console.log(`🚀 [TEST DUY NHẤT 1 SITE MỚI] Đang gọi: ${testUrl}`);
+    console.log(`🚀 [TEST SITE MỚI + KHO 789505] URL: ${testUrl}`);
 
     try {
         const res = await fetch(testUrl, {
@@ -97,12 +99,14 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
             }
         });
 
-        console.log(`📡 Status Code: ${res.status}`);
         const bodyText = await res.text();
         console.log(`📦 Body Trả Về:`, bodyText);
 
+        const j = JSON.parse(bodyText);
+        console.log(`🎯 TOTAL ĐƠN TÌM THẤY = ${j.metadata?.total ?? 0}`);
+
     } catch (e: any) {
-        console.error(`💥 Lỗi kết nối:`, e?.message || e);
+        console.error(`💥 Lỗi:`, e?.message || e);
     }
 
     console.log(`====================================================`);
