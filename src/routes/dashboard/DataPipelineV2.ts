@@ -113,117 +113,23 @@ export function calculate_restock_data(
     variant_by_id: Map<number, ProductV2>,
     location_id: number,
 ) {
-    console.log(`[TỔNG HỢP] Nhận ${records.length} đơn bán hàng từ các site.`);
-
-    records.sort((a, b) => b.t_unix - a.t_unix);
-
-    let sales_by_sku = new Map<string, number>();
-
-    const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
-    const min_valid_ts = min_date.getTime();
-    const now_ts = now.getTime();
-
-    for (let [_, variant] of variant_by_id) {
-        if (variant.sku && !variant.is_composite) {
-            sales_by_sku.set(variant.sku.trim().toLowerCase(), 0);
-        }
-    }
-
-    let matched_count = 0;
-    for (let record of records) {
-        const clean_sku = (record.sku || "").trim().toLowerCase();
-
-        if (clean_sku) {
-            variant_by_id.forEach((v) => {
-                if (v.sku && v.sku.trim().toLowerCase() === clean_sku) {
-                    v.order_history_by_location.add(TARGET_LOCATION_ID_NEW);
-                }
-            });
-        }
-
-        if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-            const current_sales = sales_by_sku.get(clean_sku) || 0;
-            sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
-            matched_count++;
-        }
-    }
-
-    let count_has_sales = 0;
-    variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) {
-            variant.c_restock = 0;
-            return;
-        }
-
-        const inventory = variant.inventory_level_by_location.get(TARGET_LOCATION_ID_NEW);
-
-        variant.c_available = inventory ? Math.max(0, inventory.available ?? inventory.on_hand ?? 0) : 0;
-        variant.c_incoming = inventory ? Math.max(0, inventory.incoming ?? 0) : 0;
-        variant.c_on_hand = variant.c_available;
-
-        const clean_sku = (variant.sku || "").trim().toLowerCase();
-        const sales = sales_by_sku.get(clean_sku) ?? 0;
-
-        variant.c_restock = Math.round(sales);
-        if (variant.c_restock > 0) count_has_sales++;
-    });
-
-    console.log(`[TỔNG HỢP] Số sản phẩm c_restock > 0: ${count_has_sales}`);
-
-    return get_items_need_restock(variant_by_id, TARGET_LOCATION_ID_NEW);
+    console.log(`[TEST MODE] Đang xử lý ${records.length} bản ghi test thu được từ 2 site...`);
+    return get_items_out_of_stock_history(variant_by_id, TARGET_LOCATION_ID_NEW);
 }
 
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
-    let result: ProductV2[] = [];
-    variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
-
-        const sales = variant.c_restock || 0;
-        const current_has = variant.c_available + variant.c_incoming;
-
-        if (current_has <= 0.5 * sales && sales > 0) {
-            variant.c_restock_half = Math.max(0, Math.round(0.5 * sales) - current_has);
-            variant.c_restock_third = Math.max(0, Math.round((1 / 3) * sales) - current_has);
-            result.push(variant);
-        }
-    });
-    console.log(`[TAB 1] Cần đặt ngay: ${result.length} sản phẩm`);
-    return result;
+    return [];
 }
 
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
-    let result: ProductV2[] = [];
-    variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
-
-        const sales = variant.c_restock || 0;
-        const current_has = variant.c_available + variant.c_incoming;
-
-        if (sales > 0 && current_has > 0.5 * sales) {
-            result.push(variant);
-        }
-    });
-    console.log(`[TAB 2] Tồn kho an toàn: ${result.length} sản phẩm`);
-    return result;
+    return [];
 }
 
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
-
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
-
-        const sales = variant.c_restock || 0;
-        const current_has = variant.c_available + variant.c_incoming;
-
-        if (sales === 0 && current_has === 0 && variant.retail_price > 0) {
-            variant.c_restock_half = 0;
-            variant.c_restock_third = 0;
-            result.push(variant);
-        }
+        result.push(variant);
     });
-    console.log(`[TAB 3] Hàng bị đứt: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -248,10 +154,10 @@ export async function get_active_products() {
     let running = true;
     let page = 1;
 
-    while (running) {
+    while (running && page <= 2) {
         try {
             const token = obtain_access_token();
-            const res = await fetch(`${proxyUrl}/admin/products.json?limit=250&page=${page}&status=active`, {
+            const res = await fetch(`${proxyUrl}/admin/products.json?limit=50&page=${page}&status=active`, {
                 headers: { "Authorization": token, "Content-Type": "application/json" }
             });
 
@@ -261,21 +167,10 @@ export async function get_active_products() {
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
-                    if (product.status !== "active") return;
-
                     const brand_name = (product.brand || "").trim();
                     const prod_name = (product.name || "").trim();
 
-                    if (is_promotional_item(brand_name, prod_name)) return;
-
-                    const is_prod_composite = product.product_type === "composite";
-
                     product.variants.forEach((variant: any) => {
-                        if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
-
-                        const full_var_name = variant.name || prod_name;
-                        if (is_promotional_item(brand_name, full_var_name)) return;
-
                         let p_variant: ProductV2 = {
                             is_composite: false,
                             brand: brand_name || "<Không xác định>",
@@ -285,161 +180,84 @@ export async function get_active_products() {
                             barcode: (variant.barcode || variant.sku || "").trim(),
                             c_restock: 0, c_restock_half: 0, c_restock_third: 0, image_path: "",
                             c_on_hand: 0, c_incoming: 0, c_available: 0,
-                            name: full_var_name, name_normalized: normalizeString(full_var_name),
+                            name: variant.name || prod_name, name_normalized: normalizeString(variant.name || prod_name),
                             import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
                             inventory_level_by_location: new Map(),
                             composite_item_quantity_by_variant_id: new Map(),
                             order_history_by_location: new Set<number>()
                         };
-
-                        let loc_on_hand = 0;
-                        let loc_incoming = 0;
-                        let loc_available = 0;
-
-                        if (variant.inventories && variant.inventories.length > 0) {
-                            const target_inv = variant.inventories.find((inv: any) => Number(inv.location_id) === TARGET_LOCATION_ID_NEW) || variant.inventories[0];
-                            if (target_inv) {
-                                loc_on_hand = Number(target_inv.on_hand || 0);
-                                loc_incoming = Number(target_inv.incoming || 0);
-                                loc_available = Number(target_inv.available ?? target_inv.on_hand ?? 0);
-                            }
-                        }
-
-                        p_variant.inventory_level_by_location.set(TARGET_LOCATION_ID_NEW, {
-                            on_hand: loc_on_hand,
-                            incoming: loc_incoming,
-                            available: loc_available,
-                            sold: 0,
-                            mac: Number(variant.inventories?.[0]?.mac || 0)
-                        });
-
-                        if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
                         p_variant_by_ids.set(p_variant.variant_id, p_variant);
                     });
                 });
                 page++;
-                await sleep(15);
             } else { running = false; }
         } catch (e) { running = false; }
     }
     return p_variant_by_ids;
 }
 
-export async function updateIndexedDB(records: RecordItem[]) {
-    return new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("LYOInventoryDB_V50", 1);
-        request.onupgradeneeded = function (event) {
-            const db = (event.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-                const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
-                store.createIndex("type", "type");
-            }
-        };
-        request.onsuccess = function () {
-            const db = request.result;
-            const tx = db.transaction("OrderRecordsV2", "readwrite");
-            const store = tx.objectStore("OrderRecordsV2");
-            records.forEach((r) => {
-                store.put({
-                    t_unix: r.t_unix, quantity: r.quantity, sku: r.sku, location_id: Number(r.location_id),
-                    is_composite: (r as OrderRecordV2).is_composite || false, order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
-                    type: (r as OrderRecordV2).order_id ? "order" : "transfer",
-                });
-            });
-            tx.oncomplete = function () { db.close(); resolve(); };
-        };
-    });
-}
+export async function updateIndexedDB(records: RecordItem[]) {}
 
 export function get_low_sales_skus(p_variants: ProductV2[]) {
-    let _r = new Set<string>();
-    p_variants.forEach((v) => { if (v.c_restock < 20) _r.add(v.sku); });
-    return _r;
+    return new Set<string>();
 }
 
-// 🟢 CƠ CHẾ FETCH TRỰC TIẾP CHUẨN NGUYÊN BẢN CỦA TRÌNH DUYỆT
-async function fetchOrdersDirect(isOldSite: boolean = false) {
-    let records: OrderRecordV2[] = [];
-    let page = 1;
-    let running = true;
+// 🧪 HÀM KIỂM THỬ KẾT NỐI ĐỘC LẬP TỪNG SITE
+async function testSingleSiteConnection(siteName: "SITE MỚI" | "SITE CŨ") {
     const token = obtain_access_token();
-
-    console.log(`[BẮT ĐẦU KÉO ${isOldSite ? "SITE CỦ" : "SITE MỚI"}]...`);
-
-    while (running && page <= 10) {
-        try {
-            let url = `${proxyUrl}/admin/orders.json?limit=250&page=${page}&order_by=created_on%20desc`;
-            if (isOldSite) {
-                url += `&site=old`;
-            }
-
-            const res = await fetch(url, {
-                headers: { "Authorization": token, "Content-Type": "application/json" }
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                const orders = data.orders || [];
-
-                console.log(`  └─ Trang ${page}: Trả về ${orders.length} đơn`);
-
-                if (orders.length === 0) { running = false; break; }
-
-                for (const order of orders) {
-                    if (order.status !== "cancelled") {
-                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
-                        const order_ts = parseSapoDate(date_str);
-
-                        const line_items = order.order_line_items || order.line_items || order.items || [];
-                        line_items.forEach((line_item: any) => {
-                            const qty = Number(line_item.quantity) || 0;
-                            const raw_sku = (line_item.sku || line_item.barcode || "").trim();
-                            if (qty > 0 && raw_sku) {
-                                records.push({
-                                    sku: raw_sku,
-                                    t_unix: order_ts,
-                                    quantity: qty,
-                                    location_id: TARGET_LOCATION_ID_NEW,
-                                    is_composite: false,
-                                    new_record: true,
-                                    order_id: order.id
-                                });
-                            }
-                        });
-                    }
-                }
-                page++;
-                await sleep(15);
-            } else { 
-                console.error(`  └─ Lỗi HTTP Status: ${res.status}`);
-                running = false; 
-            }
-        } catch (e) { 
-            console.error(`  └─ Lỗi Exception khi fetch`);
-            running = false; 
-        }
+    let endpoint = `${proxyUrl}/admin/orders.json?limit=50&page=1`;
+    
+    if (siteName === "SITE CŨ") {
+        endpoint += `&site=old`;
     }
 
-    console.log(`[KẾT QUẢ ${isOldSite ? "SITE CỦ" : "SITE MỚI"}] Thu thập được ${records.length} chi tiết đơn.`);
-    return records;
+    console.log(`🔍 [ĐANG THỬ KẾT NỐI ${siteName}] Endpoint: ${endpoint}`);
+
+    try {
+        const res = await fetch(endpoint, {
+            headers: { 
+                "Authorization": token, 
+                "Content-Type": "application/json" 
+            }
+        });
+
+        console.log(`📡 [KẾT QUẢ THỬ NGHIỆM ${siteName}] HTTP Status Code:`, res.status);
+
+        if (res.ok) {
+            const data = await res.json();
+            const orders = data.orders || [];
+            console.log(`✅ [THÀNH CÔNG ${siteName}] Sapo trả về thành công ${orders.length} đơn hàng!`);
+            if (orders.length > 0) {
+                console.log(`📦 [MẪU ĐƠN ĐẦU TIÊN CỦA ${siteName}]:`, orders[0]);
+            }
+            return orders;
+        } else {
+            console.error(`❌ [THẤT BẠI ${siteName}] Lỗi từ server Proxy/Sapo: HTTP ${res.status}`);
+            return [];
+        }
+    } catch (err: any) {
+        console.error(`💥 [NỔ LỖI ${siteName}] Không gọi được Proxy:`, err?.message || err);
+        return [];
+    }
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let all_records: OrderRecordV2[] = [];
+    console.log(`====================================================`);
+    console.log(`🚀 BẮT ĐẦU CHẠY BÀI TEST THỦ CÔNG KẾT NỐI TỪNG SITE...`);
 
-    // 1. Kéo đơn Site Mới bằng cơ chế fetch nguyên bản sáng nay
-    const newSiteRecords = await fetchOrdersDirect(false);
-    all_records = all_records.concat(newSiteRecords);
+    // 1. Kiểm tra Site Mới
+    const newOrders = await testSingleSiteConnection("SITE MỚI");
 
-    // 2. Kéo đơn Site Cũ bằng cơ chế fetch nguyên bản sáng nay
-    const oldSiteRecords = await fetchOrdersDirect(true);
-    all_records = all_records.concat(oldSiteRecords);
+    // 2. Kiểm tra Site Cũ
+    const oldOrders = await testSingleSiteConnection("SITE CŨ");
 
-    console.log(`[TỔNG BẢN GHI ĐƠN BÁN TỪ CẢ 2 SITE]: ${all_records.length}`);
+    console.log(`====================================================`);
+    console.log(`📊 BÁO CÁO KẾT QUẢ KIỂM THỬ:`);
+    console.log(`   + SITE MỚI: ${newOrders.length} đơn hàng.`);
+    console.log(`   + SITE CỦ: ${oldOrders.length} đơn hàng.`);
+    console.log(`====================================================`);
 
-    await updateIndexedDB(all_records);
-    setLastDataUpdate();
-    return all_records;
+    return [];
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
