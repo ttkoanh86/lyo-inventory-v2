@@ -8,7 +8,7 @@ if (import.meta.env.MODE === "development") {
     proxyUrl = "http://localhost:8080/api";
     baseUrl = "http://localhost:8080";
 } else {
-    // 🎯 Proxy Singapore siêu tốc
+    // Proxy Singapore
     proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
     baseUrl = "https://lyo-inventory-proxy-sg.onrender.com";
 }
@@ -74,12 +74,15 @@ export interface ProductV2 {
     order_history_by_location: Set<number>;
 }
 
-// 🎯 ID KHO SITE MỚI VÀ SITE CŨ
+// 🎯 ID KHO VÀ MỐC THỜI GIAN
 const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới
 const TARGET_LOCATION_ID_OLD = 781327; // ID Kho Site Cũ
 
-// Mốc bàn giao dữ liệu sang Site Mới: 01/09/2026
+// Mốc bắt đầu dùng Site Mới: 01/09/2026 00:00:00
 const CUTOFF_TIMESTAMP = new Date("2026-09-01T00:00:00+07:00").getTime();
+
+// Mốc kết thúc lấy đơn Site Cũ: 31/08/2026 23:59:59 (Tránh lấy dữ liệu tháng 9 bị sai ở Site Cũ)
+const OLD_SITE_MAX_TIMESTAMP = CUTOFF_TIMESTAMP - 1;
 
 export function obtain_access_token() {
     const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || sessionStorage.getItem("token") || "";
@@ -96,10 +99,20 @@ export function parseSapoDate(dateStr: string): number {
     return new Date(dateStr).getTime() || 0;
 }
 
-export function is_promotional_item(brand: string) {
-    if (!brand) return false;
-    const br = brand.trim().toLowerCase();
-    return br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh";
+// 🟢 LOẠI BỎ HÀNG SALE / TẶNG / KĐH
+export function is_promotional_item(brand: string, name: string = "") {
+    const br = (brand || "").trim().toLowerCase();
+    const nm = (name || "").trim().toLowerCase();
+
+    if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) {
+        return true;
+    }
+
+    if (nm.includes("- sale") || nm.includes("-sale") || nm.includes("sale ") || nm.includes("(tặng)") || nm.includes("kđh")) {
+        return true;
+    }
+
+    return false;
 }
 
 export function calculate_restock_data(
@@ -118,16 +131,16 @@ export function calculate_restock_data(
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku && !variant.is_composite) {
-            sales_by_sku.set(variant.sku.trim(), 0);
+            sales_by_sku.set(variant.sku.trim().toLowerCase(), 0);
         }
     }
 
     for (let record of records) {
-        const clean_sku = (record.sku || "").trim();
+        const clean_sku = (record.sku || "").trim().toLowerCase();
 
         if (clean_sku) {
             variant_by_id.forEach((v) => {
-                if (v.sku && v.sku.trim() === clean_sku) {
+                if (v.sku && v.sku.trim().toLowerCase() === clean_sku) {
                     v.order_history_by_location.add(TARGET_LOCATION_ID_NEW);
                 }
             });
@@ -140,7 +153,7 @@ export function calculate_restock_data(
     }
 
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand)) {
+        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) {
             variant.c_restock = 0;
             return;
         }
@@ -151,7 +164,7 @@ export function calculate_restock_data(
         variant.c_incoming = inventory ? Math.max(0, inventory.incoming ?? 0) : 0;
         variant.c_on_hand = variant.c_available;
 
-        const clean_sku = (variant.sku || "").trim();
+        const clean_sku = (variant.sku || "").trim().toLowerCase();
         const sales = sales_by_sku.get(clean_sku) ?? 0;
 
         variant.c_restock = Math.round(sales);
@@ -163,7 +176,7 @@ export function calculate_restock_data(
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand)) return;
+        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
@@ -180,7 +193,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand)) return;
+        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
@@ -196,14 +209,12 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
     let result: ProductV2[] = [];
 
     variant_by_id.forEach((variant) => {
-        if (variant.is_composite || is_promotional_item(variant.brand)) return;
+        if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
 
         const sales = variant.c_restock || 0;
         const current_has = variant.c_available + variant.c_incoming;
 
-        const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
-
-        if (sales === 0 && current_has === 0 && is_valid_product) {
+        if (sales === 0 && current_has === 0 && variant.retail_price > 0) {
             variant.c_restock_half = 0;
             variant.c_restock_third = 0;
             result.push(variant);
@@ -229,7 +240,6 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 TẢI TỒN KHO TỪ SITE MỚI (LẤY TẤT CẢ SẢN PHẨM)
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -257,12 +267,17 @@ export async function get_active_products() {
                     if (product.status !== "active") return;
 
                     const brand_name = (product.brand || "").trim();
-                    if (is_promotional_item(brand_name)) return;
+                    const prod_name = (product.name || "").trim();
+
+                    if (is_promotional_item(brand_name, prod_name)) return;
 
                     const is_prod_composite = product.product_type === "composite";
 
                     product.variants.forEach((variant: any) => {
                         if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
+
+                        const full_var_name = variant.name || prod_name;
+                        if (is_promotional_item(brand_name, full_var_name)) return;
 
                         let p_variant: ProductV2 = {
                             is_composite: false,
@@ -273,37 +288,32 @@ export async function get_active_products() {
                             barcode: (variant.barcode || variant.sku || "").trim(),
                             c_restock: 0, c_restock_half: 0, c_restock_third: 0, image_path: "",
                             c_on_hand: 0, c_incoming: 0, c_available: 0,
-                            name: variant.name, name_normalized: normalizeString(variant.name),
-                            import_price: variant.variant_import_price, retail_price: variant.variant_retail_price, retail_price_ecomm: 0,
+                            name: full_var_name, name_normalized: normalizeString(full_var_name),
+                            import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
                             inventory_level_by_location: new Map(),
                             composite_item_quantity_by_variant_id: new Map(),
                             order_history_by_location: new Set<number>()
                         };
 
-                        // 🎯 Lấy tất cả thông tin tồn kho không phân biệt ID
-                        if (variant.inventories && variant.inventories.length > 0) {
-                            let total_on_hand = 0;
-                            let total_incoming = 0;
-                            let total_available = 0;
+                        let total_on_hand = 0;
+                        let total_incoming = 0;
+                        let total_available = 0;
 
+                        if (variant.inventories && variant.inventories.length > 0) {
                             variant.inventories.forEach((inventory: any) => {
                                 total_on_hand += Number(inventory.on_hand || 0);
                                 total_incoming += Number(inventory.incoming || 0);
                                 total_available += Number(inventory.available ?? inventory.on_hand ?? 0);
                             });
-
-                            p_variant.inventory_level_by_location.set(TARGET_LOCATION_ID_NEW, {
-                                on_hand: total_on_hand,
-                                incoming: total_incoming,
-                                available: total_available,
-                                sold: 0,
-                                mac: Number(variant.inventories[0]?.mac || 0)
-                            });
-                        } else {
-                            p_variant.inventory_level_by_location.set(TARGET_LOCATION_ID_NEW, {
-                                on_hand: 0, incoming: 0, available: 0, sold: 0, mac: 0
-                            });
                         }
+
+                        p_variant.inventory_level_by_location.set(TARGET_LOCATION_ID_NEW, {
+                            on_hand: total_on_hand,
+                            incoming: total_incoming,
+                            available: total_available,
+                            sold: 0,
+                            mac: Number(variant.inventories?.[0]?.mac || 0)
+                        });
 
                         if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
                         p_variant_by_ids.set(p_variant.variant_id, p_variant);
@@ -345,11 +355,11 @@ export async function updateIndexedDB(records: RecordItem[]) {
 
 export function get_low_sales_skus(p_variants: ProductV2[]) {
     let _r = new Set<string>();
-    p_variants.forEach((v) => { if (!v.is_composite && v.c_restock < 20) _r.add(v.sku); });
+    p_variants.forEach((v) => { if (v.c_restock < 20) _r.add(v.sku); });
     return _r;
 }
 
-// 🟢 TẢI ĐƠN TỪ PROXY
+// 🟢 TẢI ĐƠN TỪ PROXY VỚI MỐC THỜI GIAN LỌC TỐI ƯU
 async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old", minTs: number, maxTs?: number) {
     let records: RecordItem[] = [];
     let existing_keys = new Set<string>();
@@ -388,11 +398,13 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
+                        // Dừng lại nếu đơn đã nhỏ hơn mốc thời gian tối thiểu
                         if (order_ts > 0 && order_ts < minTs) {
                             reached_old_date = true;
                             break;
                         }
 
+                        // Bỏ qua nếu đơn nằm ngoài mốc maxTs (dành cho Site Cũ)
                         if (maxTs && order_ts > maxTs) continue;
 
                         if (order_ts >= minTs) {
@@ -429,7 +441,7 @@ async function fetchOrdersFromProxy(axiosClient: Axios, siteType: "new" | "old",
     return records;
 }
 
-// 🟢 TỰ ĐỘNG GỘP ĐƠN TỪ 2 SITE
+// 🟢 THUẬT TOÁN TÍNH THỜI GIAN THEO ĐÚNG CHUẨN ĐỀ XUẤT
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { 
@@ -440,18 +452,32 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
     let all_records: RecordItem[] = [];
     
+    // 1. Mốc thời gian ngày hôm nay (0h00)
     const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
-    const min_valid_ts = min_date.getTime();
+    const today_start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
+    
+    // Mốc thời gian lùi lại đúng 31 ngày
+    const target_31_days_ago = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0).getTime();
 
-    // 1. Tải đơn Site Mới
-    const newSiteMinTs = Math.max(min_valid_ts, CUTOFF_TIMESTAMP);
+    // 2. Tính số ngày Site Mới đã chạy (kể từ 01/09/2026)
+    const ms_per_day = 24 * 60 * 60 * 1000;
+    const days_on_new_site = Math.max(0, Math.floor((today_start - CUTOFF_TIMESTAMP) / ms_per_day));
+
+    // 3. TẢI ĐƠN SITE MỚI: Từ 01/09/2026 đến nay
+    const newSiteMinTs = Math.max(target_31_days_ago, CUTOFF_TIMESTAMP);
     const newSiteRecords = await fetchOrdersFromProxy(a, "new", newSiteMinTs);
     all_records = all_records.concat(newSiteRecords);
 
-    // 2. Tải đơn Site Cũ cho các ngày còn thiếu
-    if (min_valid_ts < CUTOFF_TIMESTAMP) {
-        const oldSiteRecords = await fetchOrdersFromProxy(a, "old", min_valid_ts, CUTOFF_TIMESTAMP);
+    // 4. KIỂM TRA THIẾU BAO NHIÊU NGÀY THÌ TẢI BÙ SITE CỦ (Tối đa đến hết 31/08/2026 23:59:59)
+    if (days_on_new_site < 31) {
+        const missing_days = 31 - days_on_new_site;
+
+        // Mốc bắt đầu tải từ Site Cũ (Bù cho đủ 31 ngày)
+        const oldSiteMinTs = target_31_days_ago;
+        // Mốc kết thúc tải từ Site Cũ: Chặn đúng 31/08/2026 23:59:59
+        const oldSiteMaxTs = OLD_SITE_MAX_TIMESTAMP;
+
+        const oldSiteRecords = await fetchOrdersFromProxy(a, "old", oldSiteMinTs, oldSiteMaxTs);
         all_records = all_records.concat(oldSiteRecords);
     }
 
