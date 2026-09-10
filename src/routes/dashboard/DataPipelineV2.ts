@@ -1,7 +1,7 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
+const proxyUrl = "https://lyo-inventory-proxy.onrender.com";
 
 export interface OrderRecordV2 {
     sku: string;
