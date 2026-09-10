@@ -1,17 +1,8 @@
 import { Axios } from "axios";
 import { type Location } from "./Template";
 
-let proxyUrl: string;
-let baseUrl: string;
-
-if (import.meta.env.MODE === "development") {
-    proxyUrl = "http://localhost:8080/api";
-    baseUrl = "http://localhost:8080";
-} else {
-    // 🟢 DÙNG PROXY US CỦ
-    proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
-    baseUrl = "https://lyo-inventory-proxy.onrender.com";
-}
+// 🟢 GIỮ NGUYÊN PROXY US CỦ NGUYÊN BẢN
+const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
 
 export interface OrderRecordV2 {
     sku: string;
@@ -38,11 +29,6 @@ interface InventoryLevel {
     incoming: number;
     available: number;
     sold: number;
-    mac?: number;
-    lot_no?: string;
-    lot_mfg?: Date;
-    lot_exp?: Date;
-    serial?: string;
 }
 
 export interface ProductV2 {
@@ -61,11 +47,6 @@ export interface ProductV2 {
     c_available: number;
     name: string;
     name_normalized: string;
-    lot_no?: string;
-    lot_mfg?: Date;
-    lot_exp?: Date;
-    serial?: string;
-    tags?: string[];
     import_price: number;
     retail_price: number;
     retail_price_ecomm: number;
@@ -76,9 +57,8 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 LẤY TOKEN NGUYÊN BẢN BAN ĐẦU
 export function obtain_access_token() {
-    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || import.meta.env.TOKEN || sessionStorage.getItem("token") || localStorage.getItem("token") || "";
+    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || import.meta.env.TOKEN || sessionStorage.getItem("token") || localStorage.getItem("token") || "dummy_token_for_auth_middleware";
     return "Bearer " + token.replace("Bearer ", "").trim();
 }
 
@@ -299,7 +279,6 @@ export async function get_active_products() {
                                     incoming: Number(inventory.incoming || 0),
                                     available: Number(inventory.available ?? inventory.on_hand ?? 0),
                                     sold: 0,
-                                    mac: Number(inventory.mac || 0)
                                 });
                             });
                         }
@@ -348,7 +327,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🎯 KÉO DATA TỪ PROXY US VỚI CẤU HÌNH CỦ
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let a = new Axios({
         headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
@@ -369,7 +347,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = JSON.parse(raw_data_str);
                 const orders = j.orders || [];
 
-                console.log(`[CONSOLE LOG] [PROXY US NGUYÊN BẢN] Trang ${page}: Trả về ${orders.length} đơn`);
+                console.log(`[CONSOLE LOG] [PROXY US CỦ] Trang ${page}: Trả về ${orders.length} đơn`);
 
                 if (orders.length === 0) { running = false; break; }
 
@@ -402,7 +380,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         } catch (e) { running = false; }
     }
 
-    console.log(`[CONSOLE LOG] TỔNG BẢN GHI KÉO TỪ PROXY US CỦ: ${records.length}`);
+    console.log(`[CONSOLE LOG] TỔNG BẢN GHI ĐƠN KÉO VỀ: ${records.length}`);
 
     await updateIndexedDB(records);
     setLastDataUpdate();
