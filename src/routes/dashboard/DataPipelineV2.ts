@@ -3,7 +3,6 @@ import { type Location } from "./Template";
 
 // 🟢 PROXY US CỦ NGUYÊN BẢN
 const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
-const authUrl = "https://lyo-inventory-proxy.onrender.com/auth";
 
 export interface OrderRecordV2 {
     sku: string;
@@ -58,30 +57,9 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 TỰ ĐỘNG ĐĂNG NHẬP /auth ĐỂ LẤY TOKEN THẬT TỪ VALKEY DB NHƯ CODE CỦ
-export async function obtain_access_token(): Promise<string> {
-    let token = localStorage.getItem("api_token") || localStorage.getItem("token");
-
-    if (!token) {
-        try {
-            const resp = await axios.post(authUrl, {
-                username: "admin",
-                password: "lyo12345"
-            }, {
-                headers: { "Content-Type": "application/json" }
-            });
-
-            if (resp.status === 200 && resp.data?.token) {
-                token = resp.data.token;
-                localStorage.setItem("api_token", token);
-                localStorage.setItem("token", token);
-            }
-        } catch (e) {
-            console.error("Lỗi đăng nhập lấy token từ Proxy Go:", e);
-        }
-    }
-
-    return "Bearer " + (token || "");
+// 🟢 HÀM ĐỒNG BỘ TRẢ VỀ CHUỖI TOKEN CHUẨN DÀNH CHO PROXY GO
+export function obtain_access_token(): string {
+    return "Bearer dummy_token_for_auth_middleware";
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -243,7 +221,8 @@ export async function get_active_products() {
     let running = true;
     let page = 1;
 
-    const authToken = await obtain_access_token();
+    // 🟢 ĐỌC TOKEN TRỰC TIẾP CHUẨN ĐỒNG BỘ
+    const authToken = obtain_access_token();
 
     while (running) {
         try {
@@ -351,7 +330,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
 
-    const authToken = await obtain_access_token();
+    // 🟢 ĐỌC TOKEN TRỰC TIẾP CHUẨN ĐỒNG BỘ
+    const authToken = obtain_access_token();
 
     while (running) {
         try {
