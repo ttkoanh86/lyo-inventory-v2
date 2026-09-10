@@ -56,14 +56,9 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 KHÔI PHỤC CƠ CHẾ LẤY TOKEN TỰ ĐỘNG CHUẨN
 export function obtain_access_token(): string {
-    let token = localStorage.getItem("token") || localStorage.getItem("api_token");
-    if (!token) {
-        // Token mặc định hệ thống tự cấp nếu máy mới chưa đăng nhập
-        token = "42cd092e162a446ca26b6ae8c9902d78";
-        localStorage.setItem("token", token);
-    }
+    let token = localStorage.getItem("token") || localStorage.getItem("api_token") || "";
+    if (!token) return "";
     token = token.replace("Bearer ", "").trim();
     return "Bearer " + token;
 }
@@ -227,16 +222,10 @@ export async function get_active_products() {
     let running = true;
     let page = 1;
 
-    // 🟢 TỰ ĐỘNG LẤY TOKEN MÀ KHÔNG CẦN NHÂN VIÊN DÁN F12
-    const authToken = obtain_access_token();
-
     while (running) {
         try {
+            // 🟢 KHÔNG TRUYỀN SAPO TOKEN TRỰC TIẾP VÀO HEADER TẠI ĐÂY LÀM CRASH PROXY
             const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": authToken
-                },
                 params: { limit: 250, page: page, status: "active" },
             });
 
@@ -296,6 +285,7 @@ export async function get_active_products() {
                 await sleep(15);
             } else { running = false; }
         } catch (e: any) {
+            console.error("[LỖI KÉO SẢN PHẨM]:", e);
             running = false;
         }
     }
@@ -339,15 +329,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
 
-    const authToken = obtain_access_token();
-
     while (running) {
         try {
+            // 🟢 KHÔNG TRUYỀN SAPO TOKEN TRỰC TIẾP VÀO HEADER TẠI ĐÂY LÀM CRASH PROXY
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": authToken
-                },
                 params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
@@ -386,6 +371,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 await sleep(15);
             } else { running = false; }
         } catch (e: any) {
+            console.error("[LỖI KÉO ĐƠN HÀNG]:", e);
             running = false;
         }
     }
