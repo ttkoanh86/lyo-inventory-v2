@@ -1,7 +1,7 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-const proxyUrl = "https://lyo-inventory-proxy.onrender.com";
+const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
 
 export interface OrderRecordV2 {
     sku: string;
@@ -56,14 +56,16 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 HÀM LẤY TOKEN ĐỘNG TỰ ĐỘNG CHO MỌI MÁY NHÂN VIÊN
-export function get_clean_token(): string {
-    const rawToken = localStorage.getItem("token") || localStorage.getItem("api_token") || "42cd092e162a446ca26b6ae8c9902d78";
-    return rawToken.replace("Bearer ", "").trim();
-}
-
+// 🟢 KHÔI PHỤC CƠ CHẾ LẤY TOKEN TỰ ĐỘNG CHUẨN
 export function obtain_access_token(): string {
-    return "Bearer " + get_clean_token();
+    let token = localStorage.getItem("token") || localStorage.getItem("api_token");
+    if (!token) {
+        // Token mặc định hệ thống tự cấp nếu máy mới chưa đăng nhập
+        token = "42cd092e162a446ca26b6ae8c9902d78";
+        localStorage.setItem("token", token);
+    }
+    token = token.replace("Bearer ", "").trim();
+    return "Bearer " + token;
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -225,18 +227,17 @@ export async function get_active_products() {
     let running = true;
     let page = 1;
 
-    // 🟢 TRUYỀN TOKEN ĐỘNG QUA PARAM ĐỂ KHÔNG BỊ KHỞI TẠO PREFLIGHT OPTIONS
-    const activeToken = get_clean_token();
+    // 🟢 TỰ ĐỘNG LẤY TOKEN MÀ KHÔNG CẦN NHÂN VIÊN DÁN F12
+    const authToken = obtain_access_token();
 
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
-                params: { 
-                    limit: 250, 
-                    page: page, 
-                    status: "active",
-                    token: activeToken 
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": authToken
                 },
+                params: { limit: 250, page: page, status: "active" },
             });
 
             if (resp.status === 200) {
@@ -338,17 +339,16 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
 
-    const activeToken = get_clean_token();
+    const authToken = obtain_access_token();
 
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-                params: { 
-                    limit: 250, 
-                    page: page, 
-                    order_by: "created_on desc",
-                    token: activeToken
-                }
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": authToken
+                },
+                params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
             if (resp.status === 200) {
