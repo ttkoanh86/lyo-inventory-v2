@@ -57,9 +57,9 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 VƯỢT QUA KIỂM TRA AUTHMIDDLEWARE CỦA PROXY GO
+// Chuỗi Token giả lập truyền qua authMiddleware của Proxy Go
 export function obtain_access_token() {
-    return "Bearer bypass_auth_middleware_token_12345";
+    return "Bearer dummy_token_for_auth_middleware";
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -216,6 +216,7 @@ export function normalizeString(input: string): string {
     return str;
 }
 
+// 🟢 HÀM KÉO SẢN PHẨM THEO CODE CỦ CHUẨN
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -225,7 +226,6 @@ export async function get_active_products() {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
                 headers: {
-                    "Content-Type": "application/json",
                     Authorization: obtain_access_token(),
                 },
                 params: { limit: 250, page: page, status: "active" },
@@ -284,7 +284,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(15);
+                await sleep(50);
             } else { running = false; }
         } catch (e) { running = false; }
     }
@@ -323,6 +323,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
+// 🟢 HÀM KÉO ĐƠN HÀNG THEO CODE CỦ CHUẨN
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let records: OrderRecordV2[] = [];
     let page = 1;
@@ -332,7 +333,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
                 headers: {
-                    "Content-Type": "application/json",
                     Authorization: obtain_access_token(),
                 },
                 params: { limit: 250, page: page, order_by: "created_on desc" }
@@ -370,7 +370,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 }
                 page++;
-                await sleep(15);
+                await sleep(50);
             } else { running = false; }
         } catch (e) { running = false; }
     }
