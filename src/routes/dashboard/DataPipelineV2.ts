@@ -169,7 +169,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN (ĐÃ SỬA LỖI ĐIỀU KIỆN LỌC)
+// 🟢 TAB 2: TỒN KHO AN TOÀN
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -294,6 +294,36 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
+// 🟢 HÀM ĐỌC TOÀN BỘ ĐƠN HÀNG ĐÃ LƯU TỪ INDEXEDDB
+export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
+    return new Promise((resolve) => {
+        const request = indexedDB.open("LYOInventoryDB_V50", 1);
+        request.onsuccess = function () {
+            const db = request.result;
+            if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+                db.close();
+                resolve([]);
+                return;
+            }
+            const tx = db.transaction("OrderRecordsV2", "readonly");
+            const store = tx.objectStore("OrderRecordsV2");
+            const getAllReq = store.getAll();
+            getAllReq.onsuccess = function () {
+                db.close();
+                resolve(getAllReq.result || []);
+            };
+            getAllReq.onerror = function () {
+                db.close();
+                resolve([]);
+            };
+        };
+        request.onerror = function () {
+            resolve([]);
+        };
+    });
+}
+
+// 🟢 HÀM LƯU ĐƠN HÀNG VÀO INDEXEDDB
 export async function updateIndexedDB(records: RecordItem[]) {
     return new Promise<void>((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB_V50", 1);
@@ -332,14 +362,18 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
+// 🟢 HÀM KÉO ĐƠN HÀNG LŨY TIẾN & GỘP VỚI CƠ SỞ DỮ LIỆU ĐÃ LƯU
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let records: OrderRecordV2[] = [];
+    let newRecords: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
 
     const now = new Date();
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
+
+    const lastUpdateTs = getLastDataUpdateTUnix(); 
+    const targetCutoffTs = (lastUpdateTs && lastUpdateTs > min_valid_ts) ? lastUpdateTs : min_valid_ts;
 
     while (running) {
         try {
@@ -358,8 +392,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        if (order_ts < min_valid_ts) {
-                            console.log(`[CẮT TẠI TRANG ${page}] Đã chạm mốc 31 ngày, ngắt vòng lặp API!`);
+                        // Ngắt vòng lặp ngay khi gặp đơn thuộc dữ liệu cũ đã kéo trước đó
+                        if (order_ts <= targetCutoffTs) {
                             running = false;
                             break;
                         }
@@ -369,7 +403,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                             const qty = Number(line_item.quantity) || 0;
                             const raw_sku = (line_item.sku || line_item.barcode || "").trim();
                             if (qty > 0 && raw_sku) {
-                                records.push({
+                                newRecords.push({
                                     sku: raw_sku,
                                     t_unix: order_ts,
                                     quantity: qty,
@@ -387,14 +421,36 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 await sleep(10);
             } else { running = false; }
         } catch (e: any) {
-            console.error("[LỖI KÉO ĐƠN HÀNG]:", e);
             running = false;
         }
     }
 
-    await updateIndexedDB(records);
+    // Đọc lại toàn bộ bản ghi đơn hàng cũ từ IndexedDB ra
+    const existingRecords = await getStoredOrderRecords();
+
+    // Lưu nối các bản ghi mới vừa kéo được vào IndexedDB
+    if (newRecords.length > 0) {
+        await updateIndexedDB(newRecords);
+    }
     setLastDataUpdate();
-    return records;
+
+    // Gộp đơn cũ và đơn mới vào Map để tránh trùng lặp bản ghi
+    const allRecordsMap = new Map<string, OrderRecordV2>();
+    
+    existingRecords.forEach(r => {
+        const key = `${r.order_id}_${r.sku}`;
+        allRecordsMap.set(key, r);
+    });
+
+    newRecords.forEach(r => {
+        const key = `${r.order_id}_${r.sku}`;
+        allRecordsMap.set(key, r);
+    });
+
+    const finalRecords = Array.from(allRecordsMap.values());
+    console.log(`[GỘP DỮ LIỆU THÀNH CÔNG] Tổng số đơn đưa vào tính toán: ${finalRecords.length} bản ghi`);
+
+    return finalRecords;
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
