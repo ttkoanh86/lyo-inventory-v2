@@ -56,9 +56,14 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
+// 🟢 HÀM LẤY TOKEN ĐỘNG TỰ ĐỘNG CHO MỌI MÁY NHÂN VIÊN
+export function get_clean_token(): string {
+    const rawToken = localStorage.getItem("token") || localStorage.getItem("api_token") || "42cd092e162a446ca26b6ae8c9902d78";
+    return rawToken.replace("Bearer ", "").trim();
+}
+
 export function obtain_access_token(): string {
-    const token = localStorage.getItem("token") || localStorage.getItem("api_token") || "42cd092e162a446ca26b6ae8c9902d78";
-    return "Bearer " + token.trim();
+    return "Bearer " + get_clean_token();
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -215,26 +220,24 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 BẪY LỖI BẮT TẬN GỐC NGUYÊN NHÂN
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
 
-    const token = obtain_access_token();
-    console.log("🔍 [BẪY LỖI] Token chuẩn bị gửi lên:", token);
+    // 🟢 TRUYỀN TOKEN ĐỘNG QUA PARAM ĐỂ KHÔNG BỊ KHỞI TẠO PREFLIGHT OPTIONS
+    const activeToken = get_clean_token();
 
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": token
+                params: { 
+                    limit: 250, 
+                    page: page, 
+                    status: "active",
+                    token: activeToken 
                 },
-                params: { limit: 250, page: page, status: "active" },
             });
-
-            console.log(`✅ [BẪY LỖI] Trả về trang ${page} thành công:`, resp.status);
 
             if (resp.status === 200) {
                 const products = resp.data?.products || [];
@@ -292,7 +295,6 @@ export async function get_active_products() {
                 await sleep(15);
             } else { running = false; }
         } catch (e: any) {
-            console.error("❌ [BẪY LỖI SẢN PHẨM CRASH]:", e?.response?.status, e?.response?.data || e?.message);
             running = false;
         }
     }
@@ -336,16 +338,17 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
 
-    const token = obtain_access_token();
+    const activeToken = get_clean_token();
 
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": token
-                },
-                params: { limit: 250, page: page, order_by: "created_on desc" }
+                params: { 
+                    limit: 250, 
+                    page: page, 
+                    order_by: "created_on desc",
+                    token: activeToken
+                }
             });
 
             if (resp.status === 200) {
@@ -383,7 +386,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 await sleep(15);
             } else { running = false; }
         } catch (e: any) {
-            console.error("❌ [BẪY LỖI ĐƠN HÀNG CRASH]:", e?.response?.status, e?.response?.data || e?.message);
             running = false;
         }
     }
