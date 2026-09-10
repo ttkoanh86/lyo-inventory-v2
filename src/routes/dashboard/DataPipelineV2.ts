@@ -1,7 +1,7 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 Domain Proxy Render Singapore / US
+// 🟢 Domain Proxy Render
 const proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
 
 export interface OrderRecordV2 {
@@ -58,9 +58,6 @@ export interface ProductV2 {
 }
 
 const TARGET_LOCATION_ID_NEW = 789505;
-
-// Mốc chốt sổ site cũ: 23:59:59 ngày 31/08/2026 (hoặc năm hiện tại)
-const CUTOFF_DATE_SITE_OLD = new Date(2026, 7, 31, 23, 59, 59).getTime(); 
 
 export function obtain_access_token(): string {
     return localStorage.getItem("token") || "";
@@ -153,6 +150,7 @@ export function calculate_restock_data(
     return get_items_need_restock(variant_by_id, active_loc_id);
 }
 
+// 🟢 TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -167,24 +165,29 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
             result.push(variant);
         }
     });
+    console.log(`[TAB 1 - CẦN ĐẶT NGAY]: ${result.length} sản phẩm`);
     return result;
 }
 
+// 🟢 TAB 2: TỒN KHO AN TOÀN (ĐÃ SỬA LỖI ĐIỀU KIỆN LỌC)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
         if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
 
         const sales = variant.c_restock || 0;
-        const current_has = variant.c_available + variant.c_incoming;
+        const inventory = variant.inventory_level_by_location.get(TARGET_LOCATION_ID_NEW);
+        const current_has = inventory ? Math.max(0, (inventory.available ?? inventory.on_hand ?? 0) + (inventory.incoming ?? 0)) : (variant.c_available + variant.c_incoming);
 
         if (sales > 0 && current_has > 0.5 * sales) {
             result.push(variant);
         }
     });
+    console.log(`[TAB 2 - TỒN KHO AN TOÀN]: ${result.length} sản phẩm`);
     return result;
 }
 
+// 🟢 TAB 3: HÀNG BỊ ĐỨT
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
 
@@ -200,6 +203,7 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
             result.push(variant);
         }
     });
+    console.log(`[TAB 3 - HÀNG BỊ ĐỨT]: ${result.length} sản phẩm`);
     return result;
 }
 
@@ -328,7 +332,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG CÓ CẮT NGẮT CHẮC CHẮN MỐC THỜI GIAN 31 NÀY
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let records: OrderRecordV2[] = [];
     let page = 1;
@@ -355,9 +358,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // 🟢 NGẮT VÒNG LẶP NGAY KHI GẶP ĐƠN VƯỢT QUÁ 31 NGÀY
                         if (order_ts < min_valid_ts) {
-                            console.log(`[CẮT TẠI TRANG ${page}] Đã chạm mốc 31 ngày gần nhất, ngắt kéo API!`);
+                            console.log(`[CẮT TẠI TRANG ${page}] Đã chạm mốc 31 ngày, ngắt vòng lặp API!`);
                             running = false;
                             break;
                         }
