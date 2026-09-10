@@ -1,9 +1,8 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 Domain Proxy Render
-//const proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api"; proxy US
-const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api"; //Proxy Singapore
+// 🟢 Domain Proxy Render Singapore (Thay đúng URL Proxy SG của dì vào đây)
+const proxyUrl = "https://<domain-proxy-singapore-cua-di>.onrender.com/api";
 
 export interface OrderRecordV2 {
     sku: string;
@@ -170,7 +169,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN
+// 🟢 TAB 2: TỒN KHO AN TOÀN (LỌC TRỰC TIẾP TỒN KHO VÀ DOANH SỐ)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -221,6 +220,7 @@ export function normalizeString(input: string): string {
     return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
+// 🟢 KÉO DANH SÁCH SẢN PHẨM KHẢ DỤNG
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -295,7 +295,7 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
-// 🟢 HÀM ĐỌC TOÀN BỘ ĐƠN HÀNG ĐÃ LƯU TỪ INDEXEDDB
+// 🟢 ĐỌC ĐƠN ĐÃ LƯU TỪ INDEXEDDB
 export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
     return new Promise((resolve) => {
         const request = indexedDB.open("LYOInventoryDB_V50", 1);
@@ -324,7 +324,7 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
     });
 }
 
-// 🟢 HÀM LƯU ĐƠN HÀNG VÀO INDEXEDDB
+// 🟢 CẬP NHẬT INDEXEDDB
 export async function updateIndexedDB(records: RecordItem[]) {
     return new Promise<void>((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB_V50", 1);
@@ -363,7 +363,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG LŨY TIẾN & GỘP VỚI CƠ SỞ DỮ LIỆU ĐÃ LƯU
+// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC VỚI CHẶN MỐC CỨNG 31 NGÀY TỪ SAPO
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let newRecords: OrderRecordV2[] = [];
     let page = 1;
@@ -373,31 +373,33 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
 
-    const lastUpdateTs = getLastDataUpdateTUnix(); 
-    const targetCutoffTs = (lastUpdateTs && lastUpdateTs > min_valid_ts) ? lastUpdateTs : min_valid_ts;
+    // Chuỗi ngày YYYY-MM-DDTHH:mm:ss gửi sang Sapo
+    const createdOnMinStr = min_date.toISOString().split('.')[0];
 
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-                params: { limit: 250, page: page, order_by: "created_on desc" }
+                params: { 
+                    limit: 250, 
+                    page: page, 
+                    order_by: "created_on desc",
+                    created_on_min: createdOnMinStr
+                }
             });
 
             if (resp.status === 200) {
                 const j = resp.data || {};
                 const orders = j.orders || [];
 
-                if (orders.length === 0) { running = false; break; }
+                if (orders.length === 0) { 
+                    running = false; 
+                    break; 
+                }
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
-
-                        // Ngắt vòng lặp ngay khi gặp đơn thuộc dữ liệu cũ đã kéo trước đó
-                        if (order_ts <= targetCutoffTs) {
-                            running = false;
-                            break;
-                        }
 
                         const line_items = order.order_line_items || order.line_items || order.items || [];
                         line_items.forEach((line_item: any) => {
@@ -422,34 +424,36 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 await sleep(10);
             } else { running = false; }
         } catch (e: any) {
+            console.error("[LỖI KÉO ĐƠN]:", e);
             running = false;
         }
     }
 
-    // Đọc lại toàn bộ bản ghi đơn hàng cũ từ IndexedDB ra
     const existingRecords = await getStoredOrderRecords();
 
-    // Lưu nối các bản ghi mới vừa kéo được vào IndexedDB
     if (newRecords.length > 0) {
         await updateIndexedDB(newRecords);
     }
     setLastDataUpdate();
 
-    // Gộp đơn cũ và đơn mới vào Map để tránh trùng lặp bản ghi
     const allRecordsMap = new Map<string, OrderRecordV2>();
     
     existingRecords.forEach(r => {
-        const key = `${r.order_id}_${r.sku}`;
-        allRecordsMap.set(key, r);
+        if (r.t_unix >= min_valid_ts) {
+            const key = `${r.order_id}_${r.sku}`;
+            allRecordsMap.set(key, r);
+        }
     });
 
     newRecords.forEach(r => {
-        const key = `${r.order_id}_${r.sku}`;
-        allRecordsMap.set(key, r);
+        if (r.t_unix >= min_valid_ts) {
+            const key = `${r.order_id}_${r.sku}`;
+            allRecordsMap.set(key, r);
+        }
     });
 
     const finalRecords = Array.from(allRecordsMap.values());
-    console.log(`[GỘP DỮ LIỆU THÀNH CÔNG] Tổng số đơn đưa vào tính toán: ${finalRecords.length} bản ghi`);
+    console.log(`[TỔNG SỐ ĐƠN LỌC ĐƯỢC IN 31 DAYS]: ${finalRecords.length} bản ghi`);
 
     return finalRecords;
 }
