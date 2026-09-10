@@ -3,6 +3,7 @@ import { type Location } from "./Template";
 
 // 🟢 PROXY US CỦ NGUYÊN BẢN
 const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
+const authUrl = "https://lyo-inventory-proxy.onrender.com/auth";
 
 export interface OrderRecordV2 {
     sku: string;
@@ -57,18 +58,30 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 TỰ ĐỘNG TẠO VÀ LƯU DÒNG TOKEN VÀO LOCALSTORAGE NHƯ TRƯỚC
-export function obtain_access_token() {
+// 🟢 TỰ ĐỘNG ĐĂNG NHẬP /auth ĐỂ LẤY TOKEN THẬT TỪ VALKEY DB NHƯ CODE CỦ
+export async function obtain_access_token(): Promise<string> {
     let token = localStorage.getItem("api_token") || localStorage.getItem("token");
-    
+
     if (!token) {
-        // Tạo token giả lập chuẩn 32 ký tự để lưu vào LocalStorage như cũ
-        token = "lyo_proxy_access_token_v50_prod_key_123456";
-        localStorage.setItem("api_token", token);
-        localStorage.setItem("token", token);
+        try {
+            const resp = await axios.post(authUrl, {
+                username: "admin",
+                password: "lyo12345"
+            }, {
+                headers: { "Content-Type": "application/json" }
+            });
+
+            if (resp.status === 200 && resp.data?.token) {
+                token = resp.data.token;
+                localStorage.setItem("api_token", token);
+                localStorage.setItem("token", token);
+            }
+        } catch (e) {
+            console.error("Lỗi đăng nhập lấy token từ Proxy Go:", e);
+        }
     }
-    
-    return "Bearer " + token;
+
+    return "Bearer " + (token || "");
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -230,11 +243,13 @@ export async function get_active_products() {
     let running = true;
     let page = 1;
 
+    const authToken = await obtain_access_token();
+
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
                 headers: {
-                    Authorization: obtain_access_token(),
+                    Authorization: authToken,
                 },
                 params: { limit: 250, page: page, status: "active" },
             });
@@ -292,7 +307,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(50);
+                await sleep(15);
             } else { running = false; }
         } catch (e) { running = false; }
     }
@@ -336,11 +351,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
     let page = 1;
     let running = true;
 
+    const authToken = await obtain_access_token();
+
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
                 headers: {
-                    Authorization: obtain_access_token(),
+                    Authorization: authToken,
                 },
                 params: { limit: 250, page: page, order_by: "created_on desc" }
             });
@@ -377,7 +394,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 }
                 page++;
-                await sleep(50);
+                await sleep(15);
             } else { running = false; }
         } catch (e) { running = false; }
     }
