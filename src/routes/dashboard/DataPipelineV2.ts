@@ -1,7 +1,7 @@
-import { Axios } from "axios";
+import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 GIỮ NGUYÊN PROXY US CỦ NGUYÊN BẢN
+// 🟢 PROXY US CỦ NGUYÊN BẢN
 const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
 
 export interface OrderRecordV2 {
@@ -58,8 +58,7 @@ export interface ProductV2 {
 const TARGET_LOCATION_ID_NEW = 789505;
 
 export function obtain_access_token() {
-    const token = import.meta.env.VITE_SAPO_ACCESS_TOKEN || import.meta.env.SAPO_ACCESS_TOKEN || import.meta.env.TOKEN || sessionStorage.getItem("token") || localStorage.getItem("token") || "dummy_token_for_auth_middleware";
-    return "Bearer " + token.replace("Bearer ", "").trim();
+    return "Bearer dummy_token_for_auth_middleware";
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -216,27 +215,24 @@ export function normalizeString(input: string): string {
     return str;
 }
 
+// 🟢 DÙNG AXIOS NGUYÊN BẢN CỦ CỦA DỰ ÁN
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
 
-    let a = new Axios({
-        headers: { 
-            "Content-Type": "application/json", 
-            Authorization: obtain_access_token() 
-        },
-    });
-
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
+            const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: obtain_access_token(),
+                },
                 params: { limit: 250, page: page, status: "active" },
             });
 
             if (resp.status === 200) {
-                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const products = JSON.parse(raw_data_str).products || [];
+                const products = resp.data?.products || [];
                 if (products.length === 0) { running = false; break; }
 
                 products.forEach((product: any) => {
@@ -328,23 +324,22 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let a = new Axios({
-        headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
-    });
-
     let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
 
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
+            const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: obtain_access_token(),
+                },
                 params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
             if (resp.status === 200) {
-                const raw_data_str = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-                const j = JSON.parse(raw_data_str);
+                const j = resp.data || {};
                 const orders = j.orders || [];
 
                 console.log(`[CONSOLE LOG] [PROXY US CỦ] Trang ${page}: Trả về ${orders.length} đơn`);
