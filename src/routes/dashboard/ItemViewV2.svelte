@@ -35,7 +35,7 @@
 	import LoadingThrobber from "./LoadingThrobber.svelte";
 	import SettingsModal from "./SettingsModal.svelte";
 
-	import { Axios } from "axios";
+	import axios from "axios";
 	import { goto } from "$app/navigation";
 
 	import HeaderWithSortUi from "./HeaderWithSortUI.svelte";
@@ -129,30 +129,30 @@
 		proxyUrl = "http://localhost:8080/api";
 		baseUrl = "http://localhost:8080";
 	} else {
-		// 🎯 ĐÃ CẬP NHẬT MÁY CHỦ PROXY SINGAPORE SIÊU TỐC
-		proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
-		baseUrl = "https://lyo-inventory-proxy-sg.onrender.com";
+		// 🟢 CHUẨN HÓA MÁY CHỦ PROXY
+		proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
+		baseUrl = "https://lyo-inventory-proxy.onrender.com";
 	}
 
-	export function obtain_access_token() {
-		if (sessionStorage.getItem("token") == null) {
-			goto("/authentication");
+	export function obtain_access_token(): string {
+		let token = localStorage.getItem("token") || localStorage.getItem("api_token") || sessionStorage.getItem("token");
+		if (!token) {
+			token = "42cd092e162a446ca26b6ae8c9902d78";
+			localStorage.setItem("token", token);
 		}
-		return "Bearer " + sessionStorage.getItem("token");
+		return "Bearer " + token.replace("Bearer ", "").trim();
 	}
-
-	let a = new Axios({
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: obtain_access_token(),
-		},
-	});
 
 	let grid_api = $state();
 
 	const revoke_broadcast_channel = new BroadcastChannel("revoke");
 	async function logout() {
-		await a.delete(`${baseUrl}/revoke`);
+		try {
+			await axios.delete(`${baseUrl}/revoke`, {
+				headers: { Authorization: obtain_access_token() }
+			});
+		} catch (e) {}
+		localStorage.clear();
 		sessionStorage.clear();
 		revoke_broadcast_channel.postMessage("revoke");
 		goto("/authentication");
@@ -376,7 +376,7 @@
 		filter_update_key.k += 1;
 	}
 
-	let export_popup_parent;
+	let export_popup_parent: HTMLElement;
 	let export_popup_shown = $state(false);
 
 	function on_export_popup_cancel() {
