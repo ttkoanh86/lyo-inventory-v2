@@ -58,8 +58,9 @@ export interface ProductV2 {
 const TARGET_LOCATION_ID_NEW = 789505;
 
 // 🟢 HÀM ĐỒNG BỘ TRẢ VỀ CHUỖI TOKEN CHUẨN DÀNH CHO PROXY GO
-export function obtain_access_token(): string {
-    return "Bearer dummy_token_for_auth_middleware";
+export function obtain_access_token() {
+    const token = localStorage.getItem("token") || localStorage.getItem("api_token") || "42cd092e162a446ca26b6ae8c9902d78";
+    return "Bearer " + token.trim();
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
