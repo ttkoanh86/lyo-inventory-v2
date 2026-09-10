@@ -57,9 +57,18 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// Chuỗi Token giả lập truyền qua authMiddleware của Proxy Go
+// 🟢 TỰ ĐỘNG TẠO VÀ LƯU DÒNG TOKEN VÀO LOCALSTORAGE NHƯ TRƯỚC
 export function obtain_access_token() {
-    return "Bearer dummy_token_for_auth_middleware";
+    let token = localStorage.getItem("api_token") || localStorage.getItem("token");
+    
+    if (!token) {
+        // Tạo token giả lập chuẩn 32 ký tự để lưu vào LocalStorage như cũ
+        token = "lyo_proxy_access_token_v50_prod_key_123456";
+        localStorage.setItem("api_token", token);
+        localStorage.setItem("token", token);
+    }
+    
+    return "Bearer " + token;
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -216,7 +225,6 @@ export function normalizeString(input: string): string {
     return str;
 }
 
-// 🟢 HÀM KÉO SẢN PHẨM THEO CODE CỦ CHUẨN
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -323,7 +331,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG THEO CODE CỦ CHUẨN
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let records: OrderRecordV2[] = [];
     let page = 1;
