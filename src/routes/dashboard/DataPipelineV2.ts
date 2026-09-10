@@ -1,7 +1,6 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 PROXY US CỦ NGUYÊN BẢN
 const proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
 
 export interface OrderRecordV2 {
@@ -57,7 +56,6 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 LẤY TOKEN CHUẨN TỪ LOCAL STORAGE / NGUYÊN BẢN
 export function obtain_access_token(): string {
     const token = localStorage.getItem("token") || localStorage.getItem("api_token") || "42cd092e162a446ca26b6ae8c9902d78";
     return "Bearer " + token.trim();
@@ -217,24 +215,26 @@ export function normalizeString(input: string): string {
     return str;
 }
 
+// 🟢 BẪY LỖI BẮT TẬN GỐC NGUYÊN NHÂN
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
     let page = 1;
 
-    // 🟢 DÙNG AXIOS INSTANCE CHUẨN ĐỂ KHÔNG BỊ CRASH M.SEND
-    const a = axios.create({
-        headers: { 
-            "Content-Type": "application/json", 
-            Authorization: obtain_access_token() 
-        },
-    });
+    const token = obtain_access_token();
+    console.log("🔍 [BẪY LỖI] Token chuẩn bị gửi lên:", token);
 
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
+            const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": token
+                },
                 params: { limit: 250, page: page, status: "active" },
             });
+
+            console.log(`✅ [BẪY LỖI] Trả về trang ${page} thành công:`, resp.status);
 
             if (resp.status === 200) {
                 const products = resp.data?.products || [];
@@ -291,7 +291,10 @@ export async function get_active_products() {
                 page++;
                 await sleep(15);
             } else { running = false; }
-        } catch (e) { running = false; }
+        } catch (e: any) {
+            console.error("❌ [BẪY LỖI SẢN PHẨM CRASH]:", e?.response?.status, e?.response?.data || e?.message);
+            running = false;
+        }
     }
     return p_variant_by_ids;
 }
@@ -329,22 +332,25 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    const a = axios.create({
-        headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
-    });
-
     let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
 
+    const token = obtain_access_token();
+
     while (running) {
         try {
-            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
+            const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": token
+                },
                 params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
             if (resp.status === 200) {
-                const orders = resp.data?.orders || [];
+                const j = resp.data || {};
+                const orders = j.orders || [];
 
                 console.log(`[CONSOLE LOG] [PROXY US CỦ] Trang ${page}: Trả về ${orders.length} đơn`);
 
@@ -376,7 +382,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 page++;
                 await sleep(15);
             } else { running = false; }
-        } catch (e) { running = false; }
+        } catch (e: any) {
+            console.error("❌ [BẪY LỖI ĐƠN HÀNG CRASH]:", e?.response?.status, e?.response?.data || e?.message);
+            running = false;
+        }
     }
 
     console.log(`[CONSOLE LOG] TỔNG BẢN GHI ĐƠN KÉO VỀ: ${records.length}`);
