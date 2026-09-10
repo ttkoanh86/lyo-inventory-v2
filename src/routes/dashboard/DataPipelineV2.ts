@@ -1,6 +1,7 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
+// 🟢 Domain Proxy Render Singapore / US
 const proxyUrl = "https://lyo-inventory-proxy-x79b.onrender.com/api";
 
 export interface OrderRecordV2 {
@@ -11,6 +12,7 @@ export interface OrderRecordV2 {
     is_composite: boolean;
     new_record: boolean;
     order_id: number;
+    site_id?: string;
     fulfillment_id?: number;
 }
 
@@ -21,6 +23,7 @@ export interface TransferRecord {
     location_id: number;
     new_record: boolean;
     transfer_id: number;
+    site_id?: string;
 }
 
 interface InventoryLevel {
@@ -56,11 +59,11 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
+// Mốc chốt sổ site cũ: 23:59:59 ngày 31/08/2026 (hoặc năm hiện tại)
+const CUTOFF_DATE_SITE_OLD = new Date(2026, 7, 31, 23, 59, 59).getTime(); 
+
 export function obtain_access_token(): string {
-    let token = localStorage.getItem("token") || localStorage.getItem("api_token") || "";
-    if (!token) return "";
-    token = token.replace("Bearer ", "").trim();
-    return "Bearer " + token;
+    return localStorage.getItem("token") || "";
 }
 
 export type RecordItem = OrderRecordV2 | TransferRecord;
@@ -146,7 +149,7 @@ export function calculate_restock_data(
         if (variant.c_restock > 0) count_has_sales++;
     });
 
-    console.log(`[CONSOLE LOG] Số sản phẩm c_restock > 0: ${count_has_sales}`);
+    console.log(`[LOG SỐ LIỆU] Số sản phẩm c_restock > 0: ${count_has_sales}`);
     return get_items_need_restock(variant_by_id, active_loc_id);
 }
 
@@ -164,7 +167,6 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
             result.push(variant);
         }
     });
-    console.log(`[CONSOLE LOG] Tab 1 (Cần đặt ngay): ${result.length} sản phẩm`);
     return result;
 }
 
@@ -180,7 +182,6 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
             result.push(variant);
         }
     });
-    console.log(`[CONSOLE LOG] Tab 2 (Tồn kho an toàn): ${result.length} sản phẩm`);
     return result;
 }
 
@@ -199,7 +200,6 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
             result.push(variant);
         }
     });
-    console.log(`[CONSOLE LOG] Tab 3 (Hàng bị đứt): ${result.length} sản phẩm`);
     return result;
 }
 
@@ -213,8 +213,7 @@ export function getLastDataUpdateTUnix() { return Number(localStorage.getItem("l
 export function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 export function normalizeString(input: string): string {
-    let str = input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
-    return str;
+    return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
 export async function get_active_products() {
@@ -224,7 +223,6 @@ export async function get_active_products() {
 
     while (running) {
         try {
-            // 🟢 KHÔNG TRUYỀN SAPO TOKEN TRỰC TIẾP VÀO HEADER TẠI ĐÂY LÀM CRASH PROXY
             const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
             });
@@ -282,7 +280,7 @@ export async function get_active_products() {
                     });
                 });
                 page++;
-                await sleep(15);
+                await sleep(10);
             } else { running = false; }
         } catch (e: any) {
             console.error("[LỖI KÉO SẢN PHẨM]:", e);
@@ -300,6 +298,7 @@ export async function updateIndexedDB(records: RecordItem[]) {
             if (!db.objectStoreNames.contains("OrderRecordsV2")) {
                 const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
                 store.createIndex("type", "type");
+                store.createIndex("site_id", "site_id");
             }
         };
         request.onsuccess = function () {
@@ -308,8 +307,13 @@ export async function updateIndexedDB(records: RecordItem[]) {
             const store = tx.objectStore("OrderRecordsV2");
             records.forEach((r) => {
                 store.put({
-                    t_unix: r.t_unix, quantity: r.quantity, sku: r.sku, location_id: Number(r.location_id),
-                    is_composite: (r as OrderRecordV2).is_composite || false, order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
+                    t_unix: r.t_unix,
+                    quantity: r.quantity,
+                    sku: r.sku,
+                    location_id: Number(r.location_id),
+                    is_composite: (r as OrderRecordV2).is_composite || false,
+                    order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
+                    site_id: r.site_id || "site_new",
                     type: (r as OrderRecordV2).order_id ? "order" : "transfer",
                 });
             });
@@ -324,14 +328,18 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
+// 🟢 HÀM KÉO ĐƠN HÀNG CÓ CẮT NGẮT CHẮC CHẮN MỐC THỜI GIAN 31 NÀY
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
 
+    const now = new Date();
+    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
+    const min_valid_ts = min_date.getTime();
+
     while (running) {
         try {
-            // 🟢 KHÔNG TRUYỀN SAPO TOKEN TRỰC TIẾP VÀO HEADER TẠI ĐÂY LÀM CRASH PROXY
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
                 params: { limit: 250, page: page, order_by: "created_on desc" }
             });
@@ -340,14 +348,19 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = resp.data || {};
                 const orders = j.orders || [];
 
-                console.log(`[CONSOLE LOG] [PROXY US CỦ] Trang ${page}: Trả về ${orders.length} đơn`);
-
                 if (orders.length === 0) { running = false; break; }
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
+
+                        // 🟢 NGẮT VÒNG LẶP NGAY KHI GẶP ĐƠN VƯỢT QUÁ 31 NGÀY
+                        if (order_ts < min_valid_ts) {
+                            console.log(`[CẮT TẠI TRANG ${page}] Đã chạm mốc 31 ngày gần nhất, ngắt kéo API!`);
+                            running = false;
+                            break;
+                        }
 
                         const line_items = order.order_line_items || order.line_items || order.items || [];
                         line_items.forEach((line_item: any) => {
@@ -361,22 +374,21 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                     location_id: TARGET_LOCATION_ID_NEW,
                                     is_composite: false,
                                     new_record: true,
-                                    order_id: order.id
+                                    order_id: order.id,
+                                    site_id: "site_new"
                                 });
                             }
                         });
                     }
                 }
                 page++;
-                await sleep(15);
+                await sleep(10);
             } else { running = false; }
         } catch (e: any) {
             console.error("[LỖI KÉO ĐƠN HÀNG]:", e);
             running = false;
         }
     }
-
-    console.log(`[CONSOLE LOG] TỔNG BẢN GHI ĐƠN KÉO VỀ: ${records.length}`);
 
     await updateIndexedDB(records);
     setLastDataUpdate();
