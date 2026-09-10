@@ -2,7 +2,7 @@ import axios from "axios";
 import { type Location } from "./Template";
 
 // 🟢 Domain Proxy Render Singapore (Thay đúng URL Proxy SG của dì vào đây)
-const proxyUrl = "https://<domain-proxy-singapore-cua-di>.onrender.com/api";
+const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
 
 export interface OrderRecordV2 {
     sku: string;
