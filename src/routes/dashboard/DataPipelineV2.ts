@@ -57,8 +57,8 @@ export interface ProductV2 {
 
 const TARGET_LOCATION_ID_NEW = 789505;
 
-// 🟢 HÀM ĐỒNG BỘ TRẢ VỀ CHUỖI TOKEN CHUẨN DÀNH CHO PROXY GO
-export function obtain_access_token() {
+// 🟢 LẤY TOKEN CHUẨN TỪ LOCAL STORAGE / NGUYÊN BẢN
+export function obtain_access_token(): string {
     const token = localStorage.getItem("token") || localStorage.getItem("api_token") || "42cd092e162a446ca26b6ae8c9902d78";
     return "Bearer " + token.trim();
 }
@@ -222,15 +222,17 @@ export async function get_active_products() {
     let running = true;
     let page = 1;
 
-    // 🟢 ĐỌC TOKEN TRỰC TIẾP CHUẨN ĐỒNG BỘ
-    const authToken = obtain_access_token();
+    // 🟢 DÙNG AXIOS INSTANCE CHUẨN ĐỂ KHÔNG BỊ CRASH M.SEND
+    const a = axios.create({
+        headers: { 
+            "Content-Type": "application/json", 
+            Authorization: obtain_access_token() 
+        },
+    });
 
     while (running) {
         try {
-            const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
-                headers: {
-                    Authorization: authToken,
-                },
+            const resp = await a.get(`${proxyUrl}/admin/products.json`, {
                 params: { limit: 250, page: page, status: "active" },
             });
 
@@ -327,25 +329,22 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 }
 
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+    const a = axios.create({
+        headers: { "Content-Type": "application/json", Authorization: obtain_access_token() },
+    });
+
     let records: OrderRecordV2[] = [];
     let page = 1;
     let running = true;
 
-    // 🟢 ĐỌC TOKEN TRỰC TIẾP CHUẨN ĐỒNG BỘ
-    const authToken = obtain_access_token();
-
     while (running) {
         try {
-            const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-                headers: {
-                    Authorization: authToken,
-                },
+            const resp = await a.get(`${proxyUrl}/admin/orders.json`, {
                 params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
             if (resp.status === 200) {
-                const j = resp.data || {};
-                const orders = j.orders || [];
+                const orders = resp.data?.orders || [];
 
                 console.log(`[CONSOLE LOG] [PROXY US CỦ] Trang ${page}: Trả về ${orders.length} đơn`);
 
