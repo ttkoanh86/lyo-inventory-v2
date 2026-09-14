@@ -80,7 +80,7 @@ export function is_promotional_item(brand: string, name: string = "") {
     return false;
 }
 
-// 🟢 HÀM TÍNH TOÁN DOANH SỐ QUY ĐỔI CHO SITE MỚI
+// 🟢 HÀM TÍNH TOÁN DOANH SỐ QUY ĐỔI CHO SITE MỚI (LÀM TRÒN CHUẨN TỪ .5)
 export function calculate_restock_data(
     records: RecordItem[],
     variant_by_id: Map<number, ProductV2>,
@@ -102,7 +102,7 @@ export function calculate_restock_data(
     const diff_time = Math.max(0, now_ts - min_valid_ts);
     const actual_days = Math.max(1, Math.ceil(diff_time / (1000 * 60 * 60 * 24)));
 
-    // Tự động nhân hệ số quy đổi về 31 ngày (Nếu đã đủ 31 ngày thì hệ số tự về 1.0)
+    // Hệ số nhân quy đổi về 31 ngày
     const multiplier_31_days = actual_days >= 31 ? 1 : (31 / actual_days);
 
     console.log(`[SITE MỚI] Số ngày chạy thực tế: ${actual_days} ngày. Hệ số quy đổi 31 ngày: x${multiplier_31_days.toFixed(2)}`);
@@ -139,25 +139,25 @@ export function calculate_restock_data(
 
         const inventory = variant.inventory_level_by_location.get(active_loc_id) || variant.inventory_level_by_location.get(TARGET_LOCATION_ID_NEW);
 
-        variant.c_available = inventory ? Math.max(0, inventory.available ?? inventory.on_hand ?? 0) : 0;
-        variant.c_incoming = inventory ? Math.max(0, inventory.incoming ?? 0) : 0;
+        variant.c_available = inventory ? Math.max(0, Math.round(inventory.available ?? inventory.on_hand ?? 0)) : 0;
+        variant.c_incoming = inventory ? Math.max(0, Math.round(inventory.incoming ?? 0)) : 0;
         variant.c_on_hand = variant.c_available;
 
         const clean_sku = (variant.sku || "").trim().toLowerCase();
         const actual_sales = sales_by_sku.get(clean_sku) ?? 0;
 
-        // Quy đổi doanh số thực tế sang mốc 31 ngày
+        // 🟢 QUY ĐỔI SANG 31 NGÀY VÀ LÀM TRÒN NGUYÊN (TRÊN .5 LÊN 1, DƯỚI .5 XUỐNG 0)
         const estimated_sales_31 = actual_sales * multiplier_31_days;
-
         variant.c_restock = Math.round(estimated_sales_31);
+
         if (variant.c_restock > 0) count_has_sales++;
     });
 
-    console.log(`[LOG SỐ LIỆU] Số sản phẩm phát sinh doanh số: ${count_has_sales}`);
+    console.log(`[LOG SỐ LIỆU] Số sản phẩm phát sinh doanh số quy đổi: ${count_has_sales}`);
     return get_items_need_restock(variant_by_id, active_loc_id);
 }
 
-// 🟢 TAB 1: CẦN ĐẶT NGAY
+// 🟢 TAB 1: CẦN ĐẶT NGAY (ĐÃ LÀM TRÒN NGUYÊN ĐẠT .5 LÊN 1)
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -167,8 +167,9 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
         const current_has = variant.c_available + variant.c_incoming;
 
         if (current_has <= 0.5 * sales && sales > 0) {
-            variant.c_restock_half = Math.max(0, Math.round(0.5 * sales) - current_has);
-            variant.c_restock_third = Math.max(0, Math.round((1 / 3) * sales) - current_has);
+            // 🟢 LÀM TRÒN: ĐẠT TỪ 0.5 TẠO NÊN 1 NGUYÊN
+            variant.c_restock_half = Math.max(0, Math.round(0.5 * sales - current_has));
+            variant.c_restock_third = Math.max(0, Math.round((1 / 3) * sales - current_has));
             result.push(variant);
         }
     });
@@ -176,7 +177,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN
+// 🟢 TAB 2: TỒN KHO AN TOÀN (LÀM TRÒN CHUẨN SỐ NGUYÊN)
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -193,7 +194,7 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
-// 🟢 TAB 3: HÀNG BỊ ĐỨT
+// 🟢 TAB 3: HÀNG BỊ ĐỨT (LÀM TRÒN VỀ 0 CHUẨN SỐ NGUYÊN)
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
 
