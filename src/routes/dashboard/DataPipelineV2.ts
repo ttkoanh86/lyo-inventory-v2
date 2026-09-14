@@ -1,9 +1,9 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 Domain Proxy Singapore chính thức
+// 🟢 Domain Proxy Render Singapore chính thức
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
-const TARGET_LOCATION_ID_NEW = 789505; // ID Kho LYO Group Site Mới
+const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới
 
 export interface OrderRecordV2 {
     sku: string;
@@ -80,7 +80,7 @@ export function is_promotional_item(brand: string, name: string = "") {
     return false;
 }
 
-// 🟢 HÀM TÍNH TOÁN QUY ĐỔI DOANH SỐ CHO SITE MỚI (TỪ 01/09 ĐẾN NAY)
+// 🟢 HÀM TÍNH TOÁN BỎ HẾT LỌC NGÀY RẮC RỐI - TÍNH TRỰC TIẾP DOANH SỐ ĐƠN KÉO VỀ
 export function calculate_restock_data(
     records: RecordItem[],
     variant_by_id: Map<number, ProductV2>,
@@ -91,28 +91,14 @@ export function calculate_restock_data(
 
     let sales_by_sku = new Map<string, number>();
 
-    // 🟢 MỐC BẮT ĐẦU SITE MỚI: 01/09/2026
-    const site_start_date = new Date("2026-09-01T00:00:00");
-    const min_valid_ts = site_start_date.getTime();
-    
-    const now = new Date();
-    const now_ts = now.getTime();
-
-    // Tính số ngày bán thực tế từ 01/09 đến nay
-    const diff_time = Math.max(0, now_ts - min_valid_ts);
-    const actual_days = Math.max(1, Math.ceil(diff_time / (1000 * 60 * 60 * 24)));
-
-    // Hệ số nhân quy đổi về mốc chuẩn 31 ngày (nếu chưa đủ 31 ngày)
-    const multiplier_31_days = actual_days >= 31 ? 1 : (31 / actual_days);
-
-    console.log(`[SITE MỚI] Đã chạy ${actual_days} ngày. Hệ số quy đổi 31 ngày: x${multiplier_31_days.toFixed(2)}`);
-
+    // Khởi tạo bảng doanh số
     for (let [_, variant] of variant_by_id) {
         if (variant.sku && !variant.is_composite) {
             sales_by_sku.set(variant.sku.trim().toLowerCase(), 0);
         }
     }
 
+    // Cộng dồn toàn bộ đơn vừa kéo về (không lọc ngày)
     for (let record of records) {
         const clean_sku = (record.sku || "").trim().toLowerCase();
 
@@ -124,10 +110,8 @@ export function calculate_restock_data(
             });
         }
 
-        if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-            const current_sales = sales_by_sku.get(clean_sku) || 0;
-            sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
-        }
+        const current_sales = sales_by_sku.get(clean_sku) || 0;
+        sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
     }
 
     let count_has_sales = 0;
@@ -146,14 +130,11 @@ export function calculate_restock_data(
         const clean_sku = (variant.sku || "").trim().toLowerCase();
         const actual_sales = sales_by_sku.get(clean_sku) ?? 0;
 
-        // Quy đổi doanh số thực tế sang mốc 31 ngày
-        const estimated_sales_31 = actual_sales * multiplier_31_days;
-
-        variant.c_restock = Math.round(estimated_sales_31);
+        variant.c_restock = Math.round(actual_sales);
         if (variant.c_restock > 0) count_has_sales++;
     });
 
-    console.log(`[LOG SỐ LIỆU] Số sản phẩm phát sinh doanh số quy đổi: ${count_has_sales}`);
+    console.log(`[TEST ĐƠN HÀNG] Tổng số SKU có bán được đơn: ${count_has_sales}`);
     return get_items_need_restock(variant_by_id, active_loc_id);
 }
 
@@ -363,18 +344,15 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN SITE MỚI (LẤY TỪ 01/09 ĐẾN NAY)
+// 🟢 TEST KÉO CỐ ĐỊNH 10 TRANG ĐƠN MỚI NHẤT (BỎ LỌC NGÀY ĐỂ BẮT DỮ LIỆU THỰC TẾ)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let all_records: RecordItem[] = [];
     let existing_keys = new Set<string>();
 
-    const site_start_date = new Date("2026-09-01T00:00:00");
-    const min_valid_ts = site_start_date.getTime();
-
     let page = 1;
-    let running = true;
+    const max_pages = 10; // Chỉ kéo đúng 10 trang (~2.500 đơn gần nhất)
 
-    while (running) {
+    while (page <= max_pages) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
                 params: { limit: 250, page: page, order_by: "created_on desc" }
@@ -384,9 +362,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                 const j = resp.data || {};
                 const orders = j.orders || [];
 
-                if (orders.length === 0) { running = false; break; }
-
-                let reached_old_date = false;
+                if (orders.length === 0) { break; }
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
@@ -394,80 +370,65 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // 🔴 NGẮT VÒNG LẶP CHẮC CHẮN NẾU ĐƠN TRƯỚC NGÀY 01/09/2026
-                        if (order_ts > 0 && order_ts < min_valid_ts) {
-                            reached_old_date = true;
-                            break;
-                        }
+                        const line_items = order.order_line_items || order.line_items || order.items || [];
+                        line_items.forEach((line_item: any, index: number) => {
+                            const qty = Number(line_item.quantity) || 0;
+                            if (qty > 0) {
+                                const variant_obj = variant_by_id.get(line_item.variant_id);
+                                const line_id = line_item.id || index;
 
-                        if (order_ts >= min_valid_ts) {
-                            const line_items = order.order_line_items || order.line_items || order.items || [];
-                            line_items.forEach((line_item: any, index: number) => {
-                                const qty = Number(line_item.quantity) || 0;
-                                if (qty > 0) {
-                                    const variant_obj = variant_by_id.get(line_item.variant_id);
-                                    const line_id = line_item.id || index;
-
-                                    if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
-                                        line_item.composite_item_parts.forEach((part: any) => {
-                                            const sub_variant = variant_by_id.get(part.variant_id);
-                                            const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
-                                            if (clean_sub_sku) {
-                                                const total_sub_qty = qty * (Number(part.quantity) || 1);
-                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
-                                                if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                    existing_keys.add(record_key);
-                                                }
-                                            }
-                                        });
-                                    } else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
-                                        variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
-                                            const sub_variant = variant_by_id.get(comp_variant_id);
-                                            if (sub_variant && sub_variant.sku) {
-                                                const clean_sub_sku = sub_variant.sku.trim();
-                                                const total_sub_qty = qty * comp_qty;
-                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
-                                                if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
-                                                    existing_keys.add(record_key);
-                                                }
-                                            }
-                                        });
-                                    } else {
-                                        const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
-                                        if (raw_sku) {
-                                            const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
+                                if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+                                    line_item.composite_item_parts.forEach((part: any) => {
+                                        const sub_variant = variant_by_id.get(part.variant_id);
+                                        const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
+                                        if (clean_sub_sku) {
+                                            const total_sub_qty = qty * (Number(part.quantity) || 1);
+                                            const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
                                             if (!existing_keys.has(record_key)) {
-                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
                                                 existing_keys.add(record_key);
                                             }
                                         }
+                                    });
+                                } else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+                                    variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
+                                        const sub_variant = variant_by_id.get(comp_variant_id);
+                                        if (sub_variant && sub_variant.sku) {
+                                            const clean_sub_sku = sub_variant.sku.trim();
+                                            const total_sub_qty = qty * comp_qty;
+                                            const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+                                            if (!existing_keys.has(record_key)) {
+                                                all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                existing_keys.add(record_key);
+                                            }
+                                        }
+                                    });
+                                } else {
+                                    const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
+                                    if (raw_sku) {
+                                        const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
+                                        if (!existing_keys.has(record_key)) {
+                                            all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                            existing_keys.add(record_key);
+                                        }
                                     }
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 }
-
-                if (reached_old_date) {
-                    console.log(`[SITE MỚI] Đã chạm mốc ngày 01/09 tại trang ${page}, ngắt API thành công!`);
-                    running = false;
-                    break;
-                }
-
                 page++;
                 await sleep(10);
-            } else { running = false; }
+            } else { break; }
         } catch (e: any) {
             console.error("[LỖI KÉO ĐƠN]:", e);
-            running = false;
+            break;
         }
     }
 
     await updateIndexedDB(all_records);
     setLastDataUpdate();
-    console.log(`[KÉO THÀNH CÔNG SITE MỚI (TỪ 01/09)]: ${all_records.length} bản ghi`);
+    console.log(`[TEST KÉO 10 TRANG ĐẦU]: Đã lấy ${all_records.length} dòng sản phẩm đơn hàng`);
     return all_records as OrderRecordV2[];
 }
 
