@@ -1,9 +1,9 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 Domain Proxy Render Singapore
+// 🟢 Domain Proxy Render Singapore chính thức
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
-const TARGET_LOCATION_ID_NEW = 789505;
+const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới
 
 export interface OrderRecordV2 {
     sku: string;
@@ -80,6 +80,7 @@ export function is_promotional_item(brand: string, name: string = "") {
     return false;
 }
 
+// 🟢 HÀM TÍNH TOÁN DOANH SỐ QUY ĐỔI CHO SITE MỚI
 export function calculate_restock_data(
     records: RecordItem[],
     variant_by_id: Map<number, ProductV2>,
@@ -89,6 +90,22 @@ export function calculate_restock_data(
     records.sort((a, b) => b.t_unix - a.t_unix);
 
     let sales_by_sku = new Map<string, number>();
+
+    // Mốc bắt đầu chạy Site mới: 01/09/2026
+    const site_start_date = new Date("2026-09-01T00:00:00");
+    const min_valid_ts = site_start_date.getTime();
+    
+    const now = new Date();
+    const now_ts = now.getTime();
+
+    // Tính số ngày bán thực tế ghi nhận được từ 01/09 đến nay
+    const diff_time = Math.max(0, now_ts - min_valid_ts);
+    const actual_days = Math.max(1, Math.ceil(diff_time / (1000 * 60 * 60 * 24)));
+
+    // Tự động nhân hệ số quy đổi về 31 ngày (Nếu đã đủ 31 ngày thì hệ số tự về 1.0)
+    const multiplier_31_days = actual_days >= 31 ? 1 : (31 / actual_days);
+
+    console.log(`[SITE MỚI] Số ngày chạy thực tế: ${actual_days} ngày. Hệ số quy đổi 31 ngày: x${multiplier_31_days.toFixed(2)}`);
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku && !variant.is_composite) {
@@ -107,8 +124,10 @@ export function calculate_restock_data(
             });
         }
 
-        const current_sales = sales_by_sku.get(clean_sku) || 0;
-        sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+        if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
+            const current_sales = sales_by_sku.get(clean_sku) || 0;
+            sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+        }
     }
 
     let count_has_sales = 0;
@@ -127,14 +146,18 @@ export function calculate_restock_data(
         const clean_sku = (variant.sku || "").trim().toLowerCase();
         const actual_sales = sales_by_sku.get(clean_sku) ?? 0;
 
-        variant.c_restock = Math.round(actual_sales);
+        // Quy đổi doanh số thực tế sang mốc 31 ngày
+        const estimated_sales_31 = actual_sales * multiplier_31_days;
+
+        variant.c_restock = Math.round(estimated_sales_31);
         if (variant.c_restock > 0) count_has_sales++;
     });
 
-    console.log(`[BẪY DATA - TÍNH TOÁN] Số sản phẩm c_restock > 0: ${count_has_sales}`);
+    console.log(`[LOG SỐ LIỆU] Số sản phẩm phát sinh doanh số: ${count_has_sales}`);
     return get_items_need_restock(variant_by_id, active_loc_id);
 }
 
+// 🟢 TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -153,6 +176,7 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
+// 🟢 TAB 2: TỒN KHO AN TOÀN
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
@@ -169,6 +193,7 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
     return result;
 }
 
+// 🟢 TAB 3: HÀNG BỊ ĐỨT
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
     let result: ProductV2[] = [];
 
@@ -338,59 +363,111 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM BẪY DỮ LIỆU ĐƠN HÀNG (PRINT CHI TIẾT TẤT CẢ PHẢN HỒI API)
+// 🟢 HÀM KÉO ĐƠN CHÍNH THỨC DÀNH CHO SITE MỚI (CHẠY TỪ 01/09 ĐẾN NAY)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
     let all_records: RecordItem[] = [];
+    let existing_keys = new Set<string>();
 
-    try {
-        console.log(`[BẪY DATA] Bắt đầu gọi API: ${proxyUrl}/admin/orders.json`);
-        
-        const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-            params: { limit: 10, page: 1, order_by: "created_on desc" }
-        });
+    const site_start_date = new Date("2026-09-01T00:00:00");
+    const min_valid_ts = site_start_date.getTime();
 
-        console.log(`[BẪY DATA] HTTP Status Code:`, resp.status);
-        console.log(`[BẪY DATA] Dữ liệu thô Sapo trả về:`, resp.data);
+    let page = 1;
+    let running = true;
 
-        if (resp.status === 200) {
-            const j = resp.data || {};
-            const orders = j.orders || [];
+    while (running) {
+        try {
+            const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+                params: { limit: 250, page: page, order_by: "created_on desc" }
+            });
 
-            console.log(`[BẪY DATA] Số lượng đơn hàng nhận được trong trang 1: ${orders.length}`);
+            if (resp.status === 200) {
+                const j = resp.data || {};
+                const orders = j.orders || [];
 
-            if (orders.length > 0) {
-                console.log(`[BẪY DATA] Đơn hàng mẫu đầu tiên:`, orders[0]);
-                
+                if (orders.length === 0) { running = false; break; }
+
+                let reached_old_date = false;
+
                 for (const order of orders) {
-                    const line_items = order.order_line_items || order.line_items || order.items || [];
-                    console.log(`[BẪY DATA] Đơn #${order.id} có ${line_items.length} chi tiết sản phẩm`);
+                    if (order.status !== "cancelled") {
+                        const actual_loc_id = Number(order.location_id || TARGET_LOCATION_ID_NEW);
+                        const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
+                        const order_ts = parseSapoDate(date_str);
 
-                    line_items.forEach((line_item: any) => {
-                        const raw_sku = (line_item.sku || line_item.barcode || "").trim();
-                        const qty = Number(line_item.quantity) || 0;
-                        console.log(`[BẪY DATA] Item SKU: "${raw_sku}" | Số lượng: ${qty}`);
-
-                        if (qty > 0 && raw_sku) {
-                            all_records.push({
-                                sku: raw_sku,
-                                t_unix: Date.now(),
-                                quantity: qty,
-                                location_id: TARGET_LOCATION_ID_NEW,
-                                is_composite: false,
-                                new_record: true,
-                                order_id: order.id,
-                                site_id: "site_new"
-                            } as OrderRecordV2);
+                        // Ngắt vòng lặp khi chạm đơn trước ngày 01/09/2026
+                        if (order_ts > 0 && order_ts < min_valid_ts) {
+                            reached_old_date = true;
+                            break;
                         }
-                    });
+
+                        if (order_ts >= min_valid_ts) {
+                            const line_items = order.order_line_items || order.line_items || order.items || [];
+                            line_items.forEach((line_item: any, index: number) => {
+                                const qty = Number(line_item.quantity) || 0;
+                                if (qty > 0) {
+                                    const variant_obj = variant_by_id.get(line_item.variant_id);
+                                    const line_id = line_item.id || index;
+
+                                    if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+                                        line_item.composite_item_parts.forEach((part: any) => {
+                                            const sub_variant = variant_by_id.get(part.variant_id);
+                                            const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
+                                            if (clean_sub_sku) {
+                                                const total_sub_qty = qty * (Number(part.quantity) || 1);
+                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+                                                if (!existing_keys.has(record_key)) {
+                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                    existing_keys.add(record_key);
+                                                }
+                                            }
+                                        });
+                                    } else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+                                        variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
+                                            const sub_variant = variant_by_id.get(comp_variant_id);
+                                            if (sub_variant && sub_variant.sku) {
+                                                const clean_sub_sku = sub_variant.sku.trim();
+                                                const total_sub_qty = qty * comp_qty;
+                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+                                                if (!existing_keys.has(record_key)) {
+                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                    existing_keys.add(record_key);
+                                                }
+                                            }
+                                        });
+                                    } else {
+                                        const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
+                                        if (raw_sku) {
+                                            const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
+                                            if (!existing_keys.has(record_key)) {
+                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                existing_keys.add(record_key);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
-            }
+
+                if (reached_old_date) {
+                    console.log(`[SITE MỚI] Ngắt API thành công khi chạm mốc 01/09 tại trang ${page}!`);
+                    running = false;
+                    break;
+                }
+
+                page++;
+                await sleep(10);
+            } else { running = false; }
+        } catch (e: any) {
+            console.error("[LỖI KÉO ĐƠN]:", e);
+            running = false;
         }
-    } catch (e: any) {
-        console.error("[BẪY DATA - BỊ LỖI KẾT NỐI API]:", e);
     }
 
-    console.log(`[BẪY DATA] TỔNG CỘNG ĐÃ LẤY ĐƯỢC: ${all_records.length} bản ghi`);
+    await updateIndexedDB(all_records);
+    setLastDataUpdate();
+    console.log(`[SITE MỚI KÉO THÀNH CÔNG TỪ 01/09]: ${all_records.length} bản ghi`);
     return all_records as OrderRecordV2[];
 }
 
