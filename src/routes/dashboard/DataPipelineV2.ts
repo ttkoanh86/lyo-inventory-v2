@@ -102,7 +102,7 @@ export function calculate_restock_data(
     const diff_time = Math.max(0, now_ts - min_valid_ts);
     const actual_days = Math.max(1, Math.ceil(diff_time / (1000 * 60 * 60 * 24)));
 
-    // Hệ số nhân quy đổi về 31 ngày
+    // Hệ số nhân quy đổi về 31 ngày (Nếu đã >= 31 ngày thì hệ số tự về 1.0)
     const multiplier_31_days = actual_days >= 31 ? 1 : (31 / actual_days);
 
     console.log(`[SITE MỚI] Số ngày chạy thực tế: ${actual_days} ngày. Hệ số quy đổi 31 ngày: x${multiplier_31_days.toFixed(2)}`);
@@ -364,14 +364,29 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN CHÍNH THỨC DÀNH CHO SITE MỚI (CHẠY TỪ 01/09 ĐẾN NAY)
+// 🟢 HÀM KÉO ĐƠN SIÊU TỐC: ĐỌC CACHE TRƯỚC -> CHỈ KÉO ĐƠN MỚI PHÁT SINH
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let all_records: RecordItem[] = [];
     let existing_keys = new Set<string>();
+    
+    // 1. ĐỌC DỮ LIỆU ĐÃ LƯU TRONG INDEXEDDB RA TRƯỚC (HIỂN THỊ TỨC THÌ)
+    let stored_records = await getStoredOrderRecords();
+    let max_stored_ts = 0;
+
+    stored_records.forEach((r) => {
+        const record_key = `ORD_${r.order_id}_${r.sku}_${r.location_id}`;
+        existing_keys.add(record_key);
+        if (r.t_unix > max_stored_ts) max_stored_ts = r.t_unix;
+    });
+
+    console.log(`[CACHE INDEXEDDB] Đã nạp thành công ${stored_records.length} bản ghi từ bộ nhớ máy!`);
 
     const site_start_date = new Date("2026-09-01T00:00:00");
     const min_valid_ts = site_start_date.getTime();
 
+    // 2. NẾU ĐÃ CÓ CACHE, CHỈ KÉO CÁC ĐƠN BẮT ĐẦU TỪ MỐC MỚI NHẤT (TRÁNH KÉO LẠI ĐƠN CŨ)
+    const fetch_since_ts = max_stored_ts > min_valid_ts ? max_stored_ts : min_valid_ts;
+
+    let new_records: RecordItem[] = [];
     let page = 1;
     let running = true;
 
@@ -387,7 +402,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
                 if (orders.length === 0) { running = false; break; }
 
-                let reached_old_date = false;
+                let reached_existing_date = false;
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
@@ -395,9 +410,9 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        // Ngắt vòng lặp khi chạm đơn trước ngày 01/09/2026
-                        if (order_ts > 0 && order_ts < min_valid_ts) {
-                            reached_old_date = true;
+                        // Ngắt vòng lặp ngay khi chạm tới mốc thời gian đã lưu trong Cache
+                        if (order_ts > 0 && order_ts <= fetch_since_ts && stored_records.length > 0) {
+                            reached_existing_date = true;
                             break;
                         }
 
@@ -417,7 +432,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                 const total_sub_qty = qty * (Number(part.quantity) || 1);
                                                 const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
                                                 if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                    new_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
                                                     existing_keys.add(record_key);
                                                 }
                                             }
@@ -430,7 +445,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                                 const total_sub_qty = qty * comp_qty;
                                                 const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
                                                 if (!existing_keys.has(record_key)) {
-                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                    new_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
                                                     existing_keys.add(record_key);
                                                 }
                                             }
@@ -440,7 +455,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                                         if (raw_sku) {
                                             const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
                                             if (!existing_keys.has(record_key)) {
-                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+                                                new_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
                                                 existing_keys.add(record_key);
                                             }
                                         }
@@ -451,8 +466,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
                     }
                 }
 
-                if (reached_old_date) {
-                    console.log(`[SITE MỚI] Ngắt API thành công khi chạm mốc 01/09 tại trang ${page}!`);
+                if (reached_existing_date) {
+                    console.log(`[TỐI ƯU CACHE] Đã dừng kéo API vì đã chạm mốc dữ liệu cũ tại trang ${page}!`);
                     running = false;
                     break;
                 }
@@ -466,10 +481,17 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    await updateIndexedDB(all_records);
+    // 3. NẾU CÓ ĐƠN MỚI THÌ LƯU THÊM VÀO INDEXEDDB
+    if (new_records.length > 0) {
+        await updateIndexedDB(new_records);
+        console.log(`[CẬP NHẬT BỔ SUNG] Đã lưu thêm ${new_records.length} đơn hàng mới vào Cache!`);
+    }
+
     setLastDataUpdate();
-    console.log(`[SITE MỚI KÉO THÀNH CÔNG TỪ 01/09]: ${all_records.length} bản ghi`);
-    return all_records as OrderRecordV2[];
+    
+    // Gộp cả dữ liệu trong Cache và Đơn mới kéo về
+    const combined_records = [...stored_records, ...new_records];
+    return combined_records as OrderRecordV2[];
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
