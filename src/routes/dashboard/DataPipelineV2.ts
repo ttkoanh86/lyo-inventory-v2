@@ -3,7 +3,7 @@ import { type Location } from "./Template";
 
 // 🟢 Domain Proxy Singapore chuẩn
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
-const TARGET_LOCATION_ID_NEW = 789505; // Kho LYO Group
+const TARGET_LOCATION_ID_NEW = 781327; // Kho LYO Group
 
 export interface OrderRecordV2 {
     sku: string;
