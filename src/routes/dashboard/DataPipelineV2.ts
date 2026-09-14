@@ -1,8 +1,9 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 Domain Proxy Render Singapore (Thay đúng URL Proxy SG của dì vào đây)
+// 🟢 Domain Proxy Singapore chuẩn
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
+const TARGET_LOCATION_ID_NEW = 789505; // Kho LYO Group
 
 export interface OrderRecordV2 {
     sku: string;
@@ -57,8 +58,6 @@ export interface ProductV2 {
     order_history_by_location: Set<number>;
 }
 
-const TARGET_LOCATION_ID_NEW = 789505;
-
 export function obtain_access_token(): string {
     return localStorage.getItem("token") || "";
 }
@@ -76,15 +75,8 @@ export function parseSapoDate(dateStr: string): number {
 export function is_promotional_item(brand: string, name: string = "") {
     const br = (brand || "").trim().toLowerCase();
     const nm = (name || "").trim().toLowerCase();
-
-    if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) {
-        return true;
-    }
-
-    if (nm.includes("- sale") || nm.includes("-sale") || nm.includes("sale ") || nm.includes("(tặng)") || nm.includes("kđh")) {
-        return true;
-    }
-
+    if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) return true;
+    if (nm.includes("- sale") || nm.includes("-sale") || nm.includes("sale ") || nm.includes("(tặng)") || nm.includes("kđh")) return true;
     return false;
 }
 
@@ -98,10 +90,11 @@ export function calculate_restock_data(
 
     let sales_by_sku = new Map<string, number>();
 
-    const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
+    // 🟢 MỐC CHỐT SỔ: 31/08/2026 lùi về 31 ngày (01/08/2026)
+    const cutoff_date = new Date(2026, 7, 31, 23, 59, 59); // 31/08/2026
+    const min_date = new Date(2026, 7, 31 - 31, 0, 0, 0);   // 01/08/2026
     const min_valid_ts = min_date.getTime();
-    const now_ts = now.getTime();
+    const now_ts = cutoff_date.getTime();
 
     for (let [_, variant] of variant_by_id) {
         if (variant.sku && !variant.is_composite) {
@@ -169,15 +162,14 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
     return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN (LỌC TRỰC TIẾP TỒN KHO VÀ DOANH SỐ)
+// 🟢 TAB 2: TỒN KHO AN TOÀN
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
     let result: ProductV2[] = [];
     variant_by_id.forEach((variant) => {
         if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
 
         const sales = variant.c_restock || 0;
-        const inventory = variant.inventory_level_by_location.get(TARGET_LOCATION_ID_NEW);
-        const current_has = inventory ? Math.max(0, (inventory.available ?? inventory.on_hand ?? 0) + (inventory.incoming ?? 0)) : (variant.c_available + variant.c_incoming);
+        const current_has = variant.c_available + variant.c_incoming;
 
         if (sales > 0 && current_has > 0.5 * sales) {
             result.push(variant);
@@ -220,7 +212,6 @@ export function normalizeString(input: string): string {
     return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 KÉO DANH SÁCH SẢN PHẨM KHẢ DỤNG
 export async function get_active_products() {
     let p_variant_by_ids: Map<number, ProductV2> = new Map();
     let running = true;
@@ -295,7 +286,6 @@ export async function get_active_products() {
     return p_variant_by_ids;
 }
 
-// 🟢 ĐỌC ĐƠN ĐÃ LƯU TỪ INDEXEDDB
 export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
     return new Promise((resolve) => {
         const request = indexedDB.open("LYOInventoryDB_V50", 1);
@@ -318,13 +308,10 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
                 resolve([]);
             };
         };
-        request.onerror = function () {
-            resolve([]);
-        };
+        request.onerror = function () { resolve([]); };
     });
 }
 
-// 🟢 CẬP NHẬT INDEXEDDB
 export async function updateIndexedDB(records: RecordItem[]) {
     return new Promise<void>((resolve, reject) => {
         const request = indexedDB.open("LYOInventoryDB_V50", 1);
@@ -363,63 +350,102 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
     return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC VỚI CHẶN MỐC CỨNG 31 NGÀY TỪ SAPO
+// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC KHÔI PHỤC LOGIC KHÔI PHỤC COMBO VÀ NGẮT NGÀY 31/08
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
-    let newRecords: OrderRecordV2[] = [];
-    let page = 1;
-    let running = true;
-
-    const now = new Date();
-    const min_date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 31, 0, 0, 0);
+    let all_records: RecordItem[] = [];
+    let existing_keys = new Set<string>();
+    
+    // 🟢 CHỐT SỔ: 31/08/2026 LÙI VỀ 31 NGÀY (01/08/2026)
+    const cutoff_date = new Date(2026, 7, 31, 23, 59, 59);
+    const min_date = new Date(2026, 7, 31 - 31, 0, 0, 0);
     const min_valid_ts = min_date.getTime();
 
-    // Chuỗi ngày YYYY-MM-DDTHH:mm:ss gửi sang Sapo
-    const createdOnMinStr = min_date.toISOString().split('.')[0];
+    let page = 1;
+    let running = true;
 
     while (running) {
         try {
             const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-                params: { 
-                    limit: 250, 
-                    page: page, 
-                    order_by: "created_on desc",
-                    created_on_min: createdOnMinStr
-                }
+                params: { limit: 250, page: page, order_by: "created_on desc" }
             });
 
             if (resp.status === 200) {
                 const j = resp.data || {};
                 const orders = j.orders || [];
 
-                if (orders.length === 0) { 
-                    running = false; 
-                    break; 
-                }
+                if (orders.length === 0) { running = false; break; }
+
+                let reached_old_date = false;
 
                 for (const order of orders) {
                     if (order.status !== "cancelled") {
                         const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
                         const order_ts = parseSapoDate(date_str);
 
-                        const line_items = order.order_line_items || order.line_items || order.items || [];
-                        line_items.forEach((line_item: any) => {
-                            const qty = Number(line_item.quantity) || 0;
-                            const raw_sku = (line_item.sku || line_item.barcode || "").trim();
-                            if (qty > 0 && raw_sku) {
-                                newRecords.push({
-                                    sku: raw_sku,
-                                    t_unix: order_ts,
-                                    quantity: qty,
-                                    location_id: TARGET_LOCATION_ID_NEW,
-                                    is_composite: false,
-                                    new_record: true,
-                                    order_id: order.id,
-                                    site_id: "site_new"
-                                });
-                            }
-                        });
+                        // 🔴 CHẶN NGẮT CHẮC CHẮN NẾU ĐƠN VƯỢT QUÁ NGÀY 01/08/2026
+                        if (order_ts > 0 && order_ts < min_valid_ts) {
+                            reached_old_date = true;
+                            break;
+                        }
+
+                        if (order_ts >= min_valid_ts && order_ts <= cutoff_date.getTime()) {
+                            const line_items = order.order_line_items || order.line_items || order.items || [];
+                            line_items.forEach((line_item: any, index: number) => {
+                                const qty = Number(line_item.quantity) || 0;
+                                if (qty > 0) {
+                                    const variant_obj = variant_by_id.get(line_item.variant_id);
+                                    const line_id = line_item.id || index;
+
+                                    // 🟢 KHÔI PHỤC LOGIC TÁCH ĐƠN COMBO / COMPOSITE TỪ CODE CŨ
+                                    if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+                                        line_item.composite_item_parts.forEach((part: any) => {
+                                            const sub_variant = variant_by_id.get(part.variant_id);
+                                            const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
+                                            if (clean_sub_sku) {
+                                                const total_sub_qty = qty * (Number(part.quantity) || 1);
+                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${TARGET_LOCATION_ID_NEW}`;
+                                                if (!existing_keys.has(record_key)) {
+                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: TARGET_LOCATION_ID_NEW, is_composite: false, new_record: true, order_id: order.id, site_id: "site_new" } as OrderRecordV2);
+                                                    existing_keys.add(record_key);
+                                                }
+                                            }
+                                        });
+                                    } else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+                                        variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
+                                            const sub_variant = variant_by_id.get(comp_variant_id);
+                                            if (sub_variant && sub_variant.sku) {
+                                                const clean_sub_sku = sub_variant.sku.trim();
+                                                const total_sub_qty = qty * comp_qty;
+                                                const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${TARGET_LOCATION_ID_NEW}`;
+                                                if (!existing_keys.has(record_key)) {
+                                                    all_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: TARGET_LOCATION_ID_NEW, is_composite: false, new_record: true, order_id: order.id, site_id: "site_new" } as OrderRecordV2);
+                                                    existing_keys.add(record_key);
+                                                }
+                                            }
+                                        });
+                                    } else {
+                                        const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
+                                        if (raw_sku) {
+                                            const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${TARGET_LOCATION_ID_NEW}`;
+                                            if (!existing_keys.has(record_key)) {
+                                                all_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: TARGET_LOCATION_ID_NEW, is_composite: false, new_record: true, order_id: order.id, site_id: "site_new" } as OrderRecordV2);
+                                                existing_keys.add(record_key);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
+
+                // 🔴 THỰC HIỆN DỪNG VÒNG LẶP KHI GẶP ĐƠN TRƯỚC NGÀY 01/08
+                if (reached_old_date) {
+                    console.log(`[CẮT TẠI TRANG ${page}] Đã ngắt kéo API vì chạm mốc ngày 01/08!`);
+                    running = false;
+                    break;
+                }
+
                 page++;
                 await sleep(10);
             } else { running = false; }
@@ -429,33 +455,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
         }
     }
 
-    const existingRecords = await getStoredOrderRecords();
-
-    if (newRecords.length > 0) {
-        await updateIndexedDB(newRecords);
-    }
+    await updateIndexedDB(all_records);
     setLastDataUpdate();
-
-    const allRecordsMap = new Map<string, OrderRecordV2>();
-    
-    existingRecords.forEach(r => {
-        if (r.t_unix >= min_valid_ts) {
-            const key = `${r.order_id}_${r.sku}`;
-            allRecordsMap.set(key, r);
-        }
-    });
-
-    newRecords.forEach(r => {
-        if (r.t_unix >= min_valid_ts) {
-            const key = `${r.order_id}_${r.sku}`;
-            allRecordsMap.set(key, r);
-        }
-    });
-
-    const finalRecords = Array.from(allRecordsMap.values());
-    console.log(`[TỔNG SỐ ĐƠN LỌC ĐƯỢC IN 31 DAYS]: ${finalRecords.length} bản ghi`);
-
-    return finalRecords;
+    console.log(`[TỔNG SỐ ĐƠN KÉO THÀNH CÔNG (01/08 - 31/08)]: ${all_records.length} bản ghi`);
+    return all_records as OrderRecordV2[];
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
