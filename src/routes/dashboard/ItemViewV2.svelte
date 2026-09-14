@@ -137,7 +137,7 @@
 	export function obtain_access_token(): string {
 		let token = localStorage.getItem("token") || localStorage.getItem("api_token") || sessionStorage.getItem("token");
 		if (!token) {
-			token = "42cd092e162a446ca26b6ae8c9902d78";
+			token = "b3e0a88853e2496c9641800adb465097";
 			localStorage.setItem("token", token);
 		}
 		return "Bearer " + token.replace("Bearer ", "").trim();
@@ -518,7 +518,7 @@
 				class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
 				onclick={() => switchTab('has_sales')}
 			>
-				📦 Tồn kho an toàn (Cân nhắc đặt thêm) ({tab2_items.length})
+				📦 Check nếu ôm hàng (Cân nhắc đặt thêm) ({tab2_items.length})
 			</button>
 
 			<button 
