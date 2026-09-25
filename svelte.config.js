@@ -8,9 +8,9 @@ const config = {
 		adapter: adapter({
 			pages: 'build',
 			assets: 'build',
-			fallback: 'index.html', // 🔥 Tự động tạo file index.html chuẩn cho ứng dụng SPA
+			fallback: 'index.html', // 🟢 Dùng index.html làm fallback
 			precompress: false,
-			strict: false // Bỏ qua strict để không bị chặn khi build
+			strict: false
 		})
 	}
 };
