@@ -169,7 +169,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 THUẬT TOÁN LỌC KIỂM HÀNG TÁCH KHO ĐỘC LẬP
+	// 🟢 THUẬT TOÁN LỌC TÁCH KHO ĐỘC LẬP CHUẨN
 	function applyTabFilter() {
 		try {
 			if (isStockCheck) {
@@ -177,7 +177,6 @@
 				const selectedLocId = Number(c_location_id);
 
 				variant_by_id.forEach((v) => {
-					// Lấy tồn kho riêng biệt của kho đang được chọn
 					const inv = v.inventory_level_by_location.get(selectedLocId);
 					const stock = inv ? Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0)) : 0;
 					const incoming = inv ? Math.max(0, Math.round(inv.incoming ?? 0)) : 0;
@@ -186,13 +185,11 @@
 					v.c_on_hand = stock;
 					v.c_incoming = incoming;
 
-					// Thuật toán: Lọc Tồn kho thuộc kho chọn > 0 và <= 20
 					if (stock > 0 && stock <= 20) {
 						stock_check_list.push(v);
 					}
 				});
 
-				// Mặc định sắp xếp TĂNG DẦN theo tồn kho
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 			} else {
 				calculate_restock_data(
@@ -567,7 +564,6 @@
 			</div>
 		</div>
 
-		<!-- 🟢 DÒNG THÔNG BÁO TỰ ĐỘNG HIỂN THỊ TÊN KHO ĐANG CHỌN -->
 		{#if !isStockCheck}
 			<div class="tab-filter-container">
 				<button 
