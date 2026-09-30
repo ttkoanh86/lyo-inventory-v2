@@ -19,6 +19,8 @@
 		fetch_inventory_transfer,
 		get_low_sales_skus,
 		setLastDataUpdate,
+		TARGET_LOCATION_ID_GROUP,
+		TARGET_LOCATION_ID_TRUNG_TAM
 	} from "./DataPipelineV2";
 	import SelectionCheckboxCell from "./SelectionCheckboxCell.svelte";
 	import ImageCell from "./ImageCell.svelte";
@@ -113,10 +115,14 @@
 	let variant_by_id = new Map<number, ProductV2>();
 	let order_records: OrderRecordV2[] = [];
 	let transfer_records: TransferRecord[] = [];
-	let locations: Location[] = $state([]);
+	
+	let locations: Location[] = $state([
+		{ id: TARGET_LOCATION_ID_GROUP, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
+		{ id: TARGET_LOCATION_ID_TRUNG_TAM, label: "Chi nhánh trung tâm", address: "Trung tâm" }
+	]);
 
-	let c_location_id: number = $state(-1);
-	let c_location: Location;
+	let c_location_id: number = $state(TARGET_LOCATION_ID_GROUP);
+	let c_location: Location = $state(locations[0]);
 	let rowCount = $state(0);
 	let grid_key = $state(0);
 
@@ -163,63 +169,58 @@
 		goto("/authentication");
 	}
 
-	// 🟢 THUẬT TOÁN LỌC KIỂM HÀNG: CỘNG DỒN TỒN KHO VẬT LÝ (KHO GROUP 789505 + KHO TRUNG TÂM 789501)
+	// 🟢 THUẬT TOÁN LỌC KIỂM HÀNG TÁCH KHO ĐỘC LẬP
 	function applyTabFilter() {
-		if (isStockCheck) {
-			let stock_check_list: ProductV2[] = [];
-			
-			const GROUP_LOC_ID = 789505; 
-			const TRUNG_TAM_LOC_ID = 789501; // 🔥 Đã cập nhật chính xác ID Kho Trung Tâm
+		try {
+			if (isStockCheck) {
+				let stock_check_list: ProductV2[] = [];
+				const selectedLocId = Number(c_location_id);
 
-			variant_by_id.forEach((v) => {
-				const invGroup = v.inventory_level_by_location.get(GROUP_LOC_ID);
-				const stockGroup = invGroup ? Math.max(0, Math.round(invGroup.available ?? invGroup.on_hand ?? 0)) : 0;
-				const incomingGroup = invGroup ? Math.max(0, Math.round(invGroup.incoming ?? 0)) : 0;
+				variant_by_id.forEach((v) => {
+					// Lấy tồn kho riêng biệt của kho đang được chọn
+					const inv = v.inventory_level_by_location.get(selectedLocId);
+					const stock = inv ? Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0)) : 0;
+					const incoming = inv ? Math.max(0, Math.round(inv.incoming ?? 0)) : 0;
 
-				const invTrungTam = v.inventory_level_by_location.get(TRUNG_TAM_LOC_ID);
-				const stockTrungTam = invTrungTam ? Math.max(0, Math.round(invTrungTam.available ?? invTrungTam.on_hand ?? 0)) : 0;
-				const incomingTrungTam = invTrungTam ? Math.max(0, Math.round(invTrungTam.incoming ?? 0)) : 0;
+					v.c_available = stock;
+					v.c_on_hand = stock;
+					v.c_incoming = incoming;
 
-				// Cộng tồn kho thực tế của cả 2 kho vật lý
-				const totalPhysicalStock = stockGroup + stockTrungTam;
-				const totalIncoming = incomingGroup + incomingTrungTam;
+					// Thuật toán: Lọc Tồn kho thuộc kho chọn > 0 và <= 20
+					if (stock > 0 && stock <= 20) {
+						stock_check_list.push(v);
+					}
+				});
 
-				v.c_available = totalPhysicalStock;
-				v.c_on_hand = totalPhysicalStock;
-				v.c_incoming = totalIncoming;
-
-				// Thuật toán: 0 < Tổng tồn kho <= 20
-				if (totalPhysicalStock > 0 && totalPhysicalStock <= 20) {
-					stock_check_list.push(v);
-				}
-			});
-
-			// Mặc định sắp xếp TĂNG DẦN theo tổng tồn kho
-			datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
-		} else {
-			calculate_restock_data(
-				[...order_records, ...transfer_records],
-				variant_by_id,
-				Number(c_location_id),
-			);
-
-			tab1_items = get_items_need_restock(variant_by_id, Number(c_location_id));
-			tab2_items = get_items_has_sales(variant_by_id);
-			tab3_items = get_items_out_of_stock_history(variant_by_id, Number(c_location_id));
-
-			if (activeTab === 'need_restock') {
-				datasource = [...tab1_items];
-			} else if (activeTab === 'has_sales') {
-				datasource = [...tab2_items];
+				// Mặc định sắp xếp TĂNG DẦN theo tồn kho
+				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 			} else {
-				datasource = [...tab3_items];
-			}
-		}
+				calculate_restock_data(
+					[...order_records, ...transfer_records],
+					variant_by_id,
+					Number(c_location_id),
+				);
 
-		updateKeys.dsource = datasource as any;
-		rowCount = datasource.length;
-		resetPagination();
-		grid_key++;
+				tab1_items = get_items_need_restock(variant_by_id, Number(c_location_id));
+				tab2_items = get_items_has_sales(variant_by_id);
+				tab3_items = get_items_out_of_stock_history(variant_by_id, Number(c_location_id));
+
+				if (activeTab === 'need_restock') {
+					datasource = [...tab1_items];
+				} else if (activeTab === 'has_sales') {
+					datasource = [...tab2_items];
+				} else {
+					datasource = [...tab3_items];
+				}
+			}
+
+			updateKeys.dsource = datasource as any;
+			rowCount = datasource.length;
+			resetPagination();
+			grid_key++;
+		} catch (e) {
+			console.error("Lỗi applyTabFilter:", e);
+		}
 	}
 
 	function switchTab(tab: 'need_restock' | 'has_sales' | 'out_of_stock') {
@@ -250,17 +251,20 @@
 
 	function handle_location_update() {
 		is_loading = true;
-		applyTabFilter();
-		low_sales_skus = get_low_sales_skus(datasource);
-		selected_skus.clear();
-		filter_by_id.clear();
-		sort_by_id.clear();
+		try {
+			applyTabFilter();
+			low_sales_skus = get_low_sales_skus(datasource);
+			selected_skus.clear();
+			filter_by_id.clear();
+			sort_by_id.clear();
 
-		updateKeys.headerSorterKey++;
-		filter_update_key.k += 1;
+			updateKeys.headerSorterKey++;
+			filter_update_key.k += 1;
 
-		is_loading = false;
-		c_location = locations.find((v) => Number(v.id) === Number(c_location_id)) as Location;
+			c_location = locations.find((v) => Number(v.id) === Number(c_location_id)) || locations[0];
+		} finally {
+			is_loading = false;
+		}
 	}
 
 	function select_all() {
@@ -275,35 +279,41 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// 🟢 TỐI ƯU KHỞI TẠO: NẾU LÀ KIỂM HÀNG THÌ BỎ QUA KÉO ĐƠN HÀNG
 	async function initialize() {
 		is_loading = true;
-
-		let loc_and_variant = await Promise.all([
-			get_locations(),
-			get_active_products(),
-		]);
-		locations = loc_and_variant[0];
-		variant_by_id = loc_and_variant[1];
-		c_location_id = Number(locations[0].id);
-
-		if (!isStockCheck) {
-			let order_and_transfer_records = await Promise.all([
-				fetch_order_record(variant_by_id),
-				fetch_inventory_transfer(variant_by_id),
+		try {
+			let loc_and_variant = await Promise.all([
+				get_locations(),
+				get_active_products(),
 			]);
-			order_records = order_and_transfer_records[0];
-			transfer_records = order_and_transfer_records[1];
+			
+			if (loc_and_variant[0] && loc_and_variant[0].length > 0) {
+				locations = loc_and_variant[0];
+			}
+			variant_by_id = loc_and_variant[1] || new Map();
+			
+			c_location_id = Number(locations[0].id);
+			c_location = locations[0];
+
+			if (!isStockCheck) {
+				let order_and_transfer_records = await Promise.all([
+					fetch_order_record(variant_by_id),
+					fetch_inventory_transfer(variant_by_id),
+				]);
+				order_records = order_and_transfer_records[0] || [];
+				transfer_records = order_and_transfer_records[1] || [];
+			}
+
+			applyTabFilter();
+			setLastDataUpdate();
+
+			low_sales_skus = get_low_sales_skus(datasource);
+			updateKeys.headerSorterKey++;
+		} catch (error) {
+			console.error("Lỗi khởi tạo:", error);
+		} finally {
+			is_loading = false;
 		}
-
-		applyTabFilter();
-		setLastDataUpdate();
-
-		low_sales_skus = get_low_sales_skus(datasource);
-		is_loading = false;
-
-		updateKeys.headerSorterKey++;
-		c_location = locations[0];
 	}
 
 	function enforce_filter() {
@@ -557,7 +567,7 @@
 			</div>
 		</div>
 
-		<!-- 🟢 DÒNG THÔNG BÁO HIỂN THỊ CHUẨN CẢ KHO GROUP + TRUNG TÂM -->
+		<!-- 🟢 DÒNG THÔNG BÁO TỰ ĐỘNG HIỂN THỊ TÊN KHO ĐANG CHỌN -->
 		{#if !isStockCheck}
 			<div class="tab-filter-container">
 				<button 
@@ -583,7 +593,7 @@
 			</div>
 		{:else}
 			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
-				📋 DỮ LIỆU KIỂM KHO: Đang hiển thị sản phẩm kho (Group + Trung tâm) có Tổng tồn kho (0 &lt; Tồn kho &le; 20) - Mặc định sắp xếp Tăng dần.
+				📋 DỮ LIỆU KIỂM KHO: Đang hiển thị sản phẩm thuộc kho ({c_location?.label || 'LYO GROUP'}) có Tồn kho (0 &lt; Tồn kho &le; 20) - Mặc định sắp xếp Tăng dần.
 			</div>
 		{/if}
 
