@@ -47,16 +47,20 @@
 		export_transfer_sheet_to_xlsx,
 	} from "./Export2Excel";
 
-	const columns = [
+	// 🟢 PROP TỐI ƯU CHO TRANG KIỂM HÀNG
+	let { isStockCheck = false } = $props();
+
+	// 🟢 CẤU HÌNH CỘT: TRÁNH TỐN CÔNG RENDER 3 CỘT BÁN HÀNG NẾU LÀ KIỂM HÀNG
+	const all_columns = [
 		{ id: "id", hidden: true },
 		{ id: "selected", cell: SelectionCheckboxCell, width: 36 },
 		{ id: "sku", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "SKU" }] },
 		{ id: "name", resize: true, width: 260, cell: NameCell, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
 		{ id: "image", header: "Ảnh", cell: ImageCell },
 		{ id: "image_path", hidden: true },
-		{ id: "c_restock_third", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/3 tháng)" }] },
-		{ id: "c_restock_half", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/2 tháng)" }] },
-		{ id: "c_restock", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL bán\n(1 tháng)" }] },
+		{ id: "c_restock_third", hidden: isStockCheck, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/3 tháng)" }] },
+		{ id: "c_restock_half", hidden: isStockCheck, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/2 tháng)" }] },
+		{ id: "c_restock", hidden: isStockCheck, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL bán\n(1 tháng)" }] },
 		{ id: "c_on_hand", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "Tồn kho" }] },
 		{ id: "c_incoming", resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "Đang về" }] },
 		{ id: "brand", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] },
@@ -65,6 +69,8 @@
 		{ id: "retail_price", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Thành tiền (Shop)" }] },
 		{ id: "retail_price_ecomm", resize: true, width: 180, header: [{ cell: HeaderWithSortUi, text: "Thành tiền (TMĐT)" }] },
 	];
+
+	const columns = all_columns.filter((col) => !col.hidden);
 
 	const filter_by_id: Map<string, Filtering> = $state(new Map());
 	const sort_by_id: Map<string, Sorting> = $state(new Map());
@@ -129,7 +135,6 @@
 		proxyUrl = "http://localhost:8080/api";
 		baseUrl = "http://localhost:8080";
 	} else {
-		// 🟢 CHUẨN HÓA MÁY CHỦ PROXY
 		proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
 		baseUrl = "https://lyo-inventory-proxy.onrender.com";
 	}
@@ -158,23 +163,48 @@
 		goto("/authentication");
 	}
 
+	// 🟢 THUẬT TOÁN LỌC TỒN KHO DÀNH RIÊNG CHO CỬA HÀNG / KIỂM HÀNG
 	function applyTabFilter() {
-		calculate_restock_data(
-			[...order_records, ...transfer_records],
-			variant_by_id,
-			Number(c_location_id),
-		);
+		if (isStockCheck) {
+			// 🔥 THUẬT TOÁN KIỂM HÀNG: Lọc sản phẩm thuộc Kho chọn có 0 < Tồn kho <= 20
+			let stock_check_list: ProductV2[] = [];
+			const active_loc_id = Number(c_location_id);
 
-		tab1_items = get_items_need_restock(variant_by_id, Number(c_location_id));
-		tab2_items = get_items_has_sales(variant_by_id);
-		tab3_items = get_items_out_of_stock_history(variant_by_id, Number(c_location_id));
+			variant_by_id.forEach((v) => {
+				const inventory = v.inventory_level_by_location.get(active_loc_id);
+				const stock = inventory ? Math.max(0, Math.round(inventory.available ?? inventory.on_hand ?? 0)) : 0;
+				const incoming = inventory ? Math.max(0, Math.round(inventory.incoming ?? 0)) : 0;
 
-		if (activeTab === 'need_restock') {
-			datasource = [...tab1_items];
-		} else if (activeTab === 'has_sales') {
-			datasource = [...tab2_items];
+				v.c_available = stock;
+				v.c_on_hand = stock;
+				v.c_incoming = incoming;
+
+				if (stock > 0 && stock <= 20) {
+					stock_check_list.push(v);
+				}
+			});
+
+			// 🔥 THUẬT TOÁN SẮP XẾP: Mặc định TĂNG DẦN theo tồn kho (1 -> 20)
+			datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 		} else {
-			datasource = [...tab3_items];
+			// Thuật toán Sale (Cần tính doanh số quy đổi từ lịch sử đơn hàng)
+			calculate_restock_data(
+				[...order_records, ...transfer_records],
+				variant_by_id,
+				Number(c_location_id),
+			);
+
+			tab1_items = get_items_need_restock(variant_by_id, Number(c_location_id));
+			tab2_items = get_items_has_sales(variant_by_id);
+			tab3_items = get_items_out_of_stock_history(variant_by_id, Number(c_location_id));
+
+			if (activeTab === 'need_restock') {
+				datasource = [...tab1_items];
+			} else if (activeTab === 'has_sales') {
+				datasource = [...tab2_items];
+			} else {
+				datasource = [...tab3_items];
+			}
 		}
 
 		updateKeys.dsource = datasource as any;
@@ -188,13 +218,17 @@
 		selected_skus.clear();
 		filter_by_id.clear();
 		sort_by_id.clear();
-		
-		if (activeTab === 'need_restock') {
-			datasource = [...tab1_items];
-		} else if (activeTab === 'has_sales') {
-			datasource = [...tab2_items];
+
+		if (isStockCheck) {
+			applyTabFilter();
 		} else {
-			datasource = [...tab3_items];
+			if (activeTab === 'need_restock') {
+				datasource = [...tab1_items];
+			} else if (activeTab === 'has_sales') {
+				datasource = [...tab2_items];
+			} else {
+				datasource = [...tab3_items];
+			}
 		}
 
 		updateKeys.dsource = datasource as any;
@@ -232,36 +266,46 @@
 		checkbox_update_key.k += 1;
 	}
 
+	// 🟢 TỐI ƯU HÀM INITIALIZE: BỎ QUA FETCH ĐƠN HÀNG NẾU LÀ KIỂM HÀNG
 	async function initialize() {
 		is_loading = true;
+
+		// 1. Chỉ kéo Danh sách Kho & Sản phẩm từ Sapo
 		let loc_and_variant = await Promise.all([
 			get_locations(),
 			get_active_products(),
 		]);
 		locations = loc_and_variant[0];
 		variant_by_id = loc_and_variant[1];
-
-		let order_and_transfer_records = await Promise.all([
-			fetch_order_record(variant_by_id),
-			fetch_inventory_transfer(variant_by_id),
-		]);
-		order_records = order_and_transfer_records[0];
-		transfer_records = order_and_transfer_records[1];
-
 		c_location_id = Number(locations[0].id);
+
+		// 2. ⚡ TỐI ƯU BỘ NHỚ/BĂNG THÔNG: NẾU KHÔNG PHẢI KIỂM HÀNG (TRANG SALE) MỚI KÉO ĐƠN HÀNG
+		if (!isStockCheck) {
+			let order_and_transfer_records = await Promise.all([
+				fetch_order_record(variant_by_id),
+				fetch_inventory_transfer(variant_by_id),
+			]);
+			order_records = order_and_transfer_records[0];
+			transfer_records = order_and_transfer_records[1];
+		}
 
 		applyTabFilter();
 		setLastDataUpdate();
 
 		low_sales_skus = get_low_sales_skus(datasource);
 		is_loading = false;
-		
+
 		updateKeys.headerSorterKey++;
 		c_location = locations[0];
 	}
 
 	function enforce_filter() {
-		let baseList = activeTab === 'need_restock' ? tab1_items : (activeTab === 'has_sales' ? tab2_items : tab3_items);
+		let baseList = [];
+		if (isStockCheck) {
+			baseList = [...datasource];
+		} else {
+			baseList = activeTab === 'need_restock' ? tab1_items : (activeTab === 'has_sales' ? tab2_items : tab3_items);
+		}
 		let list = [...baseList];
 
 		if (filter_by_id.size) {
@@ -280,7 +324,7 @@
 		}
 		datasource = list;
 		rowCount = datasource.length;
-		resetPagination(); 
+		resetPagination();
 	}
 
 	function enforce_sorting() {
@@ -302,7 +346,7 @@
 				});
 			});
 		}
-		updatePageData(); 
+		updatePageData();
 	}
 
 	let viewing_low_sales = $state(false);
@@ -416,7 +460,7 @@
 				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
 				<Button icon="mdi mdi-package-variant-closed-check" onclick={filter_low_stock_items}>Kiểm hàng</Button>
-				
+
 				<div bind:this={export_popup_parent}>
 					<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">Xuất Excel</Button>
 				</div>
@@ -506,30 +550,37 @@
 			</div>
 		</div>
 
-		<div class="tab-filter-container">
-			<button 
-				class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
-				onclick={() => switchTab('need_restock')}
-			>
-				🚨 Cần đặt ngay (Cảnh báo đứt hàng) ({tab1_items.length})
-			</button>
+		<!-- 🟢 NẾU LÀ KIỂM HÀNG THÌ ẨN 3 TAB DỰ BÁO BÁN HÀNG -->
+		{#if !isStockCheck}
+			<div class="tab-filter-container">
+				<button 
+					class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" 
+					onclick={() => switchTab('need_restock')}
+				>
+					🚨 Cần đặt ngay (Cảnh báo đứt hàng) ({tab1_items.length})
+				</button>
 
-			<button 
-				class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
-				onclick={() => switchTab('has_sales')}
-			>
-				📦 Check nếu ôm hàng (Cân nhắc đặt thêm) ({tab2_items.length})
-			</button>
+				<button 
+					class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" 
+					onclick={() => switchTab('has_sales')}
+				>
+					📦 Check nếu ôm hàng (Cân nhắc đặt thêm) ({tab2_items.length})
+				</button>
 
-			<button 
-				class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
-				onclick={() => switchTab('out_of_stock')}
-			>
-				⚠️ Hàng bị đứt (Cần check để đặt lại) ({tab3_items.length})
-			</button>
-		</div>
+				<button 
+					class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" 
+					onclick={() => switchTab('out_of_stock')}
+				>
+					⚠️ Hàng bị đứt (Cần check để đặt lại) ({tab3_items.length})
+				</button>
+			</div>
+		{:else}
+			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
+				📋 DỮ LIỆU KIỂM KHO: Đang hiển thị sản phẩm thuộc kho ({c_location?.label || 'LYO GROUP'}) có Tồn kho (0 &lt; Tồn kho &le; 20) - Mặc định sắp xếp Tăng dần.
+			</div>
+		{/if}
 
-		{#if low_sales_skus.size && !viewing_low_stocks}
+		{#if low_sales_skus.size && !viewing_low_stocks && !isStockCheck}
 			<div style="width: 100%; padding-left: 10px; background-color: #ffc748; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; border-radius: 5px">
 				{#if !viewing_low_sales}
 					<p><b>{low_sales_skus.size}</b> mặt hàng có sản lượng thấp (trong 1 tháng, dưới 20).</p>
