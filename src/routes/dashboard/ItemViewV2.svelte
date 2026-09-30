@@ -47,10 +47,10 @@
 		export_transfer_sheet_to_xlsx,
 	} from "./Export2Excel";
 
-	// 🟢 PROP TỐI ƯU CHO TRANG KIỂM HÀNG
+	// 🟢 CỜ NHẬN BIẾT TRANG KIỂM HÀNG
 	let { isStockCheck = false } = $props();
 
-	// 🟢 CẤU HÌNH CỘT: TRÁNH TỐN CÔNG RENDER 3 CỘT BÁN HÀNG NẾU LÀ KIỂM HÀNG
+	// 🟢 TỰ ĐỘNG ẨN 3 CỘT BÁN HÀNG NẾU LÀ TRANG KIỂM HÀNG
 	const all_columns = [
 		{ id: "id", hidden: true },
 		{ id: "selected", cell: SelectionCheckboxCell, width: 36 },
@@ -163,31 +163,40 @@
 		goto("/authentication");
 	}
 
-	// 🟢 THUẬT TOÁN LỌC TỒN KHO DÀNH RIÊNG CHO CỬA HÀNG / KIỂM HÀNG
+	// 🟢 THUẬT TOÁN LỌC KIỂM HÀNG: CỘNG DỒN TỒN KHO VẬT LÝ (KHO GROUP 789505 + KHO TRUNG TÂM 789501)
 	function applyTabFilter() {
 		if (isStockCheck) {
-			// 🔥 THUẬT TOÁN KIỂM HÀNG: Lọc sản phẩm thuộc Kho chọn có 0 < Tồn kho <= 20
 			let stock_check_list: ProductV2[] = [];
-			const active_loc_id = Number(c_location_id);
+			
+			const GROUP_LOC_ID = 789505; 
+			const TRUNG_TAM_LOC_ID = 789501; // 🔥 Đã cập nhật chính xác ID Kho Trung Tâm
 
 			variant_by_id.forEach((v) => {
-				const inventory = v.inventory_level_by_location.get(active_loc_id);
-				const stock = inventory ? Math.max(0, Math.round(inventory.available ?? inventory.on_hand ?? 0)) : 0;
-				const incoming = inventory ? Math.max(0, Math.round(inventory.incoming ?? 0)) : 0;
+				const invGroup = v.inventory_level_by_location.get(GROUP_LOC_ID);
+				const stockGroup = invGroup ? Math.max(0, Math.round(invGroup.available ?? invGroup.on_hand ?? 0)) : 0;
+				const incomingGroup = invGroup ? Math.max(0, Math.round(invGroup.incoming ?? 0)) : 0;
 
-				v.c_available = stock;
-				v.c_on_hand = stock;
-				v.c_incoming = incoming;
+				const invTrungTam = v.inventory_level_by_location.get(TRUNG_TAM_LOC_ID);
+				const stockTrungTam = invTrungTam ? Math.max(0, Math.round(invTrungTam.available ?? invTrungTam.on_hand ?? 0)) : 0;
+				const incomingTrungTam = invTrungTam ? Math.max(0, Math.round(invTrungTam.incoming ?? 0)) : 0;
 
-				if (stock > 0 && stock <= 20) {
+				// Cộng tồn kho thực tế của cả 2 kho vật lý
+				const totalPhysicalStock = stockGroup + stockTrungTam;
+				const totalIncoming = incomingGroup + incomingTrungTam;
+
+				v.c_available = totalPhysicalStock;
+				v.c_on_hand = totalPhysicalStock;
+				v.c_incoming = totalIncoming;
+
+				// Thuật toán: 0 < Tổng tồn kho <= 20
+				if (totalPhysicalStock > 0 && totalPhysicalStock <= 20) {
 					stock_check_list.push(v);
 				}
 			});
 
-			// 🔥 THUẬT TOÁN SẮP XẾP: Mặc định TĂNG DẦN theo tồn kho (1 -> 20)
+			// Mặc định sắp xếp TĂNG DẦN theo tổng tồn kho
 			datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 		} else {
-			// Thuật toán Sale (Cần tính doanh số quy đổi từ lịch sử đơn hàng)
 			calculate_restock_data(
 				[...order_records, ...transfer_records],
 				variant_by_id,
@@ -266,11 +275,10 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// 🟢 TỐI ƯU HÀM INITIALIZE: BỎ QUA FETCH ĐƠN HÀNG NẾU LÀ KIỂM HÀNG
+	// 🟢 TỐI ƯU KHỞI TẠO: NẾU LÀ KIỂM HÀNG THÌ BỎ QUA KÉO ĐƠN HÀNG
 	async function initialize() {
 		is_loading = true;
 
-		// 1. Chỉ kéo Danh sách Kho & Sản phẩm từ Sapo
 		let loc_and_variant = await Promise.all([
 			get_locations(),
 			get_active_products(),
@@ -279,7 +287,6 @@
 		variant_by_id = loc_and_variant[1];
 		c_location_id = Number(locations[0].id);
 
-		// 2. ⚡ TỐI ƯU BỘ NHỚ/BĂNG THÔNG: NẾU KHÔNG PHẢI KIỂM HÀNG (TRANG SALE) MỚI KÉO ĐƠN HÀNG
 		if (!isStockCheck) {
 			let order_and_transfer_records = await Promise.all([
 				fetch_order_record(variant_by_id),
@@ -550,7 +557,7 @@
 			</div>
 		</div>
 
-		<!-- 🟢 NẾU LÀ KIỂM HÀNG THÌ ẨN 3 TAB DỰ BÁO BÁN HÀNG -->
+		<!-- 🟢 DÒNG THÔNG BÁO HIỂN THỊ CHUẨN CẢ KHO GROUP + TRUNG TÂM -->
 		{#if !isStockCheck}
 			<div class="tab-filter-container">
 				<button 
@@ -576,7 +583,7 @@
 			</div>
 		{:else}
 			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
-				📋 DỮ LIỆU KIỂM KHO: Đang hiển thị sản phẩm thuộc kho ({c_location?.label || 'LYO GROUP'}) có Tồn kho (0 &lt; Tồn kho &le; 20) - Mặc định sắp xếp Tăng dần.
+				📋 DỮ LIỆU KIỂM KHO: Đang hiển thị sản phẩm kho (Group + Trung tâm) có Tổng tồn kho (0 &lt; Tồn kho &le; 20) - Mặc định sắp xếp Tăng dần.
 			</div>
 		{/if}
 
