@@ -3,7 +3,10 @@ import { type Location } from "./Template";
 
 // 🟢 Domain Proxy Render Singapore chính thức
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
-export const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới (Kho LYO Group)
+
+// 🔴 EXPORT CHUẨN CẢ 2 ID KHO ĐỂ TRÁNH LỖI BUILD ROLLUP
+export const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới (Group)
+export const TARGET_LOCATION_ID_GROUP = 789505; // ID Kho LYO Group
 export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; // ID Kho Trung Tâm
 
 export interface OrderRecordV2 {
@@ -81,7 +84,7 @@ export function is_promotional_item(brand: string, name: string = "") {
 	return false;
 }
 
-// 🟢 HÀM TÍNH TOÁN DOANH SỐ QUY ĐỔI CHO SITE MỚI (CHÍNH XÁC BẢN GỐC BẢO VỆ CHIA 0)
+// 🟢 HÀM TÍNH TOÁN DOANH SỐ QUY ĐỔI SẢN PHẨM GỐC
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -92,21 +95,15 @@ export function calculate_restock_data(
 
 	let sales_by_sku = new Map<string, number>();
 
-	// Mốc bắt đầu chạy Site mới
 	const site_start_date = new Date("2026-09-01T00:00:00");
 	const min_valid_ts = site_start_date.getTime();
 	
 	const now = new Date();
 	const now_ts = now.getTime();
 
-	// Tính số ngày bán thực tế (Tránh lỗi chia 0)
 	const diff_time = Math.max(0, now_ts - min_valid_ts);
 	const actual_days = Math.max(1, Math.ceil(diff_time / (1000 * 60 * 60 * 24)));
-
-	// Hệ số nhân quy đổi về 31 ngày
 	const multiplier_31_days = actual_days >= 31 ? 1 : (31 / actual_days);
-
-	console.log(`[SITE MỚI] Số ngày chạy thực tế: ${actual_days} ngày. Hệ số quy đổi 31 ngày: x${multiplier_31_days.toFixed(2)}`);
 
 	for (let [_, variant] of variant_by_id) {
 		if (variant.sku && !variant.is_composite) {
@@ -153,11 +150,9 @@ export function calculate_restock_data(
 		if (variant.c_restock > 0) count_has_sales++;
 	});
 
-	console.log(`[LOG SỐ LIỆU] Số sản phẩm phát sinh doanh số quy đổi: ${count_has_sales}`);
 	return get_items_need_restock(variant_by_id, active_loc_id);
 }
 
-// 🟢 TAB 1: CẦN ĐẶT NGAY
 export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
 	let result: ProductV2[] = [];
 	variant_by_id.forEach((variant) => {
@@ -172,11 +167,9 @@ export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, ta
 			result.push(variant);
 		}
 	});
-	console.log(`[TAB 1 - CẦN ĐẶT NGAY]: ${result.length} sản phẩm`);
 	return result;
 }
 
-// 🟢 TAB 2: TỒN KHO AN TOÀN
 export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
 	let result: ProductV2[] = [];
 	variant_by_id.forEach((variant) => {
@@ -189,11 +182,9 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
 			result.push(variant);
 		}
 	});
-	console.log(`[TAB 2 - TỒN KHO AN TOÀN]: ${result.length} sản phẩm`);
 	return result;
 }
 
-// 🟢 TAB 3: HÀNG BỊ ĐỨT
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
 	let result: ProductV2[] = [];
 
@@ -211,13 +202,12 @@ export function get_items_out_of_stock_history(variant_by_id: Map<number, Produc
 			result.push(variant);
 		}
 	});
-	console.log(`[TAB 3 - HÀNG BỊ ĐỨT]: ${result.length} sản phẩm`);
 	return result;
 }
 
 export async function get_locations(): Promise<Location[]> {
 	return [
-		{ id: TARGET_LOCATION_ID_NEW, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
+		{ id: TARGET_LOCATION_ID_GROUP, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
 		{ id: TARGET_LOCATION_ID_TRUNG_TAM, label: "Chi nhánh trung tâm", address: "Trung tâm" }
 	];
 }
@@ -375,7 +365,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN CHUẨN GỐC CỦA DÌ (TỰ ĐỘNG BÓC TÁCH COMBO)
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
 	let existing_keys = new Set<string>();
 	
@@ -387,8 +376,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 		existing_keys.add(record_key);
 		if (r.t_unix > max_stored_ts) max_stored_ts = r.t_unix;
 	});
-
-	console.log(`[CACHE INDEXEDDB] Đã nạp thành công ${stored_records.length} bản ghi từ bộ nhớ máy!`);
 
 	const site_start_date = new Date("2026-09-01T00:00:00");
 	const min_valid_ts = site_start_date.getTime();
@@ -475,7 +462,6 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 				}
 
 				if (reached_existing_date) {
-					console.log(`[TỐI ƯU CACHE] Đã dừng kéo API vì đã chạm mốc dữ liệu cũ tại trang ${page}!`);
 					running = false;
 					break;
 				}
@@ -491,12 +477,10 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
 	if (new_records.length > 0) {
 		await updateIndexedDB(new_records);
-		console.log(`[CẬP NHẬT BỔ SUNG] Đã lưu thêm ${new_records.length} đơn hàng mới vào Cache!`);
 	}
 
 	setLastDataUpdate();
-	const combined_records = [...stored_records, ...new_records];
-	return combined_records as OrderRecordV2[];
+	return [...stored_records, ...new_records] as OrderRecordV2[];
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
