@@ -259,7 +259,7 @@ export async function get_active_products() {
 							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
 							inventory_level_by_location: new Map(),
 							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: new Set<number>()
+							order_history_by_location: Set<number>()
 						};
 
 						if (variant.inventories && variant.inventories.length > 0) {
@@ -481,7 +481,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
 
-// 🟢 HÀM ĐẨY TRỰC TIẾP PHIẾU CHUYỂN HÀNG LÊN SAPO DÙNG KHI BẤM NÚT
+// 🟢 HÀM ĐẨY PHIẾU CHUYỂN HÀNG VÀ BÁO LỖI CHI TIẾT TỪ SAPO
 export async function create_sapo_stock_transfer(
 	items: ProductV2[], 
 	target_location_id: number
@@ -511,18 +511,28 @@ export async function create_sapo_stock_transfer(
 			}
 		};
 
+		// Gửi Yêu Cầu Lên Sapo Proxy
 		const resp = await axios.post(`${proxyUrl}/admin/stock_transfers.json`, payload);
 		
 		if (resp.status === 200 || resp.status === 201) {
 			alert(`✅ Đã tạo thành công Đơn chuyển hàng trên Sapo với ${line_items.length} sản phẩm!`);
 			return true;
-		} else {
-			alert("Lỗi khi tạo đơn chuyển hàng trên Sapo!");
-			return false;
 		}
 	} catch (e: any) {
-		console.error("Lỗi POST stock_transfers:", e);
-		alert("Không thể kết nối API Sapo để tạo đơn chuyển hàng. Vui lòng dùng nút Xuất Excel!");
+		console.error("LỖI PHÂN TÍCH API SAPO:", e);
+		
+		const status = e.response?.status;
+		const errorData = JSON.stringify(e.response?.data || {});
+
+		if (status === 403 || status === 401) {
+			alert(`🔒 Sapo từ chối (Mã ${status}): API Token chưa được cấp quyền GHI/TẠO cho đơn chuyển hàng (write_stock_transfers).`);
+		} else if (status === 422) {
+			alert(`⚠️ Sapo từ chối (Mã 422 - Sai định dạng): ${errorData}`);
+		} else if (status === 404) {
+			alert(`❌ Sapo từ chối (Mã 404): Endpoint API /admin/stock_transfers.json không tồn tại trên hệ thống Sapo của bạn.`);
+		} else {
+			alert(`❌ Lỗi kết nối Sapo (Mã ${status || 'Unknown'}): ${e.message || errorData}`);
+		}
 		return false;
 	}
 }
