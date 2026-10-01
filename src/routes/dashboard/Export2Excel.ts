@@ -20,16 +20,13 @@ export async function export_kiem_hang_to_xlsx(
 	const wb = new ExcelJS.Workbook();
 	const ws = wb.addWorksheet('Sheet 1');
 
-	// Dòng 1 -> 3: Cấu trúc Tiêu đề chuẩn Sapo
 	ws.getRow(1).values = ["Phiếu kiểm hàng", "", "", "", "", ""];
 	ws.getRow(1).font = { bold: true, size: 14 };
 	ws.getRow(2).values = ["Mã phiếu:", "", "", "", "", ""];
 
-	// Dòng 4: Tiêu đề 6 cột chính xác của file sapo_mau_nhap_phieu_kiem_hang_07112022.xlsx
 	ws.getRow(4).values = ["Mã SKU*", "Tên sản phẩm", "Mã lô", "Tồn thực tế", "Lý do", "Ghi chú"];
 	ws.getRow(4).font = { bold: true };
 
-	// Dòng 5 trở đi: Đưa dữ liệu vào
 	for (let i = 0; i < items.length; i++) {
 		const v = items[i];
 		const stock_actual = v.c_on_hand ?? v.c_available ?? 0;
@@ -114,7 +111,7 @@ export async function export_transfer_sheet_to_xlsx(
 	}
 }
 
-// 🟢 5. HÀM XUẤT PHIẾU CHUYỂN HÀNG SAPO NỘI BỘ (CHO KHO CHI NHÁNH ĐƯỢC CHỌN)
+// 🟢 5. HÀM XUẤT PHIẾU CHUYỂN HÀNG SAPO CHUẨN NGUYÊN MẪU (mau_nhap_phieu_chuyen_hang_20220926.xlsx)
 export async function export_phieu_chuyen_hang_sapo(
 	items: any[], 
 	target_location_label: string
@@ -124,22 +121,22 @@ export async function export_phieu_chuyen_hang_sapo(
 
 	// @ts-ignore
 	const wb = new ExcelJS.Workbook();
-	const ws = wb.addWorksheet('Phiếu chuyển hàng');
+	const ws = wb.addWorksheet('Sheet0');
 
-	ws.getRow(1).values = ["Phiếu chuyển hàng", "", "", "", ""];
-	ws.getRow(1).font = { bold: true, size: 14 };
-	ws.getRow(2).values = [`Kho nhận: ${target_location_label}`, "", "", "", ""];
-	ws.getRow(4).values = ["Mã SKU*", "Tên sản phẩm", "Tồn kho Group", "SL Bán 30d", "Số lượng chuyển*"];
-	ws.getRow(4).font = { bold: true };
+	ws.getRow(1).values = ["Mã phiếu chuyển hàng", "", "", "", "", ""];
+	ws.getRow(2).values = ["Mã SKU *", "Tên sản phẩm", "Serial/IMEI", "Mã lô", "Số lượng chuyển", "Giá chuyển"];
+	ws.getRow(2).font = { bold: true };
 
 	for (let i = 0; i < items.length; i++) {
 		const v = items[i];
-		ws.getRow(i + 5).values = [
+		const qty_transfer = v.c_transfer_suggest ?? 0;
+		ws.getRow(i + 3).values = [
 			v.sku || "",
 			v.name || "",
-			v.c_on_hand_group || 0,
-			v.c_restock || 0,
-			v.c_transfer_suggest || 0
+			"", // Serial/IMEI để trống
+			"", // Mã lô để trống
+			qty_transfer,
+			""  // Giá chuyển để trống
 		];
 	}
 
@@ -147,13 +144,16 @@ export async function export_phieu_chuyen_hang_sapo(
 	ws.getColumn(2).width = 50;
 	ws.getColumn(3).width = 15;
 	ws.getColumn(4).width = 15;
-	ws.getColumn(5).width = 20;
+	ws.getColumn(5).width = 18;
+	ws.getColumn(6).width = 15;
 
 	const wb_buffer = await wb.xlsx.writeBuffer();
 	const blob = new Blob([wb_buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 
 	const normalized_name = normalizeString(target_location_label);
-	const date_str = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+	const t = new Date();
+	const date_str = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}_${String(t.getHours()).padStart(2, '0')}${String(t.getMinutes()).padStart(2, '0')}`;
+	
 	// @ts-ignore
 	saveAs(blob, `Phieu_Chuyen_Hang_${normalized_name}_${date_str}.xlsx`);
 }
@@ -201,8 +201,6 @@ export async function _actual_export_handler(
 							let ext = "png";
 							const cleanPath = v.image_path.split("?")[0].toLowerCase();
 							if (cleanPath.endsWith(".jpg") || cleanPath.endsWith(".jpeg")) {
-								ext = "jpeg";
-							} else if (cleanPath.endsWith(".jpeg") || cleanPath.endsWith(".jpg")) {
 								ext = "jpeg";
 							} else if (cleanPath.endsWith(".gif")) {
 								ext = "gif";
