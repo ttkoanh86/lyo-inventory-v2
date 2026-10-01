@@ -3,18 +3,57 @@ import { imageToArrayBuffer } from "./imageToByteArray";
 import { lazyLoadScript } from "./lazyLoadScript";
 import { type Location } from "./Template";
 
-// 🟢 1. HÀM XUẤT CHO KIỂM HÀNG (ÉP TÊN KIỂM HÀNG + BỎ TẢI ẢNH SIÊU NHANH)
+// 🟢 1. HÀM XUẤT CHO KIỂM HÀNG (CHUẨN ĐÚNG 6 CỘT CỦA FILE MẪU SAPO)
 export async function export_kiem_hang_to_xlsx(
-    selected_skus: Set<string>, 
-    datasource: ProductV2[], 
-    location: Location
+	selected_skus: Set<string>, 
+	datasource: ProductV2[], 
+	location: Location
 ) {
-    const x = selected_skus.size > 0 
-        ? datasource.filter((item) => selected_skus.has(item.sku))
-        : datasource;
-        
-    // 🟢 ÉP BẮT BUỘC: is_transfer = false, is_check_mode = true, skip_images = true
-    await _actual_export_handler(x, location, false, true, true);
+	await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js", "sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==");
+	await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js", "sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ==");
+
+	const items = selected_skus.size > 0 
+		? datasource.filter((item) => selected_skus.has(item.sku))
+		: datasource;
+
+	// @ts-ignore
+	const wb = new ExcelJS.Workbook();
+	const ws = wb.addWorksheet('Sheet1');
+
+	// Dòng 1 -> 3: Khung thông tin phiếu kiểm mẫu Sapo
+	ws.getRow(1).values = ["Phiếu kiểm hàng", "", "", "", "", ""];
+	ws.getRow(1).font = { bold: true, size: 14 };
+	ws.getRow(2).values = ["Mã phiếu:", "", "", "", "", ""];
+
+	// Dòng 4: Header chuẩn đúng 6 cột của Sapo
+	ws.getRow(4).values = ["Mã SKU*", "Tên sản phẩm", "Mã lô", "Tồn thực tế", "Lý do", "Ghi chú"];
+	ws.getRow(4).font = { bold: true };
+
+	// Dòng 5 trở đi: Đưa dữ liệu từng sản phẩm vào
+	for (let i = 0; i < items.length; i++) {
+		const v = items[i];
+		const stock_actual = v.c_on_hand ?? v.c_available ?? 0;
+		// 6 cột: SKU | Tên | Mã lô (trống) | Tồn thực tế | Lý do (trống) | Ghi chú (trống)
+		ws.getRow(i + 5).values = [v.sku || "", v.name || "", "", stock_actual, "", ""];
+	}
+
+	// Set độ rộng từng cột
+	ws.getColumn(1).width = 20; // Mã SKU*
+	ws.getColumn(2).width = 50; // Tên sản phẩm
+	ws.getColumn(3).width = 15; // Mã lô
+	ws.getColumn(4).width = 15; // Tồn thực tế
+	ws.getColumn(5).width = 20; // Lý do
+	ws.getColumn(6).width = 20; // Ghi chú
+
+	const wb_buffer = await wb.xlsx.writeBuffer();
+	const blob = new Blob([wb_buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+	const normalized_branch = normalizeString(location?.label || "Kho");
+	const t = new Date();
+	const time_str = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}_${String(t.getHours()).padStart(2, '0')}${String(t.getMinutes()).padStart(2, '0')}${String(t.getSeconds()).padStart(2, '0')}`;
+
+	// @ts-ignore
+	saveAs(blob, `Kiem_hang_${normalized_branch}_${time_str}.xlsx`);
 }
 
 // 🟢 2. HÀM XUẤT CHO NHẬP HÀNG (CÓ CHỌN / ĐANG LỌC)
