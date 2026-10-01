@@ -472,11 +472,6 @@
 				<Button onclick={select_all}>Chọn tất cả</Button>
 				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
-				<!-- 🟢 CHỈ HIỂN THỊ NÚT "KIỂM HÀNG" KHI Ở TRANG ĐẶT HÀNG, TRANG KIỂM HÀNG TỰ ĐỘNG ẨN -->
-				{#if !isStockCheck}
-					<Button icon="mdi mdi-package-variant-closed-check" onclick={filter_low_stock_items}>Kiểm hàng</Button>
-				{/if}
-
 				<div bind:this={export_popup_parent}>
 					<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">Xuất Excel</Button>
 				</div>
@@ -519,7 +514,7 @@
 										});
 									}}>Xuất toàn bộ sản phẩm trong kho</Button>
 								{:else}
-									<!-- 🟢 2. NẾU Ở TRANG KIỂM HÀNG: CHỈ HIỂN THỊ XUẤT PHIẾU KIỂM HÀNG (ẨN HẮN XUẤT CHUYỂN HÀNG) -->
+									<!-- 🟢 2. NẾU Ở TRANG KIỂM HÀNG: CHỈ HIỂN THỊ XUẤT PHIẾU KIỂM HÀNG -->
 									<p style="margin: 0px;"><b>Xuất phiếu kiểm hàng Sapo</b></p>
 									{#if selected_skus.size != 0}
 										<Button type="block primary" onclick={async () => {
