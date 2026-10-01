@@ -472,7 +472,10 @@
 				<Button onclick={select_all}>Chọn tất cả</Button>
 				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
-				<Button icon="mdi mdi-package-variant-closed-check" onclick={filter_low_stock_items}>Kiểm hàng</Button>
+				<!-- 🟢 CHỈ HIỂN THỊ NÚT "KIỂM HÀNG" KHI Ở TRANG ĐẶT HÀNG, TRANG KIỂM HÀNG TỰ ĐỘNG ẨN -->
+				{#if !isStockCheck}
+					<Button icon="mdi mdi-package-variant-closed-check" onclick={filter_low_stock_items}>Kiểm hàng</Button>
+				{/if}
 
 				<div bind:this={export_popup_parent}>
 					<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">Xuất Excel</Button>
@@ -483,7 +486,7 @@
 						<Popup parent={export_popup_parent} at="bottom" oncancel={on_export_popup_cancel}>
 							<div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
 								
-								<!-- 🔴 MỤC 1: XUẤT PHIẾU NHẬP HÀNG (ẨN KHI Ở TRANG KIỂM HÀNG) -->
+								<!-- 🟢 1. NẾU Ở TRANG ĐẶT HÀNG: CHỈ XUẤT PHIẾU NHẬP HÀNG -->
 								{#if !isStockCheck}
 									<p style="margin: 0px;"><b>1. Xuất phiếu nhập hàng</b></p>
 									{#if selected_skus.size != 0}
@@ -515,50 +518,32 @@
 											is_loading = false;
 										});
 									}}>Xuất toàn bộ sản phẩm trong kho</Button>
-
-									<hr style="color: #ccc; margin: 4px 0;" />
-								{/if}
-
-								<!-- 🟢 MỤC 2: XUẤT PHIẾU KIỂM HÀNG -->
-								<p style="margin: 0px;"><b>{#if !isStockCheck}2. {:else}1. {/if}Xuất phiếu kiểm hàng</b></p>
-								{#if selected_skus.size != 0}
-									<Button type="block primary" onclick={async () => {
-										is_loading = true;
-										try {
-											await export_kiem_hang_to_xlsx(selected_skus, datasource, c_location);
-										} finally {
-											is_loading = false;
-											export_popup_shown = false;
-										}
-									}}>Xuất {selected_skus.size} sản phẩm đã chọn (Kiểm hàng)</Button>
 								{:else}
-									<Button type="block primary" onclick={async () => {
-										is_loading = true;
-										try {
-											const filtered_skus = new Set(datasource.map(item => item.sku));
-											await export_kiem_hang_to_xlsx(filtered_skus, datasource, c_location);
-										} finally {
-											is_loading = false;
-											export_popup_shown = false;
-										}
-									}}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Kiểm hàng)</Button>
+									<!-- 🟢 2. NẾU Ở TRANG KIỂM HÀNG: CHỈ HIỂN THỊ XUẤT PHIẾU KIỂM HÀNG (ẨN HẮN XUẤT CHUYỂN HÀNG) -->
+									<p style="margin: 0px;"><b>Xuất phiếu kiểm hàng Sapo</b></p>
+									{#if selected_skus.size != 0}
+										<Button type="block primary" onclick={async () => {
+											is_loading = true;
+											try {
+												await export_kiem_hang_to_xlsx(selected_skus, datasource, c_location);
+											} finally {
+												is_loading = false;
+												export_popup_shown = false;
+											}
+										}}>Xuất {selected_skus.size} sản phẩm đã chọn (Kiểm hàng)</Button>
+									{:else}
+										<Button type="block primary" onclick={async () => {
+											is_loading = true;
+											try {
+												const filtered_skus = new Set(datasource.map(item => item.sku));
+												await export_kiem_hang_to_xlsx(filtered_skus, datasource, c_location);
+											} finally {
+												is_loading = false;
+												export_popup_shown = false;
+											}
+										}}>Xuất toàn bộ {datasource.length} sản phẩm đang lọc (Kiểm hàng)</Button>
+									{/if}
 								{/if}
-
-								<hr style="color: #ccc; margin: 4px 0;" />
-
-								<!-- 🟢 MỤC 3: XUẤT PHIẾU CHUYỂN HÀNG -->
-								<p style="margin: 0px;"><b>{#if !isStockCheck}3. {:else}2. {/if}Xuất phiếu chuyển hàng</b></p>
-								<div>
-									<Button type="block secondary" onclick={async () => {
-										is_loading = true;
-										await export_transfer_sheet_to_xlsx(order_records, transfer_records, variant_by_id, locations).finally(() => {
-											is_loading = false;
-										});
-									}}>Xuất đơn chuyển hàng</Button>
-									<p style="margin: 0px; font-size: 11px; color: gray;">
-										<i>(Bao gồm hàng tồn kho trong chi nhánh trung tâm)</i>
-									</p>
-								</div>
 							</div>
 						</Popup>
 					</Portal>
