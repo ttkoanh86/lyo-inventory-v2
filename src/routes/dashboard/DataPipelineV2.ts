@@ -80,10 +80,8 @@ export function is_promotional_item(brand: string, name: string = "") {
 	const br = (brand || "").trim().toLowerCase();
 	const nm = (name || "").trim().toLowerCase();
 
-	// Lọc theo Brand
 	if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) return true;
 
-	// Lọc theo Tên sản phẩm (Bổ sung lọc triệt để từ khóa 'combo')
 	if (
 		nm.includes("combo") || 
 		nm.includes("- sale") || 
@@ -216,7 +214,7 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 KÉO SẢN PHẨM CÓ BỘ LỌC CẢ NĂM TÊN SẢN PHẨM CHUẨN
+// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -246,7 +244,6 @@ export async function get_active_products() {
 						if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
 
 						const full_var_name = variant.name || prod_name;
-						// Lọc triệt để ngay từ cấp độ mẫu mã variant
 						if (is_promotional_item(brand_name, full_var_name)) return;
 
 						let p_variant: ProductV2 = {
@@ -362,6 +359,7 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
+// 🟢 HÀM KÉO ĐƠN HÀNG CHUẨN GỐC
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
 	let existing_keys = new Set<string>();
 	
@@ -482,3 +480,49 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 }
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
+
+// 🟢 HÀM ĐẨY TRỰC TIẾP PHIẾU CHUYỂN HÀNG LÊN SAPO DÙNG KHI BẤM NÚT
+export async function create_sapo_stock_transfer(
+	items: ProductV2[], 
+	target_location_id: number
+) {
+	try {
+		const line_items = items.map((item: any) => ({
+			variant_id: item.variant_id,
+			sku: item.sku,
+			name: item.name,
+			qty: item.c_transfer_suggest || 0
+		})).filter(x => x.qty > 0);
+
+		if (line_items.length === 0) {
+			alert("Không có sản phẩm nào có số lượng chuyển > 0!");
+			return false;
+		}
+
+		const payload = {
+			stock_transfer: {
+				from_location_id: TARGET_LOCATION_ID_GROUP,
+				to_location_id: Number(target_location_id),
+				note: "Đơn chuyển hàng tự động từ LYO Dự Báo",
+				stock_transfer_line_items: line_items.map(i => ({
+					variant_id: i.variant_id,
+					quantity: i.qty
+				}))
+			}
+		};
+
+		const resp = await axios.post(`${proxyUrl}/admin/stock_transfers.json`, payload);
+		
+		if (resp.status === 200 || resp.status === 201) {
+			alert(`✅ Đã tạo thành công Đơn chuyển hàng trên Sapo với ${line_items.length} sản phẩm!`);
+			return true;
+		} else {
+			alert("Lỗi khi tạo đơn chuyển hàng trên Sapo!");
+			return false;
+		}
+	} catch (e: any) {
+		console.error("Lỗi POST stock_transfers:", e);
+		alert("Không thể kết nối API Sapo để tạo đơn chuyển hàng. Vui lòng dùng nút Xuất Excel!");
+		return false;
+	}
+}
