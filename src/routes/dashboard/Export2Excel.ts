@@ -3,7 +3,7 @@ import { imageToArrayBuffer } from "./imageToByteArray";
 import { lazyLoadScript } from "./lazyLoadScript";
 import { type Location } from "./Template";
 
-// 🟢 1. HÀM XUẤT PHIẾU KIỂM HÀNG CHUẨN MẪU SAPO (TẠO FILE 6 CỘT TỰ ĐỘNG, KHÔNG DÙNG FILE MẪU NHẬP HÀNG)
+// 🟢 1. HÀM XUẤT PHIẾU KIỂM HÀNG CHUẨN MẪU SAPO (6 CỘT)
 export async function export_kiem_hang_to_xlsx(
 	selected_skus: Set<string>, 
 	datasource: ProductV2[], 
@@ -33,17 +33,15 @@ export async function export_kiem_hang_to_xlsx(
 	for (let i = 0; i < items.length; i++) {
 		const v = items[i];
 		const stock_actual = v.c_on_hand ?? v.c_available ?? 0;
-		// Ghi đúng 6 cột: SKU | Tên sản phẩm | Mã lô (trống) | Tồn thực tế | Lý do (trống) | Ghi chú (trống)
 		ws.getRow(i + 5).values = [v.sku || "", v.name || "", "", stock_actual, "", ""];
 	}
 
-	// Chỉnh độ rộng các cột
-	ws.getColumn(1).width = 20; // Mã SKU*
-	ws.getColumn(2).width = 50; // Tên sản phẩm
-	ws.getColumn(3).width = 15; // Mã lô
-	ws.getColumn(4).width = 15; // Tồn thực tế
-	ws.getColumn(5).width = 20; // Lý do
-	ws.getColumn(6).width = 20; // Ghi chú
+	ws.getColumn(1).width = 20;
+	ws.getColumn(2).width = 50;
+	ws.getColumn(3).width = 15;
+	ws.getColumn(4).width = 15;
+	ws.getColumn(5).width = 20;
+	ws.getColumn(6).width = 20;
 
 	const wb_buffer = await wb.xlsx.writeBuffer();
 	const blob = new Blob([wb_buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -95,7 +93,7 @@ export async function export_all_to_xlsx(
 	}
 }
 
-// 🟢 4. HÀM XUẤT CHUYỂN HÀNG
+// 🟢 4. HÀM XUẤT CHUYỂN HÀNG CŨ
 export async function export_transfer_sheet_to_xlsx(
 	order_records: OrderRecordV2[], 
 	transfer_records: TransferRecord[], 
@@ -116,7 +114,51 @@ export async function export_transfer_sheet_to_xlsx(
 	}
 }
 
-// 🟢 5. HÀM XỬ LÝ CHÍNH DÙNG CHO NHẬP HÀNG / CHUYỂN HÀNG
+// 🟢 5. HÀM XUẤT PHIẾU CHUYỂN HÀNG SAPO NỘI BỘ (CHO KHO CHI NHÁNH ĐƯỢC CHỌN)
+export async function export_phieu_chuyen_hang_sapo(
+	items: any[], 
+	target_location_label: string
+) {
+	await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js", "sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==");
+	await lazyLoadScript("https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js", "sha512-csNcFYJniKjJxRWRV1R7fvnXrycHP6qDR21mgz1ZP55xY5d+aHLfo9/FcGDQLfn2IfngbAHd8LdfsagcCqgTcQ==");
+
+	// @ts-ignore
+	const wb = new ExcelJS.Workbook();
+	const ws = wb.addWorksheet('Phiếu chuyển hàng');
+
+	ws.getRow(1).values = ["Phiếu chuyển hàng", "", "", "", ""];
+	ws.getRow(1).font = { bold: true, size: 14 };
+	ws.getRow(2).values = [`Kho nhận: ${target_location_label}`, "", "", "", ""];
+	ws.getRow(4).values = ["Mã SKU*", "Tên sản phẩm", "Tồn kho Group", "SL Bán 30d", "Số lượng chuyển*"];
+	ws.getRow(4).font = { bold: true };
+
+	for (let i = 0; i < items.length; i++) {
+		const v = items[i];
+		ws.getRow(i + 5).values = [
+			v.sku || "",
+			v.name || "",
+			v.c_on_hand_group || 0,
+			v.c_restock || 0,
+			v.c_transfer_suggest || 0
+		];
+	}
+
+	ws.getColumn(1).width = 20;
+	ws.getColumn(2).width = 50;
+	ws.getColumn(3).width = 15;
+	ws.getColumn(4).width = 15;
+	ws.getColumn(5).width = 20;
+
+	const wb_buffer = await wb.xlsx.writeBuffer();
+	const blob = new Blob([wb_buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+	const normalized_name = normalizeString(target_location_label);
+	const date_str = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+	// @ts-ignore
+	saveAs(blob, `Phieu_Chuyen_Hang_${normalized_name}_${date_str}.xlsx`);
+}
+
+// 🟢 6. HÀM XỬ LÝ CHÍNH DÙNG CHO NHẬP HÀNG / CHUYỂN HÀNG
 export async function _actual_export_handler(
 	prods: ProductV2[], 
 	location: Location, 
@@ -159,6 +201,8 @@ export async function _actual_export_handler(
 							let ext = "png";
 							const cleanPath = v.image_path.split("?")[0].toLowerCase();
 							if (cleanPath.endsWith(".jpg") || cleanPath.endsWith(".jpeg")) {
+								ext = "jpeg";
+							} else if (cleanPath.endsWith(".jpeg") || cleanPath.endsWith(".jpg")) {
 								ext = "jpeg";
 							} else if (cleanPath.endsWith(".gif")) {
 								ext = "gif";
