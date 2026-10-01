@@ -111,7 +111,7 @@ export async function export_transfer_sheet_to_xlsx(
 	}
 }
 
-// 🟢 5. HÀM XUẤT PHIẾU CHUYỂN HÀNG SAPO CHUẨN NGUYÊN MẪU (mau_nhap_phieu_chuyen_hang_20220926.xlsx)
+// 🟢 5. HÀM XUẤT PHIẾU CHUYỂN HÀNG SAPO CHUẨN NGUYÊN MẪU (DÒNG 1: MÃ PHIẾU, DÒNG 2: TRỐNG, DÒNG 3: CỘT TIÊU ĐỀ)
 export async function export_phieu_chuyen_hang_sapo(
 	items: any[], 
 	target_location_label: string
@@ -123,14 +123,21 @@ export async function export_phieu_chuyen_hang_sapo(
 	const wb = new ExcelJS.Workbook();
 	const ws = wb.addWorksheet('Sheet0');
 
+	// Dòng 1: Mã phiếu chuyển hàng (A1)
 	ws.getRow(1).values = ["Mã phiếu chuyển hàng", "", "", "", "", ""];
-	ws.getRow(2).values = ["Mã SKU *", "Tên sản phẩm", "Serial/IMEI", "Mã lô", "Số lượng chuyển", "Giá chuyển"];
-	ws.getRow(2).font = { bold: true };
+	
+	// Dòng 2: Để trống hoàn toàn chuẩn mẫu Sapo
+	ws.getRow(2).values = ["", "", "", "", "", ""];
 
+	// Dòng 3: Cột tiêu đề chuẩn 6 cột Sapo
+	ws.getRow(3).values = ["Mã SKU *", "Tên sản phẩm", "Serial/IMEI", "Mã lô", "Số lượng chuyển", "Giá chuyển"];
+	ws.getRow(3).font = { bold: true };
+
+	// Dòng 4 trở đi: Dữ liệu sản phẩm
 	for (let i = 0; i < items.length; i++) {
 		const v = items[i];
 		const qty_transfer = v.c_transfer_suggest ?? 0;
-		ws.getRow(i + 3).values = [
+		ws.getRow(i + 4).values = [
 			v.sku || "",
 			v.name || "",
 			"", // Serial/IMEI để trống
