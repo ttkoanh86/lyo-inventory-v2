@@ -19,6 +19,7 @@
 		fetch_inventory_transfer,
 		get_low_sales_skus,
 		setLastDataUpdate,
+		create_sapo_stock_transfer,
 		TARGET_LOCATION_ID_GROUP
 	} from "./DataPipelineV2";
 	import SelectionCheckboxCell from "./SelectionCheckboxCell.svelte";
@@ -369,9 +370,27 @@
 							<div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
 								
 								{#if isStockTransfer}
-									<!-- 🚚 TRANG CHUYỂN HÀNG -->
-									<p style="margin: 0px;"><b>Xuất phiếu chuyển hàng Sapo</b></p>
-									<Button type="primary" onclick={async () => {
+									<!-- 🚚 TRANG CHUYỂN HÀNG: CÓ CẢ 2 LỰA CHỌN -->
+									<p style="margin: 0px;"><b>Chuyển Hàng Nội Bộ Sapo</b></p>
+
+									<!-- NÚT 1: ĐẨY TRỰC TIẾP LÊN SAPO -->
+									<Button type="primary" icon="mdi mdi-cloud-upload" onclick={async () => {
+										is_loading = true;
+										try {
+											const items = selected_skus.size > 0 
+												? datasource.filter((x) => selected_skus.has(x.sku))
+												: datasource;
+											await create_sapo_stock_transfer(items, c_location_id);
+										} finally {
+											is_loading = false;
+											export_popup_shown = false;
+										}
+									}}>
+										1. Đẩy trực tiếp đơn chuyển lên Sapo ({selected_skus.size > 0 ? selected_skus.size : datasource.length} SP)
+									</Button>
+
+									<!-- NÚT 2: XUẤT FILE EXCEL CHUẨN MẪU SAPO -->
+									<Button type="secondary" icon="mdi mdi-file-excel" onclick={async () => {
 										is_loading = true;
 										try {
 											const items = selected_skus.size > 0 
@@ -384,7 +403,7 @@
 											export_popup_shown = false;
 										}
 									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : datasource.length} sản phẩm (Chuyển Hàng)
+										2. Xuất File Excel chuyển hàng mẫu 6 cột
 									</Button>
 
 								{:else if isStockCheck}
