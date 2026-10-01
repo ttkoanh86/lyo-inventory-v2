@@ -75,15 +75,30 @@ export function parseSapoDate(dateStr: string): number {
 	return new Date(dateStr).getTime() || 0;
 }
 
+// 🟢 BỘ LỌC TỰ ĐỘNG CHẶN HÀNG KHUYẾN MÃI / MÃ ẢO / SẢN PHẨM COMBO QUY ĐỔI
 export function is_promotional_item(brand: string, name: string = "") {
 	const br = (brand || "").trim().toLowerCase();
 	const nm = (name || "").trim().toLowerCase();
+
+	// Lọc theo Brand
 	if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) return true;
-	if (nm.includes("- sale") || nm.includes("-sale") || nm.includes("sale ") || nm.includes("(tặng)") || nm.includes("kđh")) return true;
+
+	// Lọc theo Tên sản phẩm (Bổ sung lọc triệt để từ khóa 'combo')
+	if (
+		nm.includes("combo") || 
+		nm.includes("- sale") || 
+		nm.includes("-sale") || 
+		nm.includes("sale ") || 
+		nm.includes("(tặng)") || 
+		nm.includes("kđh")
+	) {
+		return true;
+	}
+
 	return false;
 }
 
-// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY chuẩn
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -201,7 +216,7 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 HÀM KÉO SẢN PHẨM NGUYÊN BẢN GỐC (ĐÃ BỎ HOÀN TOÀN TIMEOUT)
+// 🟢 KÉO SẢN PHẨM CÓ BỘ LỌC CẢ NĂM TÊN SẢN PHẨM CHUẨN
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -231,6 +246,7 @@ export async function get_active_products() {
 						if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
 
 						const full_var_name = variant.name || prod_name;
+						// Lọc triệt để ngay từ cấp độ mẫu mã variant
 						if (is_promotional_item(brand_name, full_var_name)) return;
 
 						let p_variant: ProductV2 = {
@@ -346,7 +362,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG CHUẨN GỐC
 export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
 	let existing_keys = new Set<string>();
 	
