@@ -4,10 +4,9 @@ import { type Location } from "./Template";
 // 🟢 Domain Proxy Render Singapore chính thức
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
 
-// 🔴 EXPORT CHUẨN CẢ 2 ID KHO ĐỂ TRÁNH LỖI BUILD ROLLUP
-export const TARGET_LOCATION_ID_NEW = 789505; // ID Kho Site Mới (Group)
-export const TARGET_LOCATION_ID_GROUP = 789505; // ID Kho LYO Group
-export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; // ID Kho Trung Tâm
+export const TARGET_LOCATION_ID_NEW = 789505; 
+export const TARGET_LOCATION_ID_GROUP = 789505; 
+export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; 
 
 export interface OrderRecordV2 {
 	sku: string;
@@ -84,26 +83,19 @@ export function is_promotional_item(brand: string, name: string = "") {
 	return false;
 }
 
-// 🟢 HÀM TÍNH TOÁN DOANH SỐ QUY ĐỔI SẢN PHẨM GỐC
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
 	location_id: number,
 ) {
-	const active_loc_id = Number(location_id) || TARGET_LOCATION_ID_NEW;
+	const active_loc_id = Number(location_id) || TARGET_LOCATION_ID_GROUP;
 	records.sort((a, b) => b.t_unix - a.t_unix);
 
 	let sales_by_sku = new Map<string, number>();
 
-	const site_start_date = new Date("2026-09-01T00:00:00");
-	const min_valid_ts = site_start_date.getTime();
-	
-	const now = new Date();
-	const now_ts = now.getTime();
-
-	const diff_time = Math.max(0, now_ts - min_valid_ts);
-	const actual_days = Math.max(1, Math.ceil(diff_time / (1000 * 60 * 60 * 24)));
-	const multiplier_31_days = actual_days >= 31 ? 1 : (31 / actual_days);
+	const now_ts = new Date().getTime();
+	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
+	const min_valid_ts = now_ts - thirty_days_ts;
 
 	for (let [_, variant] of variant_by_id) {
 		if (variant.sku && !variant.is_composite) {
@@ -113,29 +105,21 @@ export function calculate_restock_data(
 
 	for (let record of records) {
 		const clean_sku = (record.sku || "").trim().toLowerCase();
+		const rec_loc = Number(record.location_id || TARGET_LOCATION_ID_GROUP);
 
-		if (clean_sku) {
-			variant_by_id.forEach((v) => {
-				if (v.sku && v.sku.trim().toLowerCase() === clean_sku) {
-					v.order_history_by_location.add(active_loc_id);
-				}
-			});
-		}
-
-		if (record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
+		if (clean_sku && rec_loc === active_loc_id && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
 			const current_sales = sales_by_sku.get(clean_sku) || 0;
 			sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
 		}
 	}
 
-	let count_has_sales = 0;
 	variant_by_id.forEach((variant) => {
 		if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) {
 			variant.c_restock = 0;
 			return;
 		}
 
-		const inventory = variant.inventory_level_by_location.get(active_loc_id) || variant.inventory_level_by_location.get(TARGET_LOCATION_ID_NEW);
+		const inventory = variant.inventory_level_by_location.get(active_loc_id) || variant.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 
 		variant.c_available = inventory ? Math.max(0, Math.round(inventory.available ?? inventory.on_hand ?? 0)) : 0;
 		variant.c_incoming = inventory ? Math.max(0, Math.round(inventory.incoming ?? 0)) : 0;
@@ -144,10 +128,7 @@ export function calculate_restock_data(
 		const clean_sku = (variant.sku || "").trim().toLowerCase();
 		const actual_sales = sales_by_sku.get(clean_sku) ?? 0;
 
-		const estimated_sales_31 = actual_sales * multiplier_31_days;
-		variant.c_restock = Math.round(estimated_sales_31);
-
-		if (variant.c_restock > 0) count_has_sales++;
+		variant.c_restock = Math.round(actual_sales);
 	});
 
 	return get_items_need_restock(variant_by_id, active_loc_id);
@@ -187,13 +168,11 @@ export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): Prod
 
 export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
 	let result: ProductV2[] = [];
-
 	variant_by_id.forEach((variant) => {
 		if (variant.is_composite || is_promotional_item(variant.brand, variant.name)) return;
 
 		const sales = variant.c_restock || 0;
 		const current_has = variant.c_available + variant.c_incoming;
-
 		const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
 
 		if (sales === 0 && current_has === 0 && is_valid_product) {
@@ -221,75 +200,87 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
+// 🟢 KÉO SẢN PHẨM CÓ TỰ ĐỘNG BẮT LỖI MẠNG ERR_NETWORK TRÁNH TREO
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
 	let page = 1;
 
 	while (running) {
-		try {
-			const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
-				params: { limit: 250, page: page, status: "active" },
-			});
+		let success = false;
+		let retries = 3;
 
-			if (resp.status === 200) {
-				const products = resp.data?.products || [];
-				if (products.length === 0) { running = false; break; }
-
-				products.forEach((product: any) => {
-					if (product.status !== "active") return;
-
-					const brand_name = (product.brand || "").trim();
-					const prod_name = (product.name || "").trim();
-
-					if (is_promotional_item(brand_name, prod_name)) return;
-
-					const is_prod_composite = product.product_type === "composite";
-
-					product.variants.forEach((variant: any) => {
-						if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
-
-						const full_var_name = variant.name || prod_name;
-						if (is_promotional_item(brand_name, full_var_name)) return;
-
-						let p_variant: ProductV2 = {
-							is_composite: false,
-							brand: brand_name || "<Không xác định>",
-							variant_id: variant.id,
-							product_id: product.id,
-							sku: (variant.sku || "").trim(),
-							barcode: (variant.barcode || variant.sku || "").trim(),
-							c_restock: 0, c_restock_half: 0, c_restock_third: 0, image_path: "",
-							c_on_hand: 0, c_incoming: 0, c_available: 0,
-							name: full_var_name, name_normalized: normalizeString(full_var_name),
-							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
-							inventory_level_by_location: new Map(),
-							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: new Set<number>()
-						};
-
-						if (variant.inventories && variant.inventories.length > 0) {
-							variant.inventories.forEach((inventory: any) => {
-								const loc_id = Number(inventory.location_id);
-								p_variant.inventory_level_by_location.set(loc_id, {
-									on_hand: Number(inventory.on_hand || 0),
-									incoming: Number(inventory.incoming || 0),
-									available: Number(inventory.available ?? inventory.on_hand ?? 0),
-									sold: 0,
-								});
-							});
-						}
-
-						if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
-						p_variant_by_ids.set(p_variant.variant_id, p_variant);
-					});
+		while (retries > 0 && !success) {
+			try {
+				const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
+					params: { limit: 250, page: page, status: "active" },
+					timeout: 12000
 				});
-				page++;
-				await sleep(10);
-			} else { running = false; }
-		} catch (e: any) {
-			console.error("[LỖI KÉO SẢN PHẨM]:", e);
-			running = false;
+
+				if (resp.status === 200) {
+					const products = resp.data?.products || [];
+					if (products.length === 0) { running = false; break; }
+
+					products.forEach((product: any) => {
+						if (product.status !== "active") return;
+
+						const brand_name = (product.brand || "").trim();
+						const prod_name = (product.name || "").trim();
+
+						if (is_promotional_item(brand_name, prod_name)) return;
+
+						const is_prod_composite = product.product_type === "composite";
+
+						product.variants.forEach((variant: any) => {
+							if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
+
+							const full_var_name = variant.name || prod_name;
+							if (is_promotional_item(brand_name, full_var_name)) return;
+
+							let p_variant: ProductV2 = {
+								is_composite: false,
+								brand: brand_name || "<Không xác định>",
+								variant_id: variant.id,
+								product_id: product.id,
+								sku: (variant.sku || "").trim(),
+								barcode: (variant.barcode || variant.sku || "").trim(),
+								c_restock: 0, c_restock_half: 0, c_restock_third: 0, image_path: "",
+								c_on_hand: 0, c_incoming: 0, c_available: 0,
+								name: full_var_name, name_normalized: normalizeString(full_var_name),
+								import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
+								inventory_level_by_location: new Map(),
+								composite_item_quantity_by_variant_id: new Map(),
+								order_history_by_location: new Set<number>()
+							};
+
+							if (variant.inventories && variant.inventories.length > 0) {
+								variant.inventories.forEach((inventory: any) => {
+									const loc_id = Number(inventory.location_id);
+									p_variant.inventory_level_by_location.set(loc_id, {
+										on_hand: Number(inventory.on_hand || 0),
+										incoming: Number(inventory.incoming || 0),
+										available: Number(inventory.available ?? inventory.on_hand ?? 0),
+										sold: 0,
+									});
+								});
+							}
+
+							if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
+							p_variant_by_ids.set(p_variant.variant_id, p_variant);
+						});
+					});
+					page++;
+					success = true;
+					await sleep(10);
+				} else { running = false; break; }
+			} catch (e: any) {
+				retries--;
+				await sleep(1000);
+				if (retries === 0) {
+					console.error("[PROXY SERVER LỖI KẾT NỐI]:", e);
+					running = false;
+				}
+			}
 		}
 	}
 	return p_variant_by_ids;
@@ -377,8 +368,9 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 		if (r.t_unix > max_stored_ts) max_stored_ts = r.t_unix;
 	});
 
-	const site_start_date = new Date("2026-09-01T00:00:00");
-	const min_valid_ts = site_start_date.getTime();
+	const now_ts = new Date().getTime();
+	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
+	const min_valid_ts = now_ts - thirty_days_ts;
 
 	const fetch_since_ts = max_stored_ts > min_valid_ts ? max_stored_ts : min_valid_ts;
 
@@ -389,7 +381,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 	while (running) {
 		try {
 			const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-				params: { limit: 250, page: page, order_by: "created_on desc" }
+				params: { limit: 250, page: page, order_by: "created_on desc" },
+				timeout: 12000
 			});
 
 			if (resp.status === 200) {
@@ -402,7 +395,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
 				for (const order of orders) {
 					if (order.status !== "cancelled") {
-						const actual_loc_id = Number(order.location_id || TARGET_LOCATION_ID_NEW);
+						const actual_loc_id = Number(order.location_id || TARGET_LOCATION_ID_GROUP);
 						const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
 						const order_ts = parseSapoDate(date_str);
 
