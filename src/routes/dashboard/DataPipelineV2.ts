@@ -214,7 +214,7 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC
+// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC (ĐÃ ĐƯỢC SỬA TỪ KHÓA new Set)
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -259,7 +259,7 @@ export async function get_active_products() {
 							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
 							inventory_level_by_location: new Map(),
 							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: Set<number>()
+							order_history_by_location: new Set<number>() // ✅ ĐÃ SỬA CHUẨN new Set<number>()
 						};
 
 						if (variant.inventories && variant.inventories.length > 0) {
@@ -466,7 +466,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 				await sleep(10);
 			} else { running = false; }
 		} catch (e: any) {
-			console.error("[LỖI KÉO ĐƠN]:", e);
+			console.error("[LỖI KÉO SẢN PHẨM]:", e);
 			running = false;
 		}
 	}
