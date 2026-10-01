@@ -65,7 +65,7 @@
 		{ id: "image", header: "Ảnh", cell: ImageCell },
 		{ id: "image_path", hidden: true },
 
-		// 🚚 CỘT CHÍNH CỦA CHUYỂN HÀNG: ĐƯỢC ĐƯA LÊN TRƯỚC LÊN ĐẦU BẢNG
+		// 🚚 CỘT CHÍNH CỦA CHUYỂN HÀNG: ĐƯỢC ĐƯA LÊN ĐẦU BẢNG
 		{ id: "c_transfer_suggest", hidden: !isStockTransfer, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "🚨 SL CẦN\nCHUYỂN" }] },
 		{ id: "c_on_hand_group", hidden: !isStockTransfer, resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Tồn Kho\nGroup" }] },
 
@@ -342,7 +342,11 @@
 				<Button onclick={initialize} type="primary" icon="mdi mdi-refresh"></Button>
 			</div>
 			<div style="width: 280px; display:flex; align-items: center">
-				<span>{#if isStockTransfer}Kho nhận:{#else}Kho:{/if}&nbsp;</span>
+				{#if isStockTransfer}
+					<span>Kho nhận:&nbsp;</span>
+				{:else}
+					<span>Kho:&nbsp;</span>
+				{/if}
 				<Select 
 					bind:value={c_location_id} 
 					options={isStockTransfer ? transfer_locations : locations} 
