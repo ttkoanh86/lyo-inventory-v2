@@ -96,7 +96,7 @@
 	const responsive_fields = { 800: { columns: columns } };
 
 	let data: any[] = $state([]);
-	let filtered_datasource: any[] = $state([]); // Danh sách sau khi áp dụng Lọc
+	let filtered_datasource: any[] = $state([]);
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 	let totalPages = $derived(Math.ceil(filtered_datasource.length / itemsPerPage) || 1);
@@ -112,11 +112,10 @@
 		updatePageData();
 	}
 
-	// 🟢 GIỮ NGUYÊN 100% HÀM LỌC ĐANG CHẠY RẤT TỐT CỦA DÌ
+	// 🟢 HÀM XỬ LÝ LỌC & SẮP XẾP CHÍNH XÁC
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
-		// 1. Áp dụng bộ lọc từ các cột Header (SKU, Tên, Nhãn hiệu...)
 		if (filter_by_id.size > 0) {
 			filter_by_id.forEach((filter, fieldId) => {
 				if (filter && filter.value) {
@@ -129,7 +128,6 @@
 			});
 		}
 
-		// 2. Áp dụng sắp xếp
 		if (sort_by_id.size > 0) {
 			sort_by_id.forEach((sort, fieldId) => {
 				if (sort && sort.dir) {
@@ -180,7 +178,6 @@
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
 
-	// 🟢 GIỮ NGUYÊN KHỐI $effect LẮNG NGHE TỰ ĐỘNG CỦA DÌ
 	$effect(() => {
 		if (filter_by_id.size >= 0 || sort_by_id.size >= 0) {
 			applyGridFilterAndSort();
@@ -221,13 +218,13 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU TỪNG TRANG ĐỘC LẬP
+	// 🟢 HÀM LỌC VÀ TÍNH TOÁN DỮ LIỆU BẢNG ĐỘC LẬP TỪNG TRANG
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG: SỬA ĐỘC LẬP NHÁNH NÀY
+				// 🚚 TRANG CHUYỂN HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
@@ -261,18 +258,15 @@
 					let raw_need_transfer = 0;
 
 					if (sales_30d > 0) {
-						// 🟢 CÓ BÁN 30 NGÀY: Thiếu hụt so với 50% sản lượng bán
 						if (current_total_branch < 0.5 * sales_30d) {
 							raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
 						}
 					} else {
-						// 🟢 KHÔNG BÁN 30 NGÀY: Chỉ chuyển 2 cái nếu Tồn chi nhánh = 0 và Tồn Group >= 6
 						if (current_total_branch === 0 && stock_group >= 6) {
 							raw_need_transfer = 2;
 						}
 					}
 
-					// 🟢 SỬA ĐỘC LẬP: Gợi ý tối đa số lượng Kho Group đang có (Xóa bỏ điều kiện stock_group >= 3 * raw_need_transfer)
 					if (raw_need_transfer > 0) {
 						let suggest_transfer = Math.min(stock_group, raw_need_transfer);
 
@@ -291,7 +285,7 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG: GIỮ NGUYÊN 100%
+				// 📋 TRANG KIỂM HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -311,7 +305,7 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
-				// 🚨 TRANG ĐẶT HÀNG: GIỮ NGUYÊN 100%
+				// 🚨 TRANG ĐẶT HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -321,6 +315,9 @@
 				else if (activeTab === 'has_sales') datasource = [...tab2_items];
 				else datasource = [...tab3_items];
 			}
+
+			updateKeys.dsource = datasource as any;
+			updateKeys.headerSorterKey++;
 
 			applyGridFilterAndSort();
 			rowCount = filtered_datasource.length;
@@ -363,11 +360,15 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ ĐƠN HÀNG
+	// ⚡ HÀM KHỞI TẠO BẢO VỆ PROMISE AN TOÀN TUYỆT ĐỐI
 	async function initialize() {
 		is_loading = true;
 		try {
-			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
+			// 1. Tải danh sách Sản phẩm & Tồn kho
+			let loc_and_variant = await Promise.all([
+				get_locations().catch(() => []), 
+				get_active_products().catch(() => new Map())
+			]);
 			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
 			variant_by_id = loc_and_variant[1] || new Map();
 
@@ -375,14 +376,22 @@
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
 			if (isStockCheck) {
+				// 📋 TRANG KIỂM HÀNG: Hiển thị lập tức, không kéo đơn
 				applyTabFilter();
 			} else {
-				let order_and_transfer_records = await Promise.all([
-					fetch_order_record(variant_by_id),
-					fetch_inventory_transfer(variant_by_id),
-				]);
-				order_records = order_and_transfer_records[0] || [];
-				transfer_records = order_and_transfer_records[1] || [];
+				// 🚨 ĐẶT HÀNG & 🚚 CHUYỂN HÀNG: Kéo đơn an toàn có bọc Try-Catch
+				try {
+					let order_and_transfer_records = await Promise.all([
+						fetch_order_record(variant_by_id).catch(() => []),
+						fetch_inventory_transfer(variant_by_id).catch(() => []),
+					]);
+					order_records = order_and_transfer_records[0] || [];
+					transfer_records = order_and_transfer_records[1] || [];
+				} catch (errRecords) {
+					console.warn("Lỗi kéo đơn đệm, bỏ qua để hiện bảng:", errRecords);
+					order_records = [];
+					transfer_records = [];
+				}
 
 				applyTabFilter();
 			}
@@ -390,7 +399,7 @@
 			setLastDataUpdate();
 			low_sales_skus = get_low_sales_skus(datasource);
 		} catch (error) {
-			console.error("Lỗi khởi tạo:", error);
+			console.error("Lỗi khởi tạo tổng:", error);
 		} finally {
 			is_loading = false;
 		}
