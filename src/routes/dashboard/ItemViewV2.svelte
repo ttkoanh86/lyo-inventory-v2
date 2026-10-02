@@ -59,7 +59,7 @@
 		{ id: TARGET_LOCATION_ID_PHAM_VAN_DONG, label: "Kho 180 Phạm Văn Đồng", address: "Phạm Văn Đồng" }
 	];
 
-	// 🟢 CẤU TRÚC CỘT CHUẨN ĐÃ KHỔI PHỤC ID KHOÁ BRAND
+	// 🟢 CẤU TRÚC CỘT THEO ĐÚNG THỨ TỰ YÊU CẦU
 	const all_columns = [
 		{ id: "id", hidden: true },
 		{ id: "selected", cell: SelectionCheckboxCell, width: 36 },
@@ -96,46 +96,26 @@
 	const responsive_fields = { 800: { columns: columns } };
 
 	let datasource: any[] = $state([]);
-	let filtered_datasource: any[] = $state([]);
 	let data: any[] = $state([]);
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
-	let totalPages = $derived(Math.ceil(filtered_datasource.length / itemsPerPage) || 1);
 
-	function updatePageData() {
-		let start = (currentPage - 1) * itemsPerPage;
-		let end = start + itemsPerPage;
-		data = filtered_datasource.slice(start, Math.min(end, filtered_datasource.length));
-	}
-
-	function resetPagination() {
-		currentPage = 1;
-		updatePageData();
-	}
-
-	// 🟢 HÀM ĐỌC DỮ LIỆU BỘ LỌC TỪ HEADERWITHSORTUI CHUẨN XÁC
-	function applyGridFilterAndSort() {
+	// Lọc danh sách trực tiếp dựa trên filter_by_id
+	let filtered_list = $derived.by(() => {
 		let result = [...datasource];
-
-		// 1. ĐỌC LỌC TỪ HeaderWithSortUI (Đọc filter.includes dạng Set & filter.value)
 		if (filter_by_id.size > 0) {
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
-
-				// Lọc theo danh sách Checkbox nhãn hiệu/giá trị đã tick
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
 						normSet.add(normalizeToEnglish(String(v || "").trim().toLowerCase()));
 					});
-
 					result = result.filter((item) => {
 						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").trim().toLowerCase());
 						return normSet.has(itemVal);
 					});
 				}
-
-				// Lọc theo từ khóa tìm kiếm gõ tay
 				if (filter.value !== undefined && filter.value !== null) {
 					const searchStr = normalizeToEnglish(String(filter.value).trim().toLowerCase());
 					if (searchStr.length > 0) {
@@ -147,26 +127,25 @@
 				}
 			});
 		}
+		return result;
+	});
 
-		// 2. ĐỌC SẮP XẾP TỪ HeaderWithSortUI (order: 1 hoặc -1)
-		if (sort_by_id.size > 0) {
-			sort_by_id.forEach((sort: any, fieldId: string) => {
-				if (sort && sort.order !== undefined && sort.order !== 0) {
-					const dirMult = sort.order === 1 ? 1 : -1;
-					result.sort((a, b) => {
-						const valA = a[fieldId] ?? "";
-						const valB = b[fieldId] ?? "";
-						if (typeof valA === "number" && typeof valB === "number") {
-							return (valA - valB) * dirMult;
-						}
-						return valA.toString().localeCompare(valB.toString()) * dirMult;
-					});
-				}
-			});
-		}
+	let totalPages = $derived(Math.ceil(filtered_list.length / itemsPerPage) || 1);
 
-		filtered_datasource = result;
-		resetPagination();
+	function updatePageData() {
+		let start = (currentPage - 1) * itemsPerPage;
+		let end = start + itemsPerPage;
+		data = filtered_list.slice(start, Math.min(end, filtered_list.length));
+	}
+
+	$effect(() => {
+		// Tự động cắt trang khi filtered_list hoặc currentPage thay đổi
+		updatePageData();
+	});
+
+	function resetPagination() {
+		currentPage = 1;
+		updatePageData();
 	}
 
 	let is_loading = $state(false);
@@ -197,13 +176,6 @@
 	setContext("selected_skus", selected_skus);
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
-
-	// 🟢 LẮNG NGHE LỌC TRỰC TIẾP TỪ NÚT BẤM CỦA HEADER
-	$effect(() => {
-		if (filter_update_key.k >= 0) {
-			applyGridFilterAndSort();
-		}
-	});
 
 	let proxyUrl = "";
 	let baseUrl = "";
@@ -239,13 +211,11 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM LỌC TÍNH DỮ LIỆU BAN ĐẦU CÁC TRANG
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
@@ -304,7 +274,6 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -324,7 +293,6 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
-				// 🚨 TRANG ĐẶT HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -338,8 +306,8 @@
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			applyGridFilterAndSort();
-			rowCount = filtered_datasource.length;
+			resetPagination();
+			rowCount = filtered_list.length;
 			grid_key++;
 		} catch (e) {
 			console.error("Lỗi applyTabFilter:", e);
@@ -370,7 +338,7 @@
 	}
 
 	function select_all() {
-		for (let x of filtered_datasource) selected_skus.add(x.sku);
+		for (let x of filtered_list) selected_skus.add(x.sku);
 		checkbox_update_key.k += 1;
 	}
 
@@ -379,7 +347,6 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO DỮ LIỆU
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -456,13 +423,12 @@
 				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
 				{#if isStockTransfer}
-					<!-- 🚚 TRANG CHUYỂN HÀNG: XUẤT FILE 6 CỘT CHUẨN SAPO -->
 					<Button type="primary" icon="mdi mdi-file-excel" onclick={async () => {
 						is_loading = true;
 						try {
 							const items = selected_skus.size > 0 
-								? filtered_datasource.filter((x) => selected_skus.has(x.sku))
-								: filtered_datasource;
+								? filtered_list.filter((x) => selected_skus.has(x.sku))
+								: filtered_list;
 							const target_label = transfer_locations.find(x => x.id === Number(c_location_id))?.label || "Kho";
 							await export_phieu_chuyen_hang_sapo(items, target_label);
 						} finally {
@@ -473,7 +439,6 @@
 					</Button>
 
 				{:else}
-					<!-- 🚨 TRANG ĐẶT HÀNG VÀ KIỂM HÀNG -->
 					<div bind:this={export_popup_parent}>
 						<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">
 							Tạo Đơn / Xuất File
@@ -486,35 +451,33 @@
 						<Popup parent={export_popup_parent} at="bottom" oncancel={() => { export_popup_shown = false; }}>
 							<div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
 								{#if isStockCheck}
-									<!-- 📋 TRANG KIỂM HÀNG -->
 									<p style="margin: 0px;"><b>Xuất phiếu kiểm hàng Sapo</b></p>
 									<Button type="primary" onclick={async () => {
 										is_loading = true;
 										try {
-											const items = selected_skus.size > 0 ? selected_skus : new Set(filtered_datasource.map(i => i.sku));
-											await export_kiem_hang_to_xlsx(items, filtered_datasource, c_location);
+											const items = selected_skus.size > 0 ? selected_skus : new Set(filtered_list.map(i => i.sku));
+											await export_kiem_hang_to_xlsx(items, filtered_list, c_location);
 										} finally {
 											is_loading = false;
 											export_popup_shown = false;
 										}
 									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : filtered_datasource.length} sản phẩm (Kiểm Hàng)
+										Xuất {selected_skus.size > 0 ? selected_skus.size : filtered_list.length} sản phẩm (Kiểm Hàng)
 									</Button>
 
 								{:else}
-									<!-- 🚨 TRANG ĐẶT HÀNG -->
 									<p style="margin: 0px;"><b>Xuất phiếu nhập hàng</b></p>
 									<Button type="primary" onclick={async () => {
 										is_loading = true;
 										try {
-											const items = selected_skus.size > 0 ? selected_skus : new Set(filtered_datasource.map(i => i.sku));
-											await export_selected_to_xlsx(items, filtered_datasource, c_location);
+											const items = selected_skus.size > 0 ? selected_skus : new Set(filtered_list.map(i => i.sku));
+											await export_selected_to_xlsx(items, filtered_list, c_location);
 										} finally {
 											is_loading = false;
 											export_popup_shown = false;
 										}
 									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : filtered_datasource.length} sản phẩm (Nhập Hàng)
+										Xuất {selected_skus.size > 0 ? selected_skus.size : filtered_list.length} sản phẩm (Nhập Hàng)
 									</Button>
 								{/if}
 							</div>
@@ -527,10 +490,9 @@
 			</div>
 		</div>
 
-		<!-- BANNER THÔNG BÁO TƯƠNG ỨNG TỪNG TRANG -->
 		{#if isStockTransfer}
 			<div style="width: 100%; padding: 8px 12px; background-color: #f0fdf4; color: #166534; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #bbf7d0;">
-				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {filtered_datasource.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}).
+				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {filtered_list.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}).
 			</div>
 		{:else if isStockCheck}
 			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
@@ -550,7 +512,7 @@
 			</div>
 		{/if}
 
-		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={applyGridFilterAndSort}>
+		<div style="height: calc(100dvh - 200px); overflow: hidden;">
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
 			{/key}
@@ -568,8 +530,8 @@
 			</div>
 
 			<div class="page-info">
-				{#if filtered_datasource.length > 0}
-					Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, filtered_datasource.length)}</b> trên tổng <b>{filtered_datasource.length}</b> kết quả
+				{#if filtered_list.length > 0}
+					Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, filtered_list.length)}</b> trên tổng <b>{filtered_list.length}</b> kết quả
 				{:else}
 					Không có kết quả nào
 				{/if}
