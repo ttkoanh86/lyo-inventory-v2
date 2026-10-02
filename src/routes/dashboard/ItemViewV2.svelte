@@ -317,11 +317,11 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ KHỞI TẠO TỐI ƯU THEO ĐÚNG BẢN CHẤT TỪNG TRANG
+	// ⚡ HÀM KHỞI TẠO SIÊU TỐC KHÔNG BỊ TREO TRÌNH DUYỆT MỚI
 	async function initialize() {
 		is_loading = true;
 		try {
-			// 1. Kéo nhanh danh sách Sản phẩm & Tồn Kho từ Sapo
+			// 1. Kéo nhanh sản phẩm & tồn kho từ Sapo
 			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
 			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
 			variant_by_id = loc_and_variant[1] || new Map();
@@ -329,24 +329,28 @@
 			c_location_id = isStockTransfer ? 789503 : Number(locations[0].id);
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
-			if (isStockCheck) {
-				// 📋 KIỂM HÀNG: Hiển thị ngay 100%, BỎ QUA hoàn toàn việc kéo đơn hàng!
-				applyTabFilter();
-				is_loading = false;
-			} else {
-				// 🚚 CHUYỂN HÀNG & 🚨 ĐẶT HÀNG: Kéo đơn hàng để tính sản lượng bán
-				let order_and_transfer_records = await Promise.all([
-					fetch_order_record(variant_by_id),
-					fetch_inventory_transfer(variant_by_id),
-				]);
-				order_records = order_and_transfer_records[0] || [];
-				transfer_records = order_and_transfer_records[1] || [];
+			// 2. TẮT MÀN HÌNH XOAY NGAY LẬP TỨC ĐỂ BẢNG HIỂN THỊ TRONG 1 GIÂY
+			applyTabFilter();
+			is_loading = false;
 
-				applyTabFilter();
-				is_loading = false;
+			// 3. KÉO NGẦM ĐƠN HÀNG Ở PHÍA SAU (KHÔNG LÀM DỪNG GIAO DIỆN)
+			if (!isStockCheck) {
+				Promise.all([
+					fetch_order_record(variant_by_id),
+					fetch_inventory_transfer(variant_by_id)
+				]).then((res) => {
+					order_records = res[0] || [];
+					transfer_records = res[1] || [];
+					// Cập nhật lại số liệu bán 30 ngày tự động sau khi kéo ngầm xong
+					applyTabFilter();
+					setLastDataUpdate();
+				}).catch((err) => {
+					console.error("Lỗi kéo đơn ngầm:", err);
+				});
+			} else {
+				setLastDataUpdate();
 			}
 
-			setLastDataUpdate();
 			low_sales_skus = get_low_sales_skus(datasource);
 		} catch (error) {
 			console.error("Lỗi khởi tạo:", error);
@@ -357,9 +361,11 @@
 	let export_popup_parent: HTMLElement;
 	let export_popup_shown = $state(false);
 
-	onMount(async () => {
-		lazyLoadStylesheets("https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css");
-		await initialize();
+	onMount(() => {
+		try {
+			lazyLoadStylesheets("https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css");
+		} catch (e) {}
+		initialize();
 	});
 </script>
 
