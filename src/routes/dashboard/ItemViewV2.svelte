@@ -102,16 +102,18 @@
 	let itemsPerPage = $state(50);
 	let totalPages = $derived(Math.ceil(display_datasource.length / itemsPerPage) || 1);
 
-	// 🟢 HÀM CẬP NHẬT PHÂN TRANG & LỌC
+	// 🟢 [VỊ TRÍ TEST 3]: HÀM LỌC CHUẨN ĐỌC HEADER POPUP
 	function updatePageData() {
+		console.log("🔍 [TEST 3 - CHẠY LỌC] Đang gọi updatePageData(). Dữ liệu mảng gốc datasource:", datasource.length, "sản phẩm.");
 		let result = [...datasource];
 
 		if (filter_by_id.size > 0) {
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// Lọc theo Checkbox nhãn hiệu/SKU đã chọn (filter.includes)
+				// 1. Lọc theo Checkbox nhãn hiệu/SKU đã chọn (filter.includes)
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
+					console.log(`📌 [TEST 3 - LỌC CHECKBOX] Cột [${fieldId}] chọn các giá trị:`, Array.from(filter.includes));
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
 						normSet.add(normalizeToEnglish(String(v || "").trim().toLowerCase()));
@@ -123,9 +125,10 @@
 					});
 				}
 
-				// Lọc theo ô từ khóa tìm kiếm (filter.value)
+				// 2. Lọc theo ô từ khóa tìm kiếm (filter.value)
 				if (filter.value !== undefined && filter.value !== null && typeof filter.value === "string" && filter.value.trim() !== "") {
 					const searchStr = normalizeToEnglish(filter.value.trim().toLowerCase());
+					console.log(`📌 [TEST 3 - LỌC TỪ KHÓA] Cột [${fieldId}] gõ: "${searchStr}"`);
 					result = result.filter((item) => {
 						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").toLowerCase());
 						return itemVal.includes(searchStr);
@@ -151,6 +154,8 @@
 		}
 
 		display_datasource = result;
+		console.log(`✅ [TEST 3 - KẾT QUẢ] Đã lọc xong! Số lượng sản phẩm hiển thị: ${display_datasource.length}/${datasource.length}`);
+
 		let start = (currentPage - 1) * itemsPerPage;
 		let end = start + itemsPerPage;
 		data = display_datasource.slice(start, Math.min(end, display_datasource.length));
@@ -190,8 +195,9 @@
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
 
-	// 🟢 LẮNG NGHE ĐÚNG TÍN HIỆU CỦA HEADER POPUP BẤM "OK" HOẶC "XÓA BỘ LỌC"
+	// 🟢 [VỊ TRÍ TEST 2]: LẮNG NGHE TÍN HIỆU BẤM "OK" TỪ POPUP HEADER UI
 	$effect(() => {
+		console.log("⚡ [TEST 2 - TÍN HIỆU POPUP] Khóa filter_update_key.k vừa thay đổi -> k =", filter_update_key.k);
 		if (filter_update_key.k >= 0) {
 			updatePageData();
 		}
@@ -231,7 +237,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM PHÂN LOẠI DỮ LIỆU CÁC TRANG & TAB
+	// 🟢 [VỊ TRÍ TEST 1]: NẠP DỮ LIỆU BAN ĐẦU CỦA SAPO
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -327,10 +333,11 @@
 				else datasource = [...tab3_items];
 			}
 
+			console.log(`📦 [TEST 1 - KHỞI TẠO DỮ LIỆU] Nạp thành công mảng datasource gốc: ${datasource.length} sản phẩm.`);
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			// 🟢 NẠP DỮ LIỆU BAN ĐẦU RA BẢNG NGAY LẬP TỨC
+			// Đổ dữ liệu ra bảng hiển thị lập tức
 			updatePageData();
 
 			rowCount = display_datasource.length;
@@ -373,7 +380,6 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ ĐƠN HÀNG
 	async function initialize() {
 		is_loading = true;
 		try {
