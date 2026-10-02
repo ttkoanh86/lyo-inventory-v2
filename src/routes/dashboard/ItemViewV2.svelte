@@ -80,7 +80,7 @@
 		{ id: "c_on_hand", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Tồn thực tế" }] },
 		{ id: "c_incoming", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Hàng đang về" }] },
 		{ id: "c_restock", hidden: isStockCheck, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL Bán 30 ngày" }] },
-		{ id: "brand", resize: true, width: 160, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] },
+		{ id: brand => brand.brand, id_key: "brand", resize: true, width: 160, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] },
 	];
 
 	const columns = all_columns.filter((col) => !col.hidden);
@@ -113,16 +113,16 @@
 		updatePageData();
 	}
 
-	// 🟢 HÀM ĐỌC ĐÚNG 100% ĐẦU RA CỦA HeaderWithSortUI
+	// 🟢 HÀM LỌC CHUẨN XÁC ĐỌC ĐÚNG ĐẦU RA CỦA HeaderWithSortUI
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
-		// 1. ĐỌC BỘ LỌC TỪ HeaderWithSortUI (Đọc thuộc tính filter.includes)
+		// 1. LỌC THEO CHECKBOX HOẶC TỪ KHÓA TÌM KIẾM TỪ POPUP
 		if (filter_by_id.size > 0) {
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// Lọc theo Checkbox đã chọn (includes dạng Set)
+				// A. Lọc theo Checkbox đã tick (HeaderWithSortUI lưu dạng Set ở filter.includes)
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
@@ -135,7 +135,7 @@
 					});
 				}
 
-				// Lọc theo từ khóa gõ tay
+				// B. Lọc theo chuỗi gõ ở ô Tìm kiếm (filter.value)
 				if (filter.value !== undefined && filter.value !== null) {
 					const searchStr = normalizeToEnglish(String(filter.value).trim().toLowerCase());
 					if (searchStr.length > 0) {
@@ -148,7 +148,7 @@
 			});
 		}
 
-		// 2. ĐỌC SẮP XẾP TỪ HeaderWithSortUI (Đọc thuộc tính sort.order)
+		// 2. SẮP XẾP BẢNG (HeaderWithSortUI lưu chiều ở sort.order: 1 hoặc -1)
 		if (sort_by_id.size > 0) {
 			sort_by_id.forEach((sort: any, fieldId: string) => {
 				if (sort && sort.order !== undefined && sort.order !== 0) {
@@ -198,13 +198,6 @@
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
 
-	// 🟢 BẮT ĐÚNG TÍN HIỆU filter_update_key KHI BẤM OK HOẶC XÓA BỘ LỌC
-	$effect(() => {
-		if (filter_update_key.k >= 0) {
-			applyGridFilterAndSort();
-		}
-	});
-
 	let proxyUrl = "";
 	let baseUrl = "";
 
@@ -239,7 +232,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM LỌC VÀ TÍNH DỮ LIỆU BẢNG TỪNG TRANG
+	// 🟢 HÀM LỌC TÍNH TOÁN THEO TRANG VÀ THỰC THI BỘ LỌC
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -379,7 +372,7 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ DỮ LIỆU
+	// ⚡ HÀM KHỞI TẠO DỮ LIỆU
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -550,7 +543,8 @@
 			</div>
 		{/if}
 
-		<div style="height: calc(100dvh - 200px); overflow: hidden;">
+		<!-- 🟢 KHI BẤM "OK" HAY BẤM BẤT KỲ ĐÂU TRÊN MÀN HÌNH NÓ SẼ BẮT LÊN VÀ TÍNH LẠI BẢNG -->
+		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={applyGridFilterAndSort}>
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
 			{/key}
