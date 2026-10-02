@@ -1,554 +1,578 @@
-<script lang="ts">
-	// @ts-ignore
-	import { Grid, Willow } from "wx-svelte-grid";
-	// @ts-ignore
-	import { Button, Select, Portal, Modal, Popup } from "wx-svelte-core";
-	// @ts-ignore
-	import { Locale } from "wx-svelte-core";
-	import {
-		calculate_restock_data,
-		get_items_need_restock,
-		get_items_has_sales,
-		get_items_out_of_stock_history,
-		get_active_products,
-		get_locations,
-		fetch_order_record,
-		type ProductV2,
-		type OrderRecordV2,
-		type TransferRecord,
-		fetch_inventory_transfer,
-		get_low_sales_skus,
-		setLastDataUpdate,
-		is_promotional_item,
-		TARGET_LOCATION_ID_GROUP
-	} from "./DataPipelineV2";
-	import SelectionCheckboxCell from "./SelectionCheckboxCell.svelte";
-	import ImageCell from "./ImageCell.svelte";
-	import NameCell from "./NameCell.svelte";
-	import { vi } from "./Localization";
-	import { onMount, setContext } from "svelte";
-	import {
-		normalizeToEnglish,
-		type Filtering,
-		type Location,
-		type Sorting,
-	} from "./Template";
-	import { lazyLoadStylesheets } from "./lazyLoadScript";
-	import LoadingThrobber from "./LoadingThrobber.svelte";
-	import SettingsModal from "./SettingsModal.svelte";
+import axios from "axios";
+import { type Location } from "./Template";
 
-	import axios from "axios";
-	import { goto } from "$app/navigation";
-	import HeaderWithSortUi from "./HeaderWithSortUI.svelte";
+// 🟢 Domain Proxy Render Singapore chính thức
+const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
 
-	import {
-		export_all_to_xlsx,
-		export_selected_to_xlsx,
-		export_kiem_hang_to_xlsx,
-		export_phieu_chuyen_hang_sapo
-	} from "./Export2Excel";
+export const TARGET_LOCATION_ID_NEW = 789505; 
+export const TARGET_LOCATION_ID_GROUP = 789505; 
+export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; 
+export const TARGET_LOCATION_ID_BA_TRIEU = 789503;       // 🟢 Kho 146 Bà Triệu
+export const TARGET_LOCATION_ID_PHAM_VAN_DONG = 789504;   // 🟢 Kho 180 Phạm Văn Đồng
 
-	// 🟢 CỜ NHẬN BIẾT CÁC TRANG
-	let { isStockCheck = false, isStockTransfer = false } = $props();
+export interface OrderRecordV2 {
+	sku: string;
+	t_unix: number;
+	quantity: number;
+	location_id: number;
+	is_composite: boolean;
+	new_record: boolean;
+	order_id: number;
+	site_id?: string;
+	fulfillment_id?: number;
+}
 
-	// 🟢 DANH SÁCH 2 KHO CHI NHÁNH CHUYỂN HÀNG
-	const transfer_locations: Location[] = [
-		{ id: 789503, label: "Kho 146 Bà Triệu", address: "Bà Triệu" },
-		{ id: 789504, label: "Kho 180 Phạm Văn Đồng", address: "Phạm Văn Đồng" }
-	];
+export interface TransferRecord {
+	sku: string;
+	t_unix: number;
+	quantity: number;
+	location_id: number;
+	new_record: boolean;
+	transfer_id: number;
+	site_id?: string;
+}
 
-	// 🟢 CẤU TRÚC CỘT THEO ĐÚNG THỨ TỰ YÊU CẦU
-	const all_columns = [
-		{ id: "id", hidden: true },
-		{ id: "selected", cell: SelectionCheckboxCell, width: 36 },
-		{ id: "sku", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "SKU" }] },
-		{ id: "name", resize: true, width: 260, cell: NameCell, header: [{ cell: HeaderWithSortUi, text: "Tên sản phẩm" }] },
-		{ id: "image", header: "Ảnh", cell: ImageCell },
-		{ id: "image_path", hidden: true },
+interface InventoryLevel {
+	on_hand: number;
+	incoming: number;
+	available: number;
+	sold: number;
+}
 
-		// 🚚 CỘT CHÍNH CỦA CHUYỂN HÀNG
-		{ id: "c_transfer_suggest", hidden: !isStockTransfer, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "🚨 SL CẦN\nCHUYỂN" }] },
-		{ id: "c_on_hand_group", hidden: !isStockTransfer, resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Tồn Kho\nGroup" }] },
+export interface ProductV2 {
+	is_composite: boolean;
+	product_id: number;
+	variant_id: number;
+	sku: string;
+	brand: string;
+	barcode: string;
+	image_path: string;
+	c_restock_third: number;
+	c_restock_half: number;
+	c_restock: number;
+	c_on_hand: number;
+	c_incoming: number;
+	c_available: number;
+	name: string;
+	name_normalized: string;
+	import_price: number;
+	retail_price: number;
+	retail_price_ecomm: number;
+	inventory_level_by_location: Map<number, InventoryLevel>;
+	composite_item_quantity_by_variant_id?: Map<number, number>;
+	order_history_by_location: Set<number>;
+}
 
-		// CỘT DÀNH CHO ĐẶT HÀNG
-		{ id: "c_restock_third", hidden: isStockCheck || isStockTransfer, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/3 tháng)" }] },
-		{ id: "c_restock_half", hidden: isStockCheck || isStockTransfer, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL đặt\n(1/2 tháng)" }] },
+export function obtain_access_token(): string {
+	return localStorage.getItem("token") || "";
+}
 
-		// CỘT ĐỐI SOÁT CHI NHÁNH ĐƯỢC CHỌN
-		{ id: "c_on_hand", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Tồn thực tế" }] },
-		{ id: "c_incoming", resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Hàng đang về" }] },
-		{ id: "c_restock", hidden: isStockCheck, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "SL Bán 30 ngày" }] },
-		{ id: "brand", resize: true, width: 160, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] },
-	];
+export type RecordItem = OrderRecordV2 | TransferRecord;
 
-	const columns = all_columns.filter((col) => !col.hidden);
+export function parseSapoDate(dateStr: string): number {
+	if (!dateStr) return 0;
+	const isoStr = dateStr.trim().replace(" ", "T");
+	const parsed = Date.parse(isoStr);
+	if (!isNaN(parsed) && parsed > 0) return parsed;
+	return new Date(dateStr).getTime() || 0;
+}
 
-	const filter_by_id: Map<string, Filtering> = $state(new Map());
-	const sort_by_id: Map<string, Sorting> = $state(new Map());
-	let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
+// 🟢 BỘ LỌC TỰ ĐỘNG CHẶN HÀNG KHUYẾN MÃI, MÃ ẢO & CÁC MÃ SKU ĐẶC BIỆT
+export function is_promotional_item(brand: string, name: string = "", sku: string = "") {
+	const br = (brand || "").trim().toLowerCase();
+	const nm = (name || "").trim().toLowerCase();
+	const clean_sku = (sku || "").trim().toUpperCase();
 
-	setContext("filterbyid", filter_by_id);
-	setContext("sortbyid", sort_by_id);
-	setContext("updatekeys", updateKeys);
-
-	const responsive_fields = { 800: { columns: columns } };
-
-	let data: any[] = $state([]);
-	let currentPage = $state(1);
-	let itemsPerPage = $state(50);
-	let totalPages = $derived(Math.ceil(datasource.length / itemsPerPage) || 1);
-
-	function updatePageData() {
-		let start = (currentPage - 1) * itemsPerPage;
-		let end = start + itemsPerPage;
-		data = datasource.slice(start, Math.min(end, datasource.length));
-	}
-
-	function resetPagination() {
-		currentPage = 1;
-		updatePageData();
-	}
-
-	let is_loading = $state(false);
-	let is_settings_open = $state(false);
-	let datasource: any[] = $state([]);
-
-	let tab1_items: ProductV2[] = [];
-	let tab2_items: ProductV2[] = [];
-	let tab3_items: ProductV2[] = [];
-	let activeTab: 'need_restock' | 'has_sales' | 'out_of_stock' = $state('need_restock');
-
-	let variant_by_id = new Map<number, ProductV2>();
-	let order_records: OrderRecordV2[] = [];
-	let transfer_records: TransferRecord[] = [];
-	
-	let locations: Location[] = $state([
-		{ id: TARGET_LOCATION_ID_GROUP, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
-		{ id: 789501, label: "Chi nhánh trung tâm", address: "Trung tâm" }
+	// 🚫 1. Danh sách 7 mã SKU cấm tuyệt đối (Đã bổ sung LYO8946)
+	const blocked_skus = new Set([
+		"LYO9566",
+		"LYO9131",
+		"LYO6928",
+		"LYO9874",
+		"LYO8946",
+		"LYO9858",
+		"LYO9873"
 	]);
 
-	let c_location_id: number = $state(isStockTransfer ? 789503 : TARGET_LOCATION_ID_GROUP);
-	let c_location: Location = $state(locations[0]);
-	let rowCount = $state(0);
-	let grid_key = $state(0);
-
-	let selected_skus = $state(new Set<string>());
-	let checkbox_update_key = $state({ k: 0 });
-	let filter_update_key = $state({ k: 0 });
-	setContext("selected_skus", selected_skus);
-	setContext("checkbox_key", checkbox_update_key);
-	setContext("filter_update_key", filter_update_key);
-	let proxyUrl = "";
-	let baseUrl = "";
-
-	let low_sales_skus: Set<string> = $state(new Set<string>());
-
-	if (import.meta.env.MODE === "development") {
-		proxyUrl = "http://localhost:8080/api";
-		baseUrl = "http://localhost:8080";
-	} else {
-		proxyUrl = "https://lyo-inventory-proxy.onrender.com/api";
-		baseUrl = "https://lyo-inventory-proxy.onrender.com";
+	if (blocked_skus.has(clean_sku)) {
+		return true;
 	}
 
-	export function obtain_access_token(): string {
-		let token = localStorage.getItem("token") || localStorage.getItem("api_token") || sessionStorage.getItem("token");
-		if (!token) {
-			token = "b3e0a88853e2496c9641800adb465097";
-			localStorage.setItem("token", token);
+	// 🚫 2. Chặn theo nhãn hiệu khuyến mãi
+	if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) {
+		return true;
+	}
+
+	// 🚫 3. Chặn theo tên combo, hàng tặng, mã ảo
+	if (
+		nm.includes("combo") || 
+		nm.includes("- sale") || 
+		nm.includes("-sale") || 
+		nm.includes("sale ") || 
+		nm.includes("(tặng)") || 
+		nm.includes("kđh")
+	) {
+		return true;
+	}
+
+	return false;
+}
+
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY CHUẨN XÁC THEO TỪNG KHO CHI NHÁNH
+export function calculate_restock_data(
+	records: RecordItem[],
+	variant_by_id: Map<number, ProductV2>,
+	location_id: number,
+) {
+	const active_loc_id = Number(location_id) || TARGET_LOCATION_ID_GROUP;
+	records.sort((a, b) => b.t_unix - a.t_unix);
+
+	let sales_by_sku = new Map<string, number>();
+
+	const now_ts = new Date().getTime();
+	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
+	const min_valid_ts = now_ts - thirty_days_ts;
+
+	for (let [_, variant] of variant_by_id) {
+		if (variant.sku && !variant.is_composite) {
+			sales_by_sku.set(variant.sku.trim().toUpperCase(), 0);
 		}
-		return "Bearer " + token.replace("Bearer ", "").trim();
 	}
 
-	let grid_api = $state();
-	const revoke_broadcast_channel = new BroadcastChannel("revoke");
-	async function logout() {
-		try {
-			await axios.delete(`${baseUrl}/revoke`, { headers: { Authorization: obtain_access_token() } });
-		} catch (e) {}
-		localStorage.clear();
-		sessionStorage.clear();
-		revoke_broadcast_channel.postMessage("revoke");
-		goto("/authentication");
+	for (let record of records) {
+		const clean_sku = (record.sku || "").trim().toUpperCase();
+		const rec_loc = Number(record.location_id);
+
+		// Bắt chính xác đơn thuộc kho chi nhánh đang chọn
+		if (clean_sku && rec_loc === active_loc_id && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
+			const current_sales = sales_by_sku.get(clean_sku) || 0;
+			sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+		}
 	}
 
-	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU
-	function applyTabFilter() {
+	variant_by_id.forEach((variant) => {
+		if (variant.is_composite || is_promotional_item(variant.brand, variant.name, variant.sku)) {
+			variant.c_restock = 0;
+			return;
+		}
+
+		const inventory = variant.inventory_level_by_location.get(active_loc_id) || variant.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
+
+		variant.c_available = inventory ? Math.max(0, Math.round(inventory.available ?? inventory.on_hand ?? 0)) : 0;
+		variant.c_incoming = inventory ? Math.max(0, Math.round(inventory.incoming ?? 0)) : 0;
+		variant.c_on_hand = variant.c_available;
+
+		const clean_sku = (variant.sku || "").trim().toUpperCase();
+		const actual_sales = sales_by_sku.get(clean_sku) ?? 0;
+
+		variant.c_restock = Math.round(actual_sales);
+	});
+
+	return get_items_need_restock(variant_by_id, active_loc_id);
+}
+
+export function get_items_need_restock(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
+	let result: ProductV2[] = [];
+	variant_by_id.forEach((variant) => {
+		if (variant.is_composite || is_promotional_item(variant.brand, variant.name, variant.sku)) return;
+
+		const sales = variant.c_restock || 0;
+		const current_has = variant.c_available + variant.c_incoming;
+
+		if (current_has <= 0.5 * sales && sales > 0) {
+			variant.c_restock_half = Math.max(0, Math.round(0.5 * sales - current_has));
+			variant.c_restock_third = Math.max(0, Math.round((1 / 3) * sales - current_has));
+			result.push(variant);
+		}
+	});
+	return result;
+}
+
+export function get_items_has_sales(variant_by_id: Map<number, ProductV2>): ProductV2[] {
+	let result: ProductV2[] = [];
+	variant_by_id.forEach((variant) => {
+		if (variant.is_composite || is_promotional_item(variant.brand, variant.name, variant.sku)) return;
+
+		const sales = variant.c_restock || 0;
+		const current_has = variant.c_available + variant.c_incoming;
+
+		if (sales > 0 && current_has > 0.5 * sales) {
+			result.push(variant);
+		}
+	});
+	return result;
+}
+
+export function get_items_out_of_stock_history(variant_by_id: Map<number, ProductV2>, target_location_id: number): ProductV2[] {
+	let result: ProductV2[] = [];
+	variant_by_id.forEach((variant) => {
+		if (variant.is_composite || is_promotional_item(variant.brand, variant.name, variant.sku)) return;
+
+		const sales = variant.c_restock || 0;
+		const current_has = variant.c_available + variant.c_incoming;
+		const is_valid_product = (variant.retail_price > 0) && (variant.image_path && variant.image_path.trim().length > 0);
+
+		if (sales === 0 && current_has === 0 && is_valid_product) {
+			variant.c_restock_half = 0;
+			variant.c_restock_third = 0;
+			result.push(variant);
+		}
+	});
+	return result;
+}
+
+export async function get_locations(): Promise<Location[]> {
+	return [
+		{ id: TARGET_LOCATION_ID_GROUP, label: "CÔNG TY TNHH LYO GROUP", address: "Mặc định" },
+		{ id: TARGET_LOCATION_ID_TRUNG_TAM, label: "Chi nhánh trung tâm", address: "Trung tâm" }
+	];
+}
+
+export function isFirstTime() { return true; }
+export function setLastDataUpdate() { localStorage.setItem("last_data_update_v50", new Date().getTime().toString()); }
+export function getLastDataUpdateTUnix() { return Number(localStorage.getItem("last_data_update_v50")); }
+export function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+export function normalizeString(input: string): string {
+	if (!input) return "";
+	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
+}
+
+// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC
+export async function get_active_products() {
+	let p_variant_by_ids: Map<number, ProductV2> = new Map();
+	let running = true;
+	let page = 1;
+
+	while (running) {
 		try {
-			const selectedLocId = Number(c_location_id);
+			const resp = await axios.get(`${proxyUrl}/admin/products.json`, {
+				params: { limit: 250, page: page, status: "active" },
+			});
 
-			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG
-				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
+			if (resp.status === 200) {
+				const products = resp.data?.products || [];
+				if (products.length === 0) { running = false; break; }
 
-				let transfer_list: any[] = [];
-				variant_by_id.forEach((v) => {
-					// 🚫 CHẶN MÃ SKU CẤM VÀ COMBO
-					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
+				products.forEach((product: any) => {
+					if (product.status !== "active") return;
 
-					// 1. Tồn Kho Group (789505)
-					let stock_group = 0;
-					const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
-					if (inv_group) {
-						stock_group = Math.max(0, Math.round(inv_group.available ?? inv_group.on_hand ?? 0));
-					} else {
-						for (let [locId, inv] of v.inventory_level_by_location) {
-							if (locId !== 789503 && locId !== 789504) {
-								stock_group = Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0));
-								if (stock_group > 0) break;
-							}
+					const brand_name = (product.brand || "").trim();
+					const prod_name = (product.name || "").trim();
+
+					const is_prod_composite = product.product_type === "composite";
+
+					product.variants.forEach((variant: any) => {
+						if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
+
+						const full_var_name = variant.name || prod_name;
+						const var_sku = (variant.sku || "").trim().toUpperCase();
+
+						if (is_promotional_item(brand_name, full_var_name, var_sku)) return;
+
+						let p_variant: ProductV2 = {
+							is_composite: false,
+							brand: brand_name || "<Không xác định>",
+							variant_id: variant.id,
+							product_id: product.id,
+							sku: var_sku,
+							barcode: (variant.barcode || var_sku).trim().toUpperCase(),
+							c_restock: 0, c_restock_half: 0, c_restock_third: 0, image_path: "",
+							c_on_hand: 0, c_incoming: 0, c_available: 0,
+							name: full_var_name, name_normalized: normalizeString(full_var_name),
+							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
+							inventory_level_by_location: new Map(),
+							composite_item_quantity_by_variant_id: new Map(),
+							order_history_by_location: new Set<number>()
+						};
+
+						if (variant.inventories && variant.inventories.length > 0) {
+							variant.inventories.forEach((inventory: any) => {
+								const loc_id = Number(inventory.location_id);
+								p_variant.inventory_level_by_location.set(loc_id, {
+									on_hand: Number(inventory.on_hand || 0),
+									incoming: Number(inventory.incoming || 0),
+									available: Number(inventory.available ?? inventory.on_hand ?? 0),
+									sold: 0,
+								});
+							});
 						}
-					}
 
-					if (stock_group <= 0) return;
+						if (variant.images && variant.images[0]) { p_variant.image_path = variant.images[0].full_path; }
+						p_variant_by_ids.set(p_variant.variant_id, p_variant);
+					});
+				});
+				page++;
+				await sleep(10);
+			} else { running = false; }
+		} catch (e: any) {
+			console.error("[LỖI KÉO SẢN PHẨM]:", e);
+			running = false;
+		}
+	}
+	return p_variant_by_ids;
+}
 
-					// 2. Tồn thực tế & Hàng đang về tại Chi nhánh nhận
-					const inv_target = v.inventory_level_by_location.get(selectedLocId);
-					const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
-					const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
+// 🟢 HÀM ĐỌC INDEXEDDB AN TOÀN
+export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
+	return new Promise((resolve) => {
+		try {
+			const request = indexedDB.open("LYOInventoryDB_V50", 1);
+			request.onupgradeneeded = function (event) {
+				const db = (event.target as IDBOpenDBRequest).result;
+				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+					const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
+					store.createIndex("type", "type");
+					store.createIndex("site_id", "site_id");
+				}
+			};
+			request.onsuccess = function () {
+				const db = request.result;
+				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+					db.close();
+					resolve([]);
+					return;
+				}
+				try {
+					const tx = db.transaction("OrderRecordsV2", "readonly");
+					const store = tx.objectStore("OrderRecordsV2");
+					const getAllReq = store.getAll();
+					getAllReq.onsuccess = function () {
+						db.close();
+						resolve(getAllReq.result || []);
+					};
+					getAllReq.onerror = function () { db.close(); resolve([]); };
+				} catch (err) {
+					db.close();
+					resolve([]);
+				}
+			};
+			request.onerror = function () { resolve([]); };
+		} catch (e) {
+			resolve([]);
+		}
+	});
+}
 
-					const current_total_branch = stock_target + incoming_target;
-					const sales_30d = v.c_restock || 0;
+// 🟢 HÀM GHI INDEXEDDB AN TOÀN
+export async function updateIndexedDB(records: RecordItem[]) {
+	return new Promise<void>((resolve) => {
+		try {
+			const request = indexedDB.open("LYOInventoryDB_V50", 1);
+			request.onupgradeneeded = function (event) {
+				const db = (event.target as IDBOpenDBRequest).result;
+				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+					const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
+					store.createIndex("type", "type");
+					store.createIndex("site_id", "site_id");
+				}
+			};
+			request.onsuccess = function () {
+				const db = request.result;
+				const tx = db.transaction("OrderRecordsV2", "readwrite");
+				const store = tx.objectStore("OrderRecordsV2");
+				records.forEach((r) => {
+					store.put({
+						t_unix: r.t_unix,
+						quantity: r.quantity,
+						sku: (r.sku || "").trim().toUpperCase(),
+						location_id: Number(r.location_id),
+						is_composite: (r as OrderRecordV2).is_composite || false,
+						order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
+						site_id: r.site_id || "site_new",
+						type: (r as OrderRecordV2).order_id ? "order" : "transfer",
+					});
+				});
+				tx.oncomplete = function () { db.close(); resolve(); };
+			};
+			request.onerror = function () { resolve(); };
+		} catch (e) {
+			resolve();
+		}
+	});
+}
 
-					let raw_need_transfer = 0;
+export function get_low_sales_skus(p_variants: ProductV2[]) {
+	let _r = new Set<string>();
+	p_variants.forEach((v) => { if (v.c_restock < 20) _r.add(v.sku); });
+	return _r;
+}
 
-					if (sales_30d > 0) {
-						// 🟢 CÓ BÁN 30 NGÀY: Thiếu hụt so với 50% sản lượng bán
-						if (current_total_branch < 0.5 * sales_30d) {
-							raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
+// 🟢 HÀM KÉO ĐƠN HÀNG TỐI ƯU CÓ BỘ LỌC CỤ THỂ THEO KHO (CHỈ KÉO KHO BÀ TRIỆU & PHẠM VĂN ĐỒNG)
+export async function fetch_order_record(
+	variant_by_id: Map<number, ProductV2>,
+	target_location_ids: number[] = [] // Truyền danh sách ID Kho cần lấy
+) {
+	let existing_keys = new Set<string>();
+	
+	let stored_records = await getStoredOrderRecords();
+	let max_stored_ts = 0;
+
+	stored_records.forEach((r) => {
+		const record_key = `ORD_${r.order_id}_${r.sku}_${r.location_id}`;
+		existing_keys.add(record_key);
+		if (r.t_unix > max_stored_ts) max_stored_ts = r.t_unix;
+	});
+
+	const now_ts = new Date().getTime();
+	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
+	const min_valid_ts = now_ts - thirty_days_ts;
+
+	const fetch_since_ts = max_stored_ts > min_valid_ts ? max_stored_ts : min_valid_ts;
+
+	let new_records: RecordItem[] = [];
+	let page = 1;
+	let running = true;
+
+	const allowed_loc_set = target_location_ids.length > 0 ? new Set(target_location_ids) : null;
+
+	while (running) {
+		try {
+			const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+				params: { limit: 250, page: page, order_by: "created_on desc" }
+			});
+
+			if (resp.status === 200) {
+				const j = resp.data || {};
+				const orders = j.orders || [];
+
+				if (orders.length === 0) { running = false; break; }
+
+				let reached_existing_date = false;
+
+				for (const order of orders) {
+					if (order.status !== "cancelled") {
+						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
+
+						// 🟢 NẾU TRUYỀN BỘ LỌC KHO: BỎ QUA TOÀN BỘ ĐƠN CỦA KHO KHÔNG LIÊN QUAN (NHƯ KHO GROUP)
+						if (allowed_loc_set && !allowed_loc_set.has(actual_loc_id)) {
+							continue;
 						}
-					} else {
-						// 🟢 KHÔNG BÁN 30 NGÀY: 
-						// Chỉ mang lên 2 cái nếu TỒN CHI NHÁNH BẰNG 0 VÀ TỒN KHO GROUP >= 6 (>= 3x2)
-						if (current_total_branch === 0 && stock_group >= 6) {
-							raw_need_transfer = 2;
+
+						const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
+						const order_ts = parseSapoDate(date_str);
+
+						if (order_ts > 0 && order_ts <= fetch_since_ts && stored_records.length > 0) {
+							reached_existing_date = true;
+							break;
 						}
-					}
 
-					if (raw_need_transfer > 0) {
-						let suggest_transfer = Math.min(stock_group, raw_need_transfer);
+						if (order_ts >= min_valid_ts) {
+							const line_items = order.order_line_items || order.line_items || order.items || [];
+							line_items.forEach((line_item: any, index: number) => {
+								const qty = Number(line_item.quantity) || 0;
+								if (qty > 0) {
+									const variant_obj = variant_by_id.get(line_item.variant_id);
+									const line_id = line_item.id || index;
 
-						if (suggest_transfer > 0) {
-							transfer_list.push({
-								...v,
-								c_on_hand_group: stock_group,
-								c_on_hand: stock_target,
-								c_incoming: incoming_target,
-								c_transfer_suggest: suggest_transfer
+									if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
+										line_item.composite_item_parts.forEach((part: any) => {
+											const sub_variant = variant_by_id.get(part.variant_id);
+											const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim().toUpperCase();
+											if (clean_sub_sku) {
+												const total_sub_qty = qty * (Number(part.quantity) || 1);
+												const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+												if (!existing_keys.has(record_key)) {
+													new_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+													existing_keys.add(record_key);
+												}
+											}
+										});
+									} else if (variant_obj?.is_composite && variant_obj?.composite_item_quantity_by_variant_id && variant_obj.composite_item_quantity_by_variant_id.size > 0) {
+										variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
+											const sub_variant = variant_by_id.get(comp_variant_id);
+											if (sub_variant && sub_variant.sku) {
+												const clean_sub_sku = sub_variant.sku.trim().toUpperCase();
+												const total_sub_qty = qty * comp_qty;
+												const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
+												if (!existing_keys.has(record_key)) {
+													new_records.push({ sku: clean_sub_sku, t_unix: order_ts, quantity: total_sub_qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+													existing_keys.add(record_key);
+												}
+											}
+										});
+									} else {
+										const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim().toUpperCase();
+										if (raw_sku) {
+											const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
+											if (!existing_keys.has(record_key)) {
+												new_records.push({ sku: raw_sku, t_unix: order_ts, quantity: qty, location_id: actual_loc_id, is_composite: false, new_record: true, order_id: order.id } as OrderRecordV2);
+												existing_keys.add(record_key);
+											}
+										}
+									}
+								}
 							});
 						}
 					}
-				});
+				}
 
-				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
+				if (reached_existing_date) {
+					running = false;
+					break;
+				}
 
-			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG
-				let stock_check_list: ProductV2[] = [];
-				variant_by_id.forEach((v) => {
-					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
+				page++;
+				await sleep(10);
+			} else { running = false; }
+		} catch (e: any) {
+			console.error("[LỖI KÉO ĐƠN]:", e);
+			running = false;
+		}
+	}
 
-					const inv = v.inventory_level_by_location.get(selectedLocId);
-					const stock = inv ? Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0)) : 0;
-					const incoming = inv ? Math.max(0, Math.round(inv.incoming ?? 0)) : 0;
+	if (new_records.length > 0) {
+		await updateIndexedDB(new_records);
+	}
 
-					v.c_available = stock;
-					v.c_on_hand = stock;
-					v.c_incoming = incoming;
+	setLastDataUpdate();
+	return [...stored_records, ...new_records] as OrderRecordV2[];
+}
 
-					if (stock > 0 && stock <= 20) {
-						stock_check_list.push(v);
-					}
-				});
-				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
+export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
 
-			} else {
-				// 🚨 TRANG ĐẶT HÀNG
-				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
-				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
-				tab2_items = get_items_has_sales(variant_by_id);
-				tab3_items = get_items_out_of_stock_history(variant_by_id, selectedLocId);
+// 🟢 HÀM ĐẨY TRỰC TIẾP PHIẾU CHUYỂN HÀNG LÊN SAPO
+export async function create_sapo_stock_transfer(
+	items: ProductV2[], 
+	target_location_id: number
+) {
+	try {
+		const line_items = items.map((item: any) => ({
+			variant_id: item.variant_id,
+			sku: item.sku,
+			name: item.name,
+			qty: item.c_transfer_suggest || 0
+		})).filter(x => x.qty > 0);
 
-				if (activeTab === 'need_restock') datasource = [...tab1_items];
-				else if (activeTab === 'has_sales') datasource = [...tab2_items];
-				else datasource = [...tab3_items];
+		if (line_items.length === 0) {
+			alert("Không có sản phẩm nào có số lượng chuyển > 0!");
+			return false;
+		}
+
+		const payload = {
+			stock_transfer: {
+				from_location_id: TARGET_LOCATION_ID_GROUP,
+				to_location_id: Number(target_location_id),
+				note: "Đơn chuyển hàng tự động từ LYO Dự Báo",
+				stock_transfer_line_items: line_items.map(i => ({
+					variant_id: i.variant_id,
+					quantity: i.qty
+				}))
 			}
+		};
 
-			updateKeys.dsource = datasource as any;
-			updateKeys.headerSorterKey++;
-			rowCount = datasource.length;
-			resetPagination();
-			grid_key++;
-		} catch (e) {
-			console.error("Lỗi applyTabFilter:", e);
+		const resp = await axios.post(`${proxyUrl}/admin/stock_transfers.json`, payload);
+		
+		if (resp.status === 200 || resp.status === 201) {
+			alert(`✅ Đã tạo thành công Phiếu chuyển hàng trên Sapo với ${line_items.length} sản phẩm!`);
+			return true;
+		} else {
+			alert("Lỗi khi tạo phiếu chuyển hàng trên Sapo!");
+			return false;
 		}
+	} catch (e: any) {
+		console.error("Lỗi POST stock_transfers:", e);
+		alert("Không thể kết nối API Sapo để tạo đơn chuyển hàng. Vui lòng dùng nút Xuất Excel!");
+		return false;
 	}
-
-	function switchTab(tab: 'need_restock' | 'has_sales' | 'out_of_stock') {
-		activeTab = tab;
-		selected_skus.clear();
-		filter_by_id.clear();
-		sort_by_id.clear();
-		applyTabFilter();
-	}
-
-	function handle_location_update() {
-		is_loading = true;
-		try {
-			applyTabFilter();
-			low_sales_skus = get_low_sales_skus(datasource);
-			selected_skus.clear();
-			filter_by_id.clear();
-			sort_by_id.clear();
-			filter_update_key.k += 1;
-			c_location = (isStockTransfer ? transfer_locations : locations).find((v) => Number(v.id) === Number(c_location_id)) || locations[0];
-		} finally {
-			is_loading = false;
-		}
-	}
-
-	function select_all() {
-		for (let x of datasource) selected_skus.add(x.sku);
-		checkbox_update_key.k += 1;
-	}
-
-	function deselect_all() {
-		selected_skus.clear();
-		checkbox_update_key.k += 1;
-	}
-
-	// ⚡ HÀM KHỞI TẠO ĐÃ ĐƯỢC TỐI ƯU CHUẨN NGHIỆP VỤ THEO Ý DÌ
-	async function initialize() {
-		is_loading = true;
-		try {
-			// 1. Kéo sản phẩm & Tồn kho từ Sapo cho tất cả các trang
-			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
-			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
-			variant_by_id = loc_and_variant[1] || new Map();
-
-			c_location_id = isStockTransfer ? 789503 : Number(locations[0].id);
-			c_location = (isStockTransfer ? transfer_locations : locations)[0];
-
-			if (isStockCheck || isStockTransfer) {
-				// 🟢 CHUYỂN HÀNG VÀ KIỂM HÀNG: HOÀN TOÀN BỎ QUA IndexedDB VÀ fetch_order_record
-				// Bảng hiển thị tức thì 100% không sợ đơ/xoay trên máy mới!
-				applyTabFilter();
-			} else {
-				// 🚨 ĐẶT HÀNG: MỚI BẮT ĐẦU CHẠY KÉO ĐƠN VÀ TRUY VẤN IndexedDB
-				let order_and_transfer_records = await Promise.all([
-					fetch_order_record(variant_by_id),
-					fetch_inventory_transfer(variant_by_id),
-				]);
-				order_records = order_and_transfer_records[0] || [];
-				transfer_records = order_and_transfer_records[1] || [];
-
-				applyTabFilter();
-			}
-
-			setLastDataUpdate();
-			low_sales_skus = get_low_sales_skus(datasource);
-		} catch (error) {
-			console.error("Lỗi khởi tạo:", error);
-		} finally {
-			is_loading = false;
-		}
-	}
-
-	let export_popup_parent: HTMLElement;
-	let export_popup_shown = $state(false);
-
-	onMount(() => {
-		try {
-			lazyLoadStylesheets("https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css");
-		} catch (e) {}
-		initialize();
-	});
-</script>
-
-<Locale words={vi}>
-	<Willow>
-		<div style="display: flex; gap: 10px; padding-bottom: 10px">
-			<div>
-				<Button onclick={initialize} type="primary" icon="mdi mdi-refresh"></Button>
-			</div>
-			<div style="width: 280px; display:flex; align-items: center">
-				{#if isStockTransfer}
-					<span>Kho nhận:&nbsp;</span>
-				{:else}
-					<span>Kho:&nbsp;</span>
-				{/if}
-				<Select 
-					bind:value={c_location_id} 
-					options={isStockTransfer ? transfer_locations : locations} 
-					onchange={handle_location_update} 
-					width="100" 
-					placeholder="Chọn kho..."
-				></Select>
-			</div>
-			<div style="display: flex; gap: 5px">
-				<Button onclick={select_all}>Chọn tất cả</Button>
-				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
-
-				{#if isStockTransfer}
-					<!-- 🚚 TRANG CHUYỂN HÀNG: XUẤT FILE 6 CỘT CHUẨN SAPO -->
-					<Button type="primary" icon="mdi mdi-file-excel" onclick={async () => {
-						is_loading = true;
-						try {
-							const items = selected_skus.size > 0 
-								? datasource.filter((x) => selected_skus.has(x.sku))
-								: datasource;
-							const target_label = transfer_locations.find(x => x.id === Number(c_location_id))?.label || "Kho";
-							await export_phieu_chuyen_hang_sapo(items, target_label);
-						} finally {
-							is_loading = false;
-						}
-					}}>
-						Xuất File Chuyển Hàng Sapo (.xlsx)
-					</Button>
-
-				{:else}
-					<!-- 🚨 TRANG ĐẶT HÀNG VÀ KIỂM HÀNG -->
-					<div bind:this={export_popup_parent}>
-						<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">
-							Tạo Đơn / Xuất File
-						</Button>
-					</div>
-				{/if}
-
-				{#if export_popup_shown && !isStockTransfer}
-					<Portal>
-						<Popup parent={export_popup_parent} at="bottom" oncancel={() => { export_popup_shown = false; }}>
-							<div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
-								{#if isStockCheck}
-									<!-- 📋 TRANG KIỂM HÀNG -->
-									<p style="margin: 0px;"><b>Xuất phiếu kiểm hàng Sapo</b></p>
-									<Button type="primary" onclick={async () => {
-										is_loading = true;
-										try {
-											const items = selected_skus.size > 0 ? selected_skus : new Set(datasource.map(i => i.sku));
-											await export_kiem_hang_to_xlsx(items, datasource, c_location);
-										} finally {
-											is_loading = false;
-											export_popup_shown = false;
-										}
-									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : datasource.length} sản phẩm (Kiểm Hàng)
-									</Button>
-
-								{:else}
-									<!-- 🚨 TRANG ĐẶT HÀNG -->
-									<p style="margin: 0px;"><b>Xuất phiếu nhập hàng</b></p>
-									<Button type="primary" onclick={async () => {
-										is_loading = true;
-										try {
-											const items = selected_skus.size > 0 ? selected_skus : new Set(datasource.map(i => i.sku));
-											await export_selected_to_xlsx(items, datasource, c_location);
-										} finally {
-											is_loading = false;
-											export_popup_shown = false;
-										}
-									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : datasource.length} sản phẩm (Nhập Hàng)
-									</Button>
-								{/if}
-							</div>
-						</Popup>
-					</Portal>
-				{/if}
-
-				<Button icon="mdi mdi-cog" onclick={() => { is_settings_open = true; }}></Button>
-				<Button icon="mdi mdi-logout" onclick={logout} type="danger"></Button>
-			</div>
-		</div>
-
-		<!-- BANNER THÔNG BÁO TƯƠNG ỨNG TỪNG TRANG -->
-		{#if isStockTransfer}
-			<div style="width: 100%; padding: 8px 12px; background-color: #f0fdf4; color: #166534; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #bbf7d0;">
-				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {datasource.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}) - Điều kiện: Tồn Group &ge; 3x SL Cần chuyển.
-			</div>
-		{:else if isStockCheck}
-			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
-				📋 DỮ LIỆU KIỂM KHO: Đang hiển thị sản phẩm thuộc kho ({c_location?.label || 'LYO GROUP'}) có Tồn kho (0 &lt; Tồn kho &le; 20).
-			</div>
-		{:else}
-			<div class="tab-filter-container">
-				<button class="tab-btn {activeTab === 'need_restock' ? 'active-red' : ''}" onclick={() => switchTab('need_restock')}>
-					🚨 Cần đặt ngay ({tab1_items.length})
-				</button>
-				<button class="tab-btn {activeTab === 'has_sales' ? 'active-green' : ''}" onclick={() => switchTab('has_sales')}>
-					📦 Check nếu ôm hàng ({tab2_items.length})
-				</button>
-				<button class="tab-btn {activeTab === 'out_of_stock' ? 'active-orange' : ''}" onclick={() => switchTab('out_of_stock')}>
-					⚠️ Hàng bị đứt ({tab3_items.length})
-				</button>
-			</div>
-		{/if}
-
-		<div style="height: calc(100dvh - 200px); overflow: hidden;">
-			{#key grid_key}
-				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
-			{/key}
-		</div>
-
-		<div class="pagination-container">
-			<div class="page-size">
-				<span>Hiển thị</span>
-				<select bind:value={itemsPerPage} onchange={resetPagination}>
-					<option value={20}>20</option>
-					<option value={50}>50</option>
-					<option value={100}>100</option>
-				</select>
-				<span>kết quả</span>
-			</div>
-
-			<div class="page-info">
-				{#if datasource.length > 0}
-					Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, datasource.length)}</b> trên tổng <b>{datasource.length}</b> kết quả
-				{:else}
-					Không có kết quả nào
-				{/if}
-			</div>
-
-			<div class="page-controls">
-				<button disabled={currentPage === 1} onclick={() => { currentPage--; updatePageData(); }}>&lt;</button>
-				{#each Array(totalPages) as _, i}
-					{#if i + 1 === 1 || i + 1 === totalPages || (i + 1 >= currentPage - 1 && i + 1 <= currentPage + 1)}
-						<button class:active={currentPage === i + 1} onclick={() => { currentPage = i + 1; updatePageData(); }}>
-							{i + 1}
-						</button>
-					{/if}
-				{/each}
-				<button disabled={currentPage === totalPages} onclick={() => { currentPage++; updatePageData(); }}>&gt;</button>
-			</div>
-		</div>
-
-		{#if is_loading}
-			<Portal>
-				<Modal buttons={[]}>
-					<div style="display:flex; flex-direction:column; align-items: center;">
-						<LoadingThrobber />
-						<p style="margin-bottom: 0px;">Đang tải dữ liệu...</p>
-					</div>
-				</Modal>
-			</Portal>
-		{/if}
-
-		{#if is_settings_open}
-			<Portal>
-				<SettingsModal bind:shown={is_settings_open}></SettingsModal>
-			</Portal>
-		{/if}
-	</Willow>
-</Locale>
-
-<style>
-	.tab-filter-container { display: flex; gap: 10px; margin-bottom: 10px; }
-	.tab-btn { padding: 8px 16px; font-size: 13px; font-weight: bold; border-radius: 6px; border: 1px solid #ccc; background: #f5f5f5; color: #333; cursor: pointer; }
-	.tab-btn.active-red { background-color: #d92d20; color: #ffffff; border-color: #b42318; }
-	.tab-btn.active-green { background-color: #059669; color: #ffffff; border-color: #047857; }
-	.tab-btn.active-orange { background-color: #d97706; color: #ffffff; border-color: #b45309; }
-
-	.pagination-container { display: flex; align-items: center; justify-content: flex-end; gap: 40px; padding: 8px 16px; background: #ffffff; border-top: 1px solid #e0e0e0; font-size: 14px; height: 45px; }
-	.page-controls button { padding: 4px 10px; border: 1px solid #d9d9d9; background: #fff; border-radius: 4px; cursor: pointer; }
-	.page-controls button.active { background-color: #0520c3; color: #fff; border-color: #0520c3; font-weight: bold; }
-</style>
+}
