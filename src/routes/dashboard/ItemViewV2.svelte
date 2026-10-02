@@ -112,38 +112,53 @@
 		updatePageData();
 	}
 
-	// 🟢 HÀM LỌC VÀ SẮP XẾP BẢNG CHÍNH XÁC 100% CẢ 3 TRANG
+	// 🟢 HÀM XỬ LÝ BỘ LỌC HEADER CHUẨN XÁC 100% CẢ 3 TRANG
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
-		// 1. Áp dụng các bộ lọc Header (SKU, Tên, Nhãn hiệu, Checkbox nhãn)
+		// 1. Duyệt qua tất cả bộ lọc từ Header (Bao gồm từ khóa & Checkbox nhãn hiệu)
 		if (filter_by_id.size > 0) {
 			filter_by_id.forEach((filter, fieldId) => {
-				if (filter && filter.value !== undefined && filter.value !== null) {
-					if (Array.isArray(filter.value)) {
-						// Lọc danh sách Checkbox (Nhãn hiệu)
-						if (filter.value.length > 0) {
-							const selectedValues = filter.value.map((v) => normalizeToEnglish(v.toString().trim().toLowerCase()));
-							result = result.filter((item) => {
-								const itemVal = normalizeToEnglish((item[fieldId] ?? "").toString().trim().toLowerCase());
-								return selectedValues.includes(itemVal);
-							});
-						}
-					} else {
-						// Lọc dạng từ khóa gõ tay
-						const searchVal = normalizeToEnglish(filter.value.toString().trim().toLowerCase());
-						if (searchVal) {
-							result = result.filter((item) => {
-								const itemVal = normalizeToEnglish((item[fieldId] ?? "").toString().toLowerCase());
-								return itemVal.includes(searchVal);
-							});
-						}
+				if (!filter) return;
+
+				let selectedList: string[] = [];
+				let textSearch = "";
+
+				// Trích xuất dữ liệu lọc đa dạng
+				if (Array.isArray(filter.value)) {
+					selectedList = filter.value;
+				} else if (filter.value && typeof filter.value === "object") {
+					if (Array.isArray((filter.value as any).selected)) {
+						selectedList = (filter.value as any).selected;
 					}
+					if ((filter.value as any).value) {
+						textSearch = (filter.value as any).value.toString();
+					}
+				} else if (filter.value !== undefined && filter.value !== null) {
+					textSearch = filter.value.toString();
+				}
+
+				// Lọc theo danh sách Checkbox nhãn hiệu
+				if (selectedList.length > 0) {
+					const normSelected = selectedList.map((s) => normalizeToEnglish(s.toString().trim().toLowerCase()));
+					result = result.filter((item) => {
+						const itemVal = normalizeToEnglish((item[fieldId] ?? "").toString().trim().toLowerCase());
+						return normSelected.includes(itemVal);
+					});
+				}
+
+				// Lọc theo từ khóa gõ tay
+				if (textSearch.trim().length > 0) {
+					const normQuery = normalizeToEnglish(textSearch.trim().toLowerCase());
+					result = result.filter((item) => {
+						const itemVal = normalizeToEnglish((item[fieldId] ?? "").toString().toLowerCase());
+						return itemVal.includes(normQuery);
+					});
 				}
 			});
 		}
 
-		// 2. Sắp xếp cột
+		// 2. Xử lý Sắp xếp cột A-Z / Z-A
 		if (sort_by_id.size > 0) {
 			sort_by_id.forEach((sort, fieldId) => {
 				if (sort && sort.dir) {
@@ -325,7 +340,7 @@
 				else datasource = [...tab3_items];
 			}
 
-			// 🟢 CẬP NHẬT CONTEXT CHO POPUP HEADER HIỂN THỊ ĐỦ DANH SÁCH NHÃN HIỆU
+			// Đồng bộ dữ liệu danh sách Nhãn hiệu vào Popup Header
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
@@ -533,7 +548,7 @@
 			</div>
 		{/if}
 
-		<div style="height: calc(100dvh - 200px); overflow: hidden;">
+		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={() => applyGridFilterAndSort()}>
 			{#key grid_key}
 				<Grid 
 					bind:this={grid_api} 
@@ -541,8 +556,6 @@
 					{data} 
 					responsive={responsive_fields} 
 					sizes={{ rowHeight: 165 }} 
-					onfilter={() => applyGridFilterAndSort()}
-					onsort={() => applyGridFilterAndSort()}
 				/>
 			{/key}
 		</div>
