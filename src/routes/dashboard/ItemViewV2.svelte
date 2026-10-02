@@ -112,7 +112,7 @@
 		updatePageData();
 	}
 
-	// 🟢 HÀM XỬ LÝ LỌC & SẮP XẾP CHẠY MƯỢT MÀ
+	// 🟢 GIỮ NGUYÊN 100% HÀM LỌC ĐANG CHẠY RẤT TỐT CỦA DÌ
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
@@ -179,6 +179,14 @@
 	setContext("selected_skus", selected_skus);
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
+
+	// 🟢 GIỮ NGUYÊN KHỐI $effect LẮNG NGHE TỰ ĐỘNG CỦA DÌ
+	$effect(() => {
+		if (filter_by_id.size >= 0 || sort_by_id.size >= 0) {
+			applyGridFilterAndSort();
+		}
+	});
+
 	let proxyUrl = "";
 	let baseUrl = "";
 
@@ -213,18 +221,17 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM TÍNH TOÁN CÔNG THỨC CHUYỂN HÀNG ĐÃ SỬA CHUẨN ĐIỂM NGHẼN
+	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU TỪNG TRANG ĐỘC LẬP
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG
+				// 🚚 TRANG CHUYỂN HÀNG: SỬA ĐỘC LẬP NHÁNH NÀY
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
 				variant_by_id.forEach((v) => {
-					// 🚫 CHẶN MÃ SKU CẤM VÀ COMBO
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
 					// 1. Tồn Kho Group (789505)
@@ -259,13 +266,13 @@
 							raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
 						}
 					} else {
-						// 🟢 KHÔNG BÁN 30 NGÀY: Chỉ lấy 2 cái nếu Tồn chi nhánh = 0 và Tồn Group >= 6
+						// 🟢 KHÔNG BÁN 30 NGÀY: Chỉ chuyển 2 cái nếu Tồn chi nhánh = 0 và Tồn Group >= 6
 						if (current_total_branch === 0 && stock_group >= 6) {
 							raw_need_transfer = 2;
 						}
 					}
 
-					// 🟢 CHỈ CẦN CÓ NHU CẦU CHUYỂN > 0: Gợi ý tối đa số lượng Kho Group đang có
+					// 🟢 SỬA ĐỘC LẬP: Gợi ý tối đa số lượng Kho Group đang có (Xóa bỏ điều kiện stock_group >= 3 * raw_need_transfer)
 					if (raw_need_transfer > 0) {
 						let suggest_transfer = Math.min(stock_group, raw_need_transfer);
 
@@ -284,7 +291,7 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG
+				// 📋 TRANG KIỂM HÀNG: GIỮ NGUYÊN 100%
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -304,7 +311,7 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
-				// 🚨 TRANG ĐẶT HÀNG
+				// 🚨 TRANG ĐẶT HÀNG: GIỮ NGUYÊN 100%
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -315,7 +322,7 @@
 				else datasource = [...tab3_items];
 			}
 
-			applyGridFilterAndSort(); // 🟢 KÍCH HOẠT LỌC TỰ ĐỘNG
+			applyGridFilterAndSort();
 			rowCount = filtered_datasource.length;
 			grid_key++;
 		} catch (e) {
@@ -356,18 +363,10 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// 🟢 TỰ ĐỘNG THEO DÕI SỰ THAY ĐỔI CỦA Ô BỘ LỌC ĐỂ CẬP NHẬT BẢNG TỨC THÌ
-	$effect(() => {
-		if (filter_by_id.size >= 0 || sort_by_id.size >= 0) {
-			applyGridFilterAndSort();
-		}
-	});
-
-	// ⚡ HÀM KHỞI TẠO TỐI ƯU AN TOÀN
+	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ ĐƠN HÀNG
 	async function initialize() {
 		is_loading = true;
 		try {
-			// 1. Kéo sản phẩm & Tồn kho từ Sapo
 			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
 			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
 			variant_by_id = loc_and_variant[1] || new Map();
@@ -376,15 +375,6 @@
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
 			if (isStockCheck) {
-				applyTabFilter();
-			} else if (isStockTransfer) {
-				let order_and_transfer_records = await Promise.all([
-					fetch_order_record(variant_by_id, [TARGET_LOCATION_ID_BA_TRIEU, TARGET_LOCATION_ID_PHAM_VAN_DONG]),
-					fetch_inventory_transfer(variant_by_id),
-				]);
-				order_records = order_and_transfer_records[0] || [];
-				transfer_records = order_and_transfer_records[1] || [];
-
 				applyTabFilter();
 			} else {
 				let order_and_transfer_records = await Promise.all([
