@@ -19,7 +19,7 @@
 		fetch_inventory_transfer,
 		get_low_sales_skus,
 		setLastDataUpdate,
-		create_sapo_stock_transfer,
+		is_promotional_item,
 		TARGET_LOCATION_ID_GROUP
 	} from "./DataPipelineV2";
 	import SelectionCheckboxCell from "./SelectionCheckboxCell.svelte";
@@ -172,7 +172,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU CHUẨN
+	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU CẢI TIẾN CHẶN CÁC MÃ SKU CẤM
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -183,11 +183,24 @@
 
 				let transfer_list: any[] = [];
 				variant_by_id.forEach((v) => {
-					if (v.is_composite) return;
+					// 🚫 CHẶN COMBO & MÃ SKU CẤM (LYO9566, LYO9131, LYO6928, LYO9874, LYO9858, LYO9873...)
+					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
 					// 1. Tồn Kho Group
+					let stock_group = 0;
 					const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
-					const stock_group = inv_group ? Math.max(0, Math.round(inv_group.available ?? inv_group.on_hand ?? 0)) : 0;
+					if (inv_group) {
+						stock_group = Math.max(0, Math.round(inv_group.available ?? inv_group.on_hand ?? 0));
+					} else {
+						for (let [locId, inv] of v.inventory_level_by_location) {
+							if (locId !== 789503 && locId !== 789504) {
+								stock_group = Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0));
+								if (stock_group > 0) break;
+							}
+						}
+					}
+
+					if (stock_group <= 0) return;
 
 					// 2. Tồn & Hàng đang về Chi nhánh được chọn
 					const inv_target = v.inventory_level_by_location.get(selectedLocId);
@@ -197,29 +210,30 @@
 					const current_total_branch = stock_target + incoming_target;
 					const sales_30d = v.c_restock || 0;
 
-					let need_transfer = 0;
+					let raw_need_transfer = 0;
 
 					if (sales_30d > 0) {
-						// 🟢 ĐIỀU KIỆN 1: Tồn thực tế + Đang về < 1/2 sản lượng bán 1 tháng
 						if (current_total_branch < 0.5 * sales_30d) {
-							need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
+							raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
 						}
 					} else {
-						// 🟢 ĐIỀU KIỆN 2: Sản phẩm mới chưa có sản lượng bán -> Mặc định đưa lên 2 sản phẩm
-						if (current_total_branch === 0) {
-							need_transfer = 2;
+						if (current_total_branch < 2) {
+							raw_need_transfer = 2 - current_total_branch;
 						}
 					}
 
-					// 🟢 ĐIỀU KIỆN BẮT BUỘC: Tồn Kho Group phải >= SL Cần Chuyển x 3
-					if (need_transfer > 0 && stock_group >= need_transfer * 3) {
-						transfer_list.push({
-							...v,
-							c_on_hand_group: stock_group,
-							c_on_hand: stock_target,
-							c_incoming: incoming_target,
-							c_transfer_suggest: need_transfer
-						});
+					if (raw_need_transfer > 0) {
+						let suggest_transfer = Math.min(stock_group, raw_need_transfer);
+
+						if (suggest_transfer > 0) {
+							transfer_list.push({
+								...v,
+								c_on_hand_group: stock_group,
+								c_on_hand: stock_target,
+								c_incoming: incoming_target,
+								c_transfer_suggest: suggest_transfer
+							});
+						}
 					}
 				});
 
@@ -229,6 +243,8 @@
 				// 📋 TRANG KIỂM HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
+					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
+
 					const inv = v.inventory_level_by_location.get(selectedLocId);
 					const stock = inv ? Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0)) : 0;
 					const incoming = inv ? Math.max(0, Math.round(inv.incoming ?? 0)) : 0;
@@ -360,53 +376,37 @@
 				<Button onclick={select_all}>Chọn tất cả</Button>
 				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
-				<div bind:this={export_popup_parent}>
-					<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">Xuất Excel</Button>
-				</div>
+				{#if isStockTransfer}
+					<!-- 🚚 TRANG CHUYỂN HÀNG: XUẤT FILE 6 CỘT CHUẨN SAPO -->
+					<Button type="primary" icon="mdi mdi-file-excel" onclick={async () => {
+						is_loading = true;
+						try {
+							const items = selected_skus.size > 0 
+								? datasource.filter((x) => selected_skus.has(x.sku))
+								: datasource;
+							const target_label = transfer_locations.find(x => x.id === Number(c_location_id))?.label || "Kho";
+							await export_phieu_chuyen_hang_sapo(items, target_label);
+						} finally {
+							is_loading = false;
+						}
+					}}>
+						Xuất File Chuyển Hàng Sapo (.xlsx)
+					</Button>
 
-				{#if export_popup_shown}
+				{:else}
+					<!-- 🚨 TRANG ĐẶT HÀNG VÀ KIỂM HÀNG -->
+					<div bind:this={export_popup_parent}>
+						<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">
+							Tạo Đơn / Xuất File
+						</Button>
+					</div>
+				{/if}
+
+				{#if export_popup_shown && !isStockTransfer}
 					<Portal>
 						<Popup parent={export_popup_parent} at="bottom" oncancel={() => { export_popup_shown = false; }}>
 							<div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
-								
-								{#if isStockTransfer}
-									<!-- 🚚 TRANG CHUYỂN HÀNG: CÓ CẢ 2 LỰA CHỌN -->
-									<p style="margin: 0px;"><b>Chuyển Hàng Nội Bộ Sapo</b></p>
-
-									<!-- NÚT 1: ĐẨY TRỰC TIẾP LÊN SAPO -->
-									<Button type="primary" icon="mdi mdi-cloud-upload" onclick={async () => {
-										is_loading = true;
-										try {
-											const items = selected_skus.size > 0 
-												? datasource.filter((x) => selected_skus.has(x.sku))
-												: datasource;
-											await create_sapo_stock_transfer(items, c_location_id);
-										} finally {
-											is_loading = false;
-											export_popup_shown = false;
-										}
-									}}>
-										1. Đẩy trực tiếp đơn chuyển lên Sapo ({selected_skus.size > 0 ? selected_skus.size : datasource.length} SP)
-									</Button>
-
-									<!-- NÚT 2: XUẤT FILE EXCEL CHUẨN MẪU SAPO -->
-									<Button type="secondary" icon="mdi mdi-file-excel" onclick={async () => {
-										is_loading = true;
-										try {
-											const items = selected_skus.size > 0 
-												? datasource.filter((x) => selected_skus.has(x.sku))
-												: datasource;
-											const target_label = transfer_locations.find(x => x.id === Number(c_location_id))?.label || "Kho";
-											await export_phieu_chuyen_hang_sapo(items, target_label);
-										} finally {
-											is_loading = false;
-											export_popup_shown = false;
-										}
-									}}>
-										2. Xuất File Excel chuyển hàng mẫu 6 cột
-									</Button>
-
-								{:else if isStockCheck}
+								{#if isStockCheck}
 									<!-- 📋 TRANG KIỂM HÀNG -->
 									<p style="margin: 0px;"><b>Xuất phiếu kiểm hàng Sapo</b></p>
 									<Button type="primary" onclick={async () => {
@@ -451,7 +451,7 @@
 		<!-- BANNER THÔNG BÁO TƯƠNG ỨNG TỪNG TRANG -->
 		{#if isStockTransfer}
 			<div style="width: 100%; padding: 8px 12px; background-color: #f0fdf4; color: #166534; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #bbf7d0;">
-				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}) - Điều kiện: Tồn Group &ge; 3x SL Cần chuyển.
+				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {datasource.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}).
 			</div>
 		{:else if isStockCheck}
 			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
