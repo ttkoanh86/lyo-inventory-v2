@@ -95,6 +95,7 @@
 
 	const responsive_fields = { 800: { columns: columns } };
 
+	let datasource: any[] = $state([]);
 	let data: any[] = $state([]);
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
@@ -113,7 +114,6 @@
 
 	let is_loading = $state(false);
 	let is_settings_open = $state(false);
-	let datasource: any[] = $state([]);
 
 	let tab1_items: ProductV2[] = [];
 	let tab2_items: ProductV2[] = [];
@@ -175,13 +175,13 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM LỌC NGUYÊN BẢN GỐC ĐẢM BẢO KHÔNG LỖI CẢ 3 TRANG
+	// 🟢 HÀM NGUYÊN BẢN BAN ĐẦU - ĐỘC LẬP HOÀN TOÀN CÁC TRANG
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG
+				// 🚚 TRANG CHUYỂN HÀNG: CẬP NHẬT CÔNG THỨC DUY NHẤT TRANG NÀY
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
@@ -242,7 +242,7 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG
+				// 📋 TRANG KIỂM HÀNG: GIỮ NGUYÊN BẢN 100%
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -262,7 +262,7 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
-				// 🚨 TRANG ĐẶT HÀNG
+				// 🚨 TRANG ĐẶT HÀNG: GIỮ NGUYÊN BẢN 100%
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -317,7 +317,7 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ DỮ LIỆU
+	// ⚡ HÀM KHỞI TẠO DỮ LIỆU NGUYÊN BẢN
 	async function initialize() {
 		is_loading = true;
 		try {
