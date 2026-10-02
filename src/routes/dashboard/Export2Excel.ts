@@ -1,7 +1,7 @@
-import { calculate_restock_data, normalizeString, type OrderRecordV2, type ProductV2, type TransferRecord } from "./DataPipelineV2";
+import { calculate_restock_data, type OrderRecordV2, type ProductV2, type TransferRecord } from "./DataPipelineV2";
 import { imageToArrayBuffer } from "./imageToByteArray";
 import { lazyLoadScript } from "./lazyLoadScript";
-import { type Location } from "./Template";
+import { normalizeString, type Location } from "./Template";
 
 // 🟢 1. HÀM XUẤT PHIẾU KIỂM HÀNG CHUẨN MẪU SAPO (6 CỘT)
 export async function export_kiem_hang_to_xlsx(
