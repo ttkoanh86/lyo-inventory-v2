@@ -96,7 +96,7 @@
 	const responsive_fields = { 800: { columns: columns } };
 
 	let datasource: any[] = $state([]);
-	let filtered_datasource: any[] = $state([]); // Mảng lưu kết quả sau khi lọc
+	let filtered_datasource: any[] = $state([]);
 	let data: any[] = $state([]);
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
@@ -113,48 +113,46 @@
 		updatePageData();
 	}
 
-	// 🟢 HÀM THỰC THI BỘ LỌC CHUẨN XÁC
+	// 🟢 HÀM ĐỌC ĐÚNG 100% ĐẦU RA CỦA HeaderWithSortUI
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
+		// 1. ĐỌC BỘ LỌC TỪ HeaderWithSortUI (Đọc thuộc tính filter.includes)
 		if (filter_by_id.size > 0) {
-			filter_by_id.forEach((filter, fieldId) => {
-				if (!filter || filter.value === undefined || filter.value === null) return;
+			filter_by_id.forEach((filter: any, fieldId: string) => {
+				if (!filter) return;
 
-				let selectedVals: string[] = [];
-				let searchStr = "";
+				// Lọc theo Checkbox đã chọn (includes dạng Set)
+				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
+					const normSet = new Set<string>();
+					filter.includes.forEach((v: any) => {
+						normSet.add(normalizeToEnglish(String(v || "").trim().toLowerCase()));
+					});
 
-				if (Array.isArray(filter.value)) {
-					selectedVals = filter.value;
-				} else if (typeof filter.value === "object") {
-					selectedVals = (filter.value as any).selected || [];
-					searchStr = ((filter.value as any).value || "").toString();
-				} else {
-					searchStr = filter.value.toString();
-				}
-
-				if (selectedVals.length > 0) {
-					const normList = selectedVals.map((v) => normalizeToEnglish(v.toString().trim().toLowerCase()));
 					result = result.filter((item) => {
-						const val = normalizeToEnglish((item[fieldId] ?? "").toString().trim().toLowerCase());
-						return normList.includes(val);
+						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").trim().toLowerCase());
+						return normSet.has(itemVal);
 					});
 				}
 
-				if (searchStr.trim() !== "") {
-					const query = normalizeToEnglish(searchStr.trim().toLowerCase());
-					result = result.filter((item) => {
-						const val = normalizeToEnglish((item[fieldId] ?? "").toString().toLowerCase());
-						return val.includes(query);
-					});
+				// Lọc theo từ khóa gõ tay
+				if (filter.value !== undefined && filter.value !== null) {
+					const searchStr = normalizeToEnglish(String(filter.value).trim().toLowerCase());
+					if (searchStr.length > 0) {
+						result = result.filter((item) => {
+							const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").toLowerCase());
+							return itemVal.includes(searchStr);
+						});
+					}
 				}
 			});
 		}
 
+		// 2. ĐỌC SẮP XẾP TỪ HeaderWithSortUI (Đọc thuộc tính sort.order)
 		if (sort_by_id.size > 0) {
-			sort_by_id.forEach((sort, fieldId) => {
-				if (sort && sort.dir) {
-					const dirMult = sort.dir === "asc" ? 1 : -1;
+			sort_by_id.forEach((sort: any, fieldId: string) => {
+				if (sort && sort.order !== undefined && sort.order !== 0) {
+					const dirMult = sort.order === 1 ? 1 : -1;
 					result.sort((a, b) => {
 						const valA = a[fieldId] ?? "";
 						const valB = b[fieldId] ?? "";
@@ -200,6 +198,13 @@
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
 
+	// 🟢 BẮT ĐÚNG TÍN HIỆU filter_update_key KHI BẤM OK HOẶC XÓA BỘ LỌC
+	$effect(() => {
+		if (filter_update_key.k >= 0) {
+			applyGridFilterAndSort();
+		}
+	});
+
 	let proxyUrl = "";
 	let baseUrl = "";
 
@@ -234,7 +239,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM NGUYÊN BẢN BAN ĐẦU - ĐỘC LẬP HOÀN TOÀN CÁC TRANG
+	// 🟢 HÀM LỌC VÀ TÍNH DỮ LIỆU BẢNG TỪNG TRANG
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -247,7 +252,6 @@
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-					// 1. Tồn Kho Group (789505)
 					let stock_group = 0;
 					const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 					if (inv_group) {
@@ -263,7 +267,6 @@
 
 					if (stock_group <= 0) return;
 
-					// 2. Tồn thực tế & Hàng đang về tại Chi nhánh nhận
 					const inv_target = v.inventory_level_by_location.get(selectedLocId);
 					const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 					const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
@@ -335,7 +338,7 @@
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			applyGridFilterAndSort(); // KÍCH HOẠT LỌC TẬP TỆP BAN ĐẦU
+			applyGridFilterAndSort();
 			rowCount = filtered_datasource.length;
 			grid_key++;
 		} catch (e) {
@@ -376,7 +379,7 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO DỮ LIỆU NGUYÊN BẢN
+	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ DỮ LIỆU
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -547,8 +550,7 @@
 			</div>
 		{/if}
 
-		<!-- 🟢 SỬ DỤNG SỰ KIỆN LỌC AN TOÀN TRÊN GRID -->
-		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={() => applyGridFilterAndSort()}>
+		<div style="height: calc(100dvh - 200px); overflow: hidden;">
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
 			{/key}
