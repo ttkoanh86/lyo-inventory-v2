@@ -317,11 +317,11 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO SIÊU TỐC KHÔNG BỊ TREO TRÌNH DUYỆT MỚI
+	// ⚡ HÀM KHỞI TẠO ĐẢM BẢO CHÍNH XÁC 100% KẾT QUẢ CHO CẢ MÁY MỚI VÀ MÁY CŨ
 	async function initialize() {
 		is_loading = true;
 		try {
-			// 1. Kéo nhanh sản phẩm & tồn kho từ Sapo
+			// 1. Kéo sản phẩm & tồn kho từ Sapo
 			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
 			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
 			variant_by_id = loc_and_variant[1] || new Map();
@@ -329,31 +329,26 @@
 			c_location_id = isStockTransfer ? 789503 : Number(locations[0].id);
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
-			// 2. TẮT MÀN HÌNH XOAY NGAY LẬP TỨC ĐỂ BẢNG HIỂN THỊ TRONG 1 GIÂY
-			applyTabFilter();
-			is_loading = false;
-
-			// 3. KÉO NGẦM ĐƠN HÀNG Ở PHÍA SAU (KHÔNG LÀM DỪNG GIAO DIỆN)
-			if (!isStockCheck) {
-				Promise.all([
-					fetch_order_record(variant_by_id),
-					fetch_inventory_transfer(variant_by_id)
-				]).then((res) => {
-					order_records = res[0] || [];
-					transfer_records = res[1] || [];
-					// Cập nhật lại số liệu bán 30 ngày tự động sau khi kéo ngầm xong
-					applyTabFilter();
-					setLastDataUpdate();
-				}).catch((err) => {
-					console.error("Lỗi kéo đơn ngầm:", err);
-				});
+			if (isStockCheck) {
+				// 📋 KIỂM HÀNG: Hiện ngay không cần đơn hàng
+				applyTabFilter();
 			} else {
-				setLastDataUpdate();
+				// 🚚 CHUYỂN HÀNG & 🚨 ĐẶT HÀNG: BẮT BUỘC ĐỜI KÉO XONG ĐƠN HÀNG RỒI MỚI HIỂN THỊ CẢ TRÊN MÁY MỚI
+				let order_and_transfer_records = await Promise.all([
+					fetch_order_record(variant_by_id),
+					fetch_inventory_transfer(variant_by_id),
+				]);
+				order_records = order_and_transfer_records[0] || [];
+				transfer_records = order_and_transfer_records[1] || [];
+
+				applyTabFilter();
 			}
 
+			setLastDataUpdate();
 			low_sales_skus = get_low_sales_skus(datasource);
 		} catch (error) {
 			console.error("Lỗi khởi tạo:", error);
+		} finally {
 			is_loading = false;
 		}
 	}
