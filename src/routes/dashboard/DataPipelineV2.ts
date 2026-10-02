@@ -10,6 +10,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 		"LYO9131",
 		"LYO6928",
 		"LYO9874",
+		"LYO8946",
 		"LYO9858",
 		"LYO9873"
 	]);
