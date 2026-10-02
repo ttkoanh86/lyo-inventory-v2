@@ -59,7 +59,7 @@
 		{ id: TARGET_LOCATION_ID_PHAM_VAN_DONG, label: "Kho 180 Phạm Văn Đồng", address: "Phạm Văn Đồng" }
 	];
 
-	// 🟢 CẤU TRÚC CỘT THEO ĐÚNG THỨ TỰ YÊU CẦU
+	// 🟢 CẤU TRÚC CỘT CHUẨN ĐÃ KHỔI PHỤC ID KHOÁ BRAND
 	const all_columns = [
 		{ id: "id", hidden: true },
 		{ id: "selected", cell: SelectionCheckboxCell, width: 36 },
@@ -95,8 +95,9 @@
 
 	const responsive_fields = { 800: { columns: columns } };
 
+	let datasource: any[] = $state([]);
+	let filtered_datasource: any[] = $state([]);
 	let data: any[] = $state([]);
-	let filtered_datasource: any[] = $state([]); // MẢNG DÙNG ĐỂ LỌC VÀ PHÂN TRANG
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 	let totalPages = $derived(Math.ceil(filtered_datasource.length / itemsPerPage) || 1);
@@ -112,26 +113,46 @@
 		updatePageData();
 	}
 
-	// 🟢 HÀM LỌC ĐANG CHẠY RẤT TỐT CỦA DÌ
+	// 🟢 HÀM ĐỌC DỮ LIỆU BỘ LỌC TỪ HEADERWITHSORTUI CHUẨN XÁC
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
+		// 1. ĐỌC LỌC TỪ HeaderWithSortUI (Đọc filter.includes dạng Set & filter.value)
 		if (filter_by_id.size > 0) {
-			filter_by_id.forEach((filter, fieldId) => {
-				if (filter && filter.value) {
-					const searchVal = normalizeToEnglish(filter.value.toString().trim().toLowerCase());
-					result = result.filter((item) => {
-						const itemVal = normalizeToEnglish((item[fieldId] ?? "").toString().toLowerCase());
-						return itemVal.includes(searchVal);
+			filter_by_id.forEach((filter: any, fieldId: string) => {
+				if (!filter) return;
+
+				// Lọc theo danh sách Checkbox nhãn hiệu/giá trị đã tick
+				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
+					const normSet = new Set<string>();
+					filter.includes.forEach((v: any) => {
+						normSet.add(normalizeToEnglish(String(v || "").trim().toLowerCase()));
 					});
+
+					result = result.filter((item) => {
+						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").trim().toLowerCase());
+						return normSet.has(itemVal);
+					});
+				}
+
+				// Lọc theo từ khóa tìm kiếm gõ tay
+				if (filter.value !== undefined && filter.value !== null) {
+					const searchStr = normalizeToEnglish(String(filter.value).trim().toLowerCase());
+					if (searchStr.length > 0) {
+						result = result.filter((item) => {
+							const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").toLowerCase());
+							return itemVal.includes(searchStr);
+						});
+					}
 				}
 			});
 		}
 
+		// 2. ĐỌC SẮP XẾP TỪ HeaderWithSortUI (order: 1 hoặc -1)
 		if (sort_by_id.size > 0) {
-			sort_by_id.forEach((sort, fieldId) => {
-				if (sort && sort.dir) {
-					const dirMult = sort.dir === "asc" ? 1 : -1;
+			sort_by_id.forEach((sort: any, fieldId: string) => {
+				if (sort && sort.order !== undefined && sort.order !== 0) {
+					const dirMult = sort.order === 1 ? 1 : -1;
 					result.sort((a, b) => {
 						const valA = a[fieldId] ?? "";
 						const valB = b[fieldId] ?? "";
@@ -150,7 +171,6 @@
 
 	let is_loading = $state(false);
 	let is_settings_open = $state(false);
-	let datasource: any[] = $state([]);
 
 	let tab1_items: ProductV2[] = [];
 	let tab2_items: ProductV2[] = [];
@@ -177,6 +197,13 @@
 	setContext("selected_skus", selected_skus);
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
+
+	// 🟢 LẮNG NGHE LỌC TRỰC TIẾP TỪ NÚT BẤM CỦA HEADER
+	$effect(() => {
+		if (filter_update_key.k >= 0) {
+			applyGridFilterAndSort();
+		}
+	});
 
 	let proxyUrl = "";
 	let baseUrl = "";
@@ -212,20 +239,19 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU CỦA 3 TRANG
+	// 🟢 HÀM LỌC TÍNH DỮ LIỆU BAN ĐẦU CÁC TRANG
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG: CHỈ SỬA DUY NHẤT ĐOẠN NÀY ĐỂ HẾT BỊ 0 KẾT QUẢ
+				// 🚚 TRANG CHUYỂN HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-					// 1. Tồn Kho Group (789505)
 					let stock_group = 0;
 					const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 					if (inv_group) {
@@ -241,7 +267,6 @@
 
 					if (stock_group <= 0) return;
 
-					// 2. Tồn thực tế & Hàng đang về tại Chi nhánh nhận
 					const inv_target = v.inventory_level_by_location.get(selectedLocId);
 					const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 					const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
@@ -261,7 +286,6 @@
 						}
 					}
 
-					// 🛠️ ĐÃ SỬA: LẤY SỐ LƯỢNG CẦN CHUYỂN THỰC TẾ (BỎ ĐIỀU KIỆN KẸT "stock_group >= 3 * raw_need_transfer")
 					if (raw_need_transfer > 0) {
 						let suggest_transfer = Math.min(stock_group, raw_need_transfer);
 
@@ -280,7 +304,7 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG: GIỮ NGUYÊN BẢN 100%
+				// 📋 TRANG KIỂM HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -300,7 +324,7 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
-				// 🚨 TRANG ĐẶT HÀNG: GIỮ NGUYÊN BẢN 100%
+				// 🚨 TRANG ĐẶT HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -314,7 +338,7 @@
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			applyGridFilterAndSort(); // GỌI LỌC BAN ĐẦU
+			applyGridFilterAndSort();
 			rowCount = filtered_datasource.length;
 			grid_key++;
 		} catch (e) {
@@ -355,7 +379,7 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ ĐƠN HÀNG
+	// ⚡ HÀM KHỞI TẠO DỮ LIỆU
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -526,7 +550,6 @@
 			</div>
 		{/if}
 
-		<!-- 🟢 BẮT SỰ KIỆN LỌC AN TOÀN KHI THAO TÁC TRÊN BẢNG HOẶC POPUP -->
 		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={applyGridFilterAndSort}>
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
