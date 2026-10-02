@@ -96,7 +96,7 @@
 	const responsive_fields = { 800: { columns: columns } };
 
 	let data: any[] = $state([]);
-	let filtered_datasource: any[] = $state([]); // Mảng lọc hoạt động chuẩn
+	let filtered_datasource: any[] = $state([]);
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 	let totalPages = $derived(Math.ceil(filtered_datasource.length / itemsPerPage) || 1);
@@ -112,7 +112,7 @@
 		updatePageData();
 	}
 
-	// 🟢 HÀM LỌC ĐANG CHẠY RẤT TỐT CỦA DÌ
+	// 🟢 HÀM LỌC NGUYÊN BẢN BAN ĐẦU DÙNG FILTERED_DATASOURCE
 	function applyGridFilterAndSort() {
 		let result = [...datasource];
 
@@ -178,6 +178,13 @@
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
 
+	// 🟢 $EFFECT LẮNG NGHE LỌC NGUYÊN BẢN
+	$effect(() => {
+		if (filter_by_id.size >= 0 || sort_by_id.size >= 0) {
+			applyGridFilterAndSort();
+		}
+	});
+
 	let proxyUrl = "";
 	let baseUrl = "";
 
@@ -212,20 +219,17 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM LỌC TÍNH TOÁN DỮ LIỆU
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-					// 1. Tồn Kho Group (789505)
 					let stock_group = 0;
 					const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 					if (inv_group) {
@@ -241,7 +245,6 @@
 
 					if (stock_group <= 0) return;
 
-					// 2. Tồn thực tế & Hàng đang về tại Chi nhánh nhận
 					const inv_target = v.inventory_level_by_location.get(selectedLocId);
 					const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 					const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
@@ -261,8 +264,7 @@
 						}
 					}
 
-					// 🛠️ ĐÃ BỎ ĐIỀU KIỆN CHẶN "stock_group >= 3 * raw_need_transfer" LÀM TRẢ VỀ 0
-					if (raw_need_transfer > 0) {
+					if (raw_need_transfer > 0 && stock_group >= 3 * raw_need_transfer) {
 						let suggest_transfer = Math.min(stock_group, raw_need_transfer);
 
 						if (suggest_transfer > 0) {
@@ -280,7 +282,6 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -300,7 +301,6 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
-				// 🚨 TRANG ĐẶT HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -314,7 +314,7 @@
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			applyGridFilterAndSort(); // Kích hoạt mảng filtered_datasource
+			applyGridFilterAndSort();
 			rowCount = filtered_datasource.length;
 			grid_key++;
 		} catch (e) {
@@ -355,7 +355,6 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ ĐƠN HÀNG
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -526,7 +525,7 @@
 			</div>
 		{/if}
 
-		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={applyGridFilterAndSort}>
+		<div style="height: calc(100dvh - 200px); overflow: hidden;">
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
 			{/key}
