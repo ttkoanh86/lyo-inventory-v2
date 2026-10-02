@@ -102,7 +102,7 @@
 	let itemsPerPage = $state(50);
 	let totalPages = $derived(Math.ceil(display_datasource.length / itemsPerPage) || 1);
 
-	// 🟢 HÀM LỌC CHUẨN ĐỌC HEADER POPUP VÀ CẮT PHÂN TRANG (KHÔNG DÙNG $EFFECT)
+	// 🟢 HÀM LỌC CHUẨN ĐỌC HEADER POPUP VÀ CẮT PHÂN TRANG
 	function updatePageData() {
 		let result = [...datasource];
 
@@ -189,6 +189,13 @@
 	setContext("selected_skus", selected_skus);
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
+
+	// 🟢 TỰ ĐỘNG CHẠY LẠI LỌC KHI HEADER POPUP BẤM "OK" HOẶC "XÓA BỘ LỌC"
+	$effect(() => {
+		// Chỉ phụ thuộc vào tín hiệu k, không gây lặp vô hạn
+		const _k = filter_update_key.k;
+		updatePageData();
+	});
 
 	let proxyUrl = "";
 	let baseUrl = "";
@@ -535,8 +542,7 @@
 			</div>
 		{/if}
 
-		<!-- 🟢 KHI MỞ POPUP LỌC BẤM OK THÌ CLICK VÀO BẢNG SẼ TỰ ĐỘNG CHẠY LẠI UPDATEPAGEDATA -->
-		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={updatePageData}>
+		<div style="height: calc(100dvh - 200px); overflow: hidden;">
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
 			{/key}
