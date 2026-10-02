@@ -81,7 +81,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	const nm = (name || "").trim().toLowerCase();
 	const clean_sku = (sku || "").trim().toUpperCase();
 
-	// 🚫 1. Danh sách 6 mã SKU cấm tuyệt đối
+	// 🚫 1. Danh sách 7 mã SKU cấm tuyệt đối (Đã bổ sung LYO8946)
 	const blocked_skus = new Set([
 		"LYO9566",
 		"LYO9131",
@@ -116,7 +116,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	return false;
 }
 
-// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY (EXPORT CÓ TỪ KHÓA export)
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY CHUẨN XÁC THEO TỪNG KHO CHI NHÁNH
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -133,14 +133,15 @@ export function calculate_restock_data(
 
 	for (let [_, variant] of variant_by_id) {
 		if (variant.sku && !variant.is_composite) {
-			sales_by_sku.set(variant.sku.trim().toLowerCase(), 0);
+			sales_by_sku.set(variant.sku.trim().toUpperCase(), 0);
 		}
 	}
 
 	for (let record of records) {
-		const clean_sku = (record.sku || "").trim().toLowerCase();
-		const rec_loc = Number(record.location_id || TARGET_LOCATION_ID_GROUP);
+		const clean_sku = (record.sku || "").trim().toUpperCase();
+		const rec_loc = Number(record.location_id);
 
+		// Bắt chính xác đơn thuộc kho chi nhánh đang chọn
 		if (clean_sku && rec_loc === active_loc_id && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
 			const current_sales = sales_by_sku.get(clean_sku) || 0;
 			sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
@@ -159,7 +160,7 @@ export function calculate_restock_data(
 		variant.c_incoming = inventory ? Math.max(0, Math.round(inventory.incoming ?? 0)) : 0;
 		variant.c_on_hand = variant.c_available;
 
-		const clean_sku = (variant.sku || "").trim().toLowerCase();
+		const clean_sku = (variant.sku || "").trim().toUpperCase();
 		const actual_sales = sales_by_sku.get(clean_sku) ?? 0;
 
 		variant.c_restock = Math.round(actual_sales);
@@ -235,7 +236,7 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC (ĐÃ CHẶN 6 MÃ SKU)
+// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -263,7 +264,7 @@ export async function get_active_products() {
 						if (variant.sellable === false || variant.status === "inactive" || variant.composite || is_prod_composite) return;
 
 						const full_var_name = variant.name || prod_name;
-						const var_sku = (variant.sku || "").trim();
+						const var_sku = (variant.sku || "").trim().toUpperCase();
 
 						if (is_promotional_item(brand_name, full_var_name, var_sku)) return;
 
@@ -273,7 +274,7 @@ export async function get_active_products() {
 							variant_id: variant.id,
 							product_id: product.id,
 							sku: var_sku,
-							barcode: (variant.barcode || var_sku).trim(),
+							barcode: (variant.barcode || var_sku).trim().toUpperCase(),
 							c_restock: 0, c_restock_half: 0, c_restock_third: 0, image_path: "",
 							c_on_hand: 0, c_incoming: 0, c_available: 0,
 							name: full_var_name, name_normalized: normalizeString(full_var_name),
@@ -310,10 +311,19 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
+// 🟢 HÀM ĐỌC INDEXEDDB AN TOÀN
 export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	return new Promise((resolve) => {
 		try {
 			const request = indexedDB.open("LYOInventoryDB_V50", 1);
+			request.onupgradeneeded = function (event) {
+				const db = (event.target as IDBOpenDBRequest).result;
+				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+					const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
+					store.createIndex("type", "type");
+					store.createIndex("site_id", "site_id");
+				}
+			};
 			request.onsuccess = function () {
 				const db = request.result;
 				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
@@ -321,14 +331,19 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 					resolve([]);
 					return;
 				}
-				const tx = db.transaction("OrderRecordsV2", "readonly");
-				const store = tx.objectStore("OrderRecordsV2");
-				const getAllReq = store.getAll();
-				getAllReq.onsuccess = function () {
+				try {
+					const tx = db.transaction("OrderRecordsV2", "readonly");
+					const store = tx.objectStore("OrderRecordsV2");
+					const getAllReq = store.getAll();
+					getAllReq.onsuccess = function () {
+						db.close();
+						resolve(getAllReq.result || []);
+					};
+					getAllReq.onerror = function () { db.close(); resolve([]); };
+				} catch (err) {
 					db.close();
-					resolve(getAllReq.result || []);
-				};
-				getAllReq.onerror = function () { db.close(); resolve([]); };
+					resolve([]);
+				}
 			};
 			request.onerror = function () { resolve([]); };
 		} catch (e) {
@@ -337,6 +352,7 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	});
 }
 
+// 🟢 HÀM GHI INDEXEDDB AN TOÀN
 export async function updateIndexedDB(records: RecordItem[]) {
 	return new Promise<void>((resolve) => {
 		try {
@@ -357,7 +373,7 @@ export async function updateIndexedDB(records: RecordItem[]) {
 					store.put({
 						t_unix: r.t_unix,
 						quantity: r.quantity,
-						sku: r.sku,
+						sku: (r.sku || "").trim().toUpperCase(),
 						location_id: Number(r.location_id),
 						is_composite: (r as OrderRecordV2).is_composite || false,
 						order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
@@ -380,8 +396,11 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG CHUẨN GỐC
-export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) {
+// 🟢 HÀM KÉO ĐƠN HÀNG TỐI ƯU CÓ BỘ LỌC CỤ THỂ THEO KHO (CHỈ KÉO KHO BÀ TRIỆU & PHẠM VĂN ĐỒNG)
+export async function fetch_order_record(
+	variant_by_id: Map<number, ProductV2>,
+	target_location_ids: number[] = [] // Truyền danh sách ID Kho cần lấy
+) {
 	let existing_keys = new Set<string>();
 	
 	let stored_records = await getStoredOrderRecords();
@@ -403,6 +422,8 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 	let page = 1;
 	let running = true;
 
+	const allowed_loc_set = target_location_ids.length > 0 ? new Set(target_location_ids) : null;
+
 	while (running) {
 		try {
 			const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
@@ -419,7 +440,13 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 
 				for (const order of orders) {
 					if (order.status !== "cancelled") {
-						const actual_loc_id = Number(order.location_id || TARGET_LOCATION_ID_GROUP);
+						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
+
+						// 🟢 NẾU TRUYỀN BỘ LỌC KHO: BỎ QUA TOÀN BỘ ĐƠN CỦA KHO KHÔNG LIÊN QUAN (NHƯ KHO GROUP)
+						if (allowed_loc_set && !allowed_loc_set.has(actual_loc_id)) {
+							continue;
+						}
+
 						const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
 						const order_ts = parseSapoDate(date_str);
 
@@ -439,7 +466,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 									if (line_item.composite_item_parts && line_item.composite_item_parts.length > 0) {
 										line_item.composite_item_parts.forEach((part: any) => {
 											const sub_variant = variant_by_id.get(part.variant_id);
-											const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim();
+											const clean_sub_sku = (sub_variant?.sku || part.sku || "").trim().toUpperCase();
 											if (clean_sub_sku) {
 												const total_sub_qty = qty * (Number(part.quantity) || 1);
 												const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
@@ -453,7 +480,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 										variant_obj.composite_item_quantity_by_variant_id.forEach((comp_qty, comp_variant_id) => {
 											const sub_variant = variant_by_id.get(comp_variant_id);
 											if (sub_variant && sub_variant.sku) {
-												const clean_sub_sku = sub_variant.sku.trim();
+												const clean_sub_sku = sub_variant.sku.trim().toUpperCase();
 												const total_sub_qty = qty * comp_qty;
 												const record_key = `ORD_${order.id}_${line_id}_${clean_sub_sku}_${actual_loc_id}`;
 												if (!existing_keys.has(record_key)) {
@@ -463,7 +490,7 @@ export async function fetch_order_record(variant_by_id: Map<number, ProductV2>) 
 											}
 										});
 									} else {
-										const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim();
+										const raw_sku = (variant_obj?.sku || line_item.sku || line_item.barcode || "").trim().toUpperCase();
 										if (raw_sku) {
 											const record_key = `ORD_${order.id}_${line_id}_${raw_sku}_${actual_loc_id}`;
 											if (!existing_keys.has(record_key)) {
