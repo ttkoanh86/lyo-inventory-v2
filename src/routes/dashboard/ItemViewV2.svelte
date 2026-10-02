@@ -102,18 +102,16 @@
 	let itemsPerPage = $state(50);
 	let totalPages = $derived(Math.ceil(display_datasource.length / itemsPerPage) || 1);
 
-	// 🟢 HÀM CẬP NHẬT TRANG VÀ LỌC CÓ BỌC LOG TRỰC TIẾP
+	// 🟢 HÀM CẬP NHẬT PHÂN TRANG & LỌC
 	function updatePageData() {
-		console.log("🔍 [KIỂM THỬ] Hàm updatePageData đang chạy! Số filter hiện tại:", filter_by_id.size);
 		let result = [...datasource];
 
 		if (filter_by_id.size > 0) {
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// 1. Lọc theo Checkbox nhãn hiệu/SKU đã chọn (filter.includes)
+				// Lọc theo Checkbox nhãn hiệu/SKU đã chọn (filter.includes)
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
-					console.log(`📌 [KIỂM THỬ] Đang lọc Checkbox cho cột [${fieldId}], các giá trị chọn:`, Array.from(filter.includes));
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
 						normSet.add(normalizeToEnglish(String(v || "").trim().toLowerCase()));
@@ -125,10 +123,9 @@
 					});
 				}
 
-				// 2. Lọc theo ô từ khóa tìm kiếm (filter.value)
+				// Lọc theo ô từ khóa tìm kiếm (filter.value)
 				if (filter.value !== undefined && filter.value !== null && typeof filter.value === "string" && filter.value.trim() !== "") {
 					const searchStr = normalizeToEnglish(filter.value.trim().toLowerCase());
-					console.log(`📌 [KIỂM THỬ] Đang lọc Từ khóa cho cột [${fieldId}]: "${searchStr}"`);
 					result = result.filter((item) => {
 						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").toLowerCase());
 						return itemVal.includes(searchStr);
@@ -154,8 +151,6 @@
 		}
 
 		display_datasource = result;
-		console.log(`✅ [KIỂM THỬ] Lọc thành công! Tổng số dòng sau lọc: ${display_datasource.length}/${datasource.length}`);
-		
 		let start = (currentPage - 1) * itemsPerPage;
 		let end = start + itemsPerPage;
 		data = display_datasource.slice(start, Math.min(end, display_datasource.length));
@@ -195,9 +190,8 @@
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
 
-	// 🟢 LẮNG NGHE SỰ THAY ĐỔI CỦA KHÓA LỌC MỘT CÁCH TỰ ĐỘNG
+	// 🟢 LẮNG NGHE ĐÚNG TÍN HIỆU CỦA HEADER POPUP BẤM "OK" HOẶC "XÓA BỘ LỌC"
 	$effect(() => {
-		// Theo dõi biến filter_update_key.k và kích hoạt lọc lại ngay lập tức
 		if (filter_update_key.k >= 0) {
 			updatePageData();
 		}
@@ -237,11 +231,13 @@
 		goto("/authentication");
 	}
 
+	// 🟢 HÀM PHÂN LOẠI DỮ LIỆU CÁC TRANG & TAB
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
+				// 🚚 TRANG CHUYỂN HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
@@ -300,6 +296,7 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
+				// 📋 TRANG KIỂM HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -319,6 +316,7 @@
 				datasource = stock_check_list.sort((a, b) => (a.c_on_hand || 0) - (b.c_on_hand || 0));
 
 			} else {
+				// 🚨 TRANG ĐẶT HÀNG
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 				tab1_items = get_items_need_restock(variant_by_id, selectedLocId);
 				tab2_items = get_items_has_sales(variant_by_id);
@@ -332,7 +330,9 @@
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			resetPagination();
+			// 🟢 NẠP DỮ LIỆU BAN ĐẦU RA BẢNG NGAY LẬP TỨC
+			updatePageData();
+
 			rowCount = display_datasource.length;
 			grid_key++;
 		} catch (e) {
@@ -373,6 +373,7 @@
 		checkbox_update_key.k += 1;
 	}
 
+	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ ĐƠN HÀNG
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -449,6 +450,7 @@
 				<Button onclick={deselect_all}>Bỏ chọn tất cả</Button>
 
 				{#if isStockTransfer}
+					<!-- 🚚 TRANG CHUYỂN HÀNG: XUẤT FILE 6 CỘT CHUẨN SAPO -->
 					<Button type="primary" icon="mdi mdi-file-excel" onclick={async () => {
 						is_loading = true;
 						try {
@@ -465,6 +467,7 @@
 					</Button>
 
 				{:else}
+					<!-- 🚨 TRANG ĐẶT HÀNG VÀ KIỂM HÀNG -->
 					<div bind:this={export_popup_parent}>
 						<Button onclick={() => { export_popup_shown = !export_popup_shown; }} icon="mdi mdi-download">
 							Tạo Đơn / Xuất File
@@ -477,6 +480,7 @@
 						<Popup parent={export_popup_parent} at="bottom" oncancel={() => { export_popup_shown = false; }}>
 							<div class="download-popup" style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
 								{#if isStockCheck}
+									<!-- 📋 TRANG KIỂM HÀNG -->
 									<p style="margin: 0px;"><b>Xuất phiếu kiểm hàng Sapo</b></p>
 									<Button type="primary" onclick={async () => {
 										is_loading = true;
@@ -492,6 +496,7 @@
 									</Button>
 
 								{:else}
+									<!-- 🚨 TRANG ĐẶT HÀNG -->
 									<p style="margin: 0px;"><b>Xuất phiếu nhập hàng</b></p>
 									<Button type="primary" onclick={async () => {
 										is_loading = true;
@@ -516,6 +521,7 @@
 			</div>
 		</div>
 
+		<!-- BANNER THÔNG BÁO TƯƠNG ỨNG TỪNG TRANG -->
 		{#if isStockTransfer}
 			<div style="width: 100%; padding: 8px 12px; background-color: #f0fdf4; color: #166534; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #bbf7d0;">
 				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {display_datasource.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}).
@@ -538,7 +544,7 @@
 			</div>
 		{/if}
 
-		<div style="height: calc(100dvh - 200px); overflow: hidden;" onclick={updatePageData}>
+		<div style="height: calc(100dvh - 200px); overflow: hidden;">
 			{#key grid_key}
 				<Grid bind:this={grid_api} {columns} {data} responsive={responsive_fields} sizes={{ rowHeight: 165 }} />
 			{/key}
