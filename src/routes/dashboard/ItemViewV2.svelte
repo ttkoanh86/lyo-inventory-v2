@@ -317,11 +317,11 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO ĐẢM BẢO CHÍNH XÁC 100% KẾT QUẢ CHO CẢ MÁY MỚI VÀ MÁY CŨ
+	// ⚡ HÀM KHỞI TẠO ĐÃ ĐƯỢC TỐI ƯU CHUẨN NGHIỆP VỤ THEO Ý DÌ
 	async function initialize() {
 		is_loading = true;
 		try {
-			// 1. Kéo sản phẩm & tồn kho từ Sapo
+			// 1. Kéo sản phẩm & Tồn kho từ Sapo cho tất cả các trang
 			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
 			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
 			variant_by_id = loc_and_variant[1] || new Map();
@@ -329,11 +329,12 @@
 			c_location_id = isStockTransfer ? 789503 : Number(locations[0].id);
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
-			if (isStockCheck) {
-				// 📋 KIỂM HÀNG: Hiện ngay không cần đơn hàng
+			if (isStockCheck || isStockTransfer) {
+				// 🟢 CHUYỂN HÀNG VÀ KIỂM HÀNG: HOÀN TOÀN BỎ QUA IndexedDB VÀ fetch_order_record
+				// Bảng hiển thị tức thì 100% không sợ đơ/xoay trên máy mới!
 				applyTabFilter();
 			} else {
-				// 🚚 CHUYỂN HÀNG & 🚨 ĐẶT HÀNG: BẮT BUỘC ĐỜI KÉO XONG ĐƠN HÀNG RỒI MỚI HIỂN THỊ CẢ TRÊN MÁY MỚI
+				// 🚨 ĐẶT HÀNG: MỚI BẮT ĐẦU CHẠY KÉO ĐƠN VÀ TRUY VẤN IndexedDB
 				let order_and_transfer_records = await Promise.all([
 					fetch_order_record(variant_by_id),
 					fetch_inventory_transfer(variant_by_id),
