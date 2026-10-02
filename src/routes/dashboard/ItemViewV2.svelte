@@ -96,56 +96,19 @@
 	const responsive_fields = { 800: { columns: columns } };
 
 	let data: any[] = $state([]);
-	let filtered_datasource: any[] = $state([]);
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
-	let totalPages = $derived(Math.ceil(filtered_datasource.length / itemsPerPage) || 1);
+	let totalPages = $derived(Math.ceil(datasource.length / itemsPerPage) || 1);
 
 	function updatePageData() {
 		let start = (currentPage - 1) * itemsPerPage;
 		let end = start + itemsPerPage;
-		data = filtered_datasource.slice(start, Math.min(end, filtered_datasource.length));
+		data = datasource.slice(start, Math.min(end, datasource.length));
 	}
 
 	function resetPagination() {
 		currentPage = 1;
 		updatePageData();
-	}
-
-	// 🟢 HÀM XỬ LÝ LỌC & SẮP XẾP CHÍNH XÁC
-	function applyGridFilterAndSort() {
-		let result = [...datasource];
-
-		if (filter_by_id.size > 0) {
-			filter_by_id.forEach((filter, fieldId) => {
-				if (filter && filter.value) {
-					const searchVal = normalizeToEnglish(filter.value.toString().trim().toLowerCase());
-					result = result.filter((item) => {
-						const itemVal = normalizeToEnglish((item[fieldId] ?? "").toString().toLowerCase());
-						return itemVal.includes(searchVal);
-					});
-				}
-			});
-		}
-
-		if (sort_by_id.size > 0) {
-			sort_by_id.forEach((sort, fieldId) => {
-				if (sort && sort.dir) {
-					const dirMult = sort.dir === "asc" ? 1 : -1;
-					result.sort((a, b) => {
-						const valA = a[fieldId] ?? "";
-						const valB = b[fieldId] ?? "";
-						if (typeof valA === "number" && typeof valB === "number") {
-							return (valA - valB) * dirMult;
-						}
-						return valA.toString().localeCompare(valB.toString()) * dirMult;
-					});
-				}
-			});
-		}
-
-		filtered_datasource = result;
-		resetPagination();
 	}
 
 	let is_loading = $state(false);
@@ -177,12 +140,6 @@
 	setContext("selected_skus", selected_skus);
 	setContext("checkbox_key", checkbox_update_key);
 	setContext("filter_update_key", filter_update_key);
-
-	$effect(() => {
-		if (filter_by_id.size >= 0 || sort_by_id.size >= 0) {
-			applyGridFilterAndSort();
-		}
-	});
 
 	let proxyUrl = "";
 	let baseUrl = "";
@@ -218,7 +175,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM LỌC VÀ TÍNH TOÁN DỮ LIỆU BẢNG ĐỘC LẬP TỪNG TRANG
+	// 🟢 HÀM LỌC NGUYÊN BẢN GỐC ĐẢM BẢO KHÔNG LỖI CẢ 3 TRANG
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -319,8 +276,8 @@
 			updateKeys.dsource = datasource as any;
 			updateKeys.headerSorterKey++;
 
-			applyGridFilterAndSort();
-			rowCount = filtered_datasource.length;
+			rowCount = datasource.length;
+			resetPagination();
 			grid_key++;
 		} catch (e) {
 			console.error("Lỗi applyTabFilter:", e);
@@ -351,7 +308,7 @@
 	}
 
 	function select_all() {
-		for (let x of filtered_datasource) selected_skus.add(x.sku);
+		for (let x of datasource) selected_skus.add(x.sku);
 		checkbox_update_key.k += 1;
 	}
 
@@ -360,11 +317,10 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO BẢO VỆ PROMISE AN TOÀN TUYỆT ĐỐI
+	// ⚡ HÀM KHỞI TẠO TẢI ĐẦY ĐỦ DỮ LIỆU
 	async function initialize() {
 		is_loading = true;
 		try {
-			// 1. Tải danh sách Sản phẩm & Tồn kho
 			let loc_and_variant = await Promise.all([
 				get_locations().catch(() => []), 
 				get_active_products().catch(() => new Map())
@@ -376,10 +332,8 @@
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
 			if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG: Hiển thị lập tức, không kéo đơn
 				applyTabFilter();
 			} else {
-				// 🚨 ĐẶT HÀNG & 🚚 CHUYỂN HÀNG: Kéo đơn an toàn có bọc Try-Catch
 				try {
 					let order_and_transfer_records = await Promise.all([
 						fetch_order_record(variant_by_id).catch(() => []),
@@ -387,8 +341,7 @@
 					]);
 					order_records = order_and_transfer_records[0] || [];
 					transfer_records = order_and_transfer_records[1] || [];
-				} catch (errRecords) {
-					console.warn("Lỗi kéo đơn đệm, bỏ qua để hiện bảng:", errRecords);
+				} catch (eOrder) {
 					order_records = [];
 					transfer_records = [];
 				}
@@ -446,8 +399,8 @@
 						is_loading = true;
 						try {
 							const items = selected_skus.size > 0 
-								? filtered_datasource.filter((x) => selected_skus.has(x.sku))
-								: filtered_datasource;
+								? datasource.filter((x) => selected_skus.has(x.sku))
+								: datasource;
 							const target_label = transfer_locations.find(x => x.id === Number(c_location_id))?.label || "Kho";
 							await export_phieu_chuyen_hang_sapo(items, target_label);
 						} finally {
@@ -476,14 +429,14 @@
 									<Button type="primary" onclick={async () => {
 										is_loading = true;
 										try {
-											const items = selected_skus.size > 0 ? selected_skus : new Set(filtered_datasource.map(i => i.sku));
-											await export_kiem_hang_to_xlsx(items, filtered_datasource, c_location);
+											const items = selected_skus.size > 0 ? selected_skus : new Set(datasource.map(i => i.sku));
+											await export_kiem_hang_to_xlsx(items, datasource, c_location);
 										} finally {
 											is_loading = false;
 											export_popup_shown = false;
 										}
 									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : filtered_datasource.length} sản phẩm (Kiểm Hàng)
+										Xuất {selected_skus.size > 0 ? selected_skus.size : datasource.length} sản phẩm (Kiểm Hàng)
 									</Button>
 
 								{:else}
@@ -492,14 +445,14 @@
 									<Button type="primary" onclick={async () => {
 										is_loading = true;
 										try {
-											const items = selected_skus.size > 0 ? selected_skus : new Set(filtered_datasource.map(i => i.sku));
-											await export_selected_to_xlsx(items, filtered_datasource, c_location);
+											const items = selected_skus.size > 0 ? selected_skus : new Set(datasource.map(i => i.sku));
+											await export_selected_to_xlsx(items, datasource, c_location);
 										} finally {
 											is_loading = false;
 											export_popup_shown = false;
 										}
 									}}>
-										Xuất {selected_skus.size > 0 ? selected_skus.size : filtered_datasource.length} sản phẩm (Nhập Hàng)
+										Xuất {selected_skus.size > 0 ? selected_skus.size : datasource.length} sản phẩm (Nhập Hàng)
 									</Button>
 								{/if}
 							</div>
@@ -515,7 +468,7 @@
 		<!-- BANNER THÔNG BÁO TƯƠNG ỨNG TỪNG TRANG -->
 		{#if isStockTransfer}
 			<div style="width: 100%; padding: 8px 12px; background-color: #f0fdf4; color: #166534; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #bbf7d0;">
-				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {filtered_datasource.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}).
+				🚚 ĐIỀU CHUYỂN KHO: Đang gợi ý {datasource.length} sản phẩm cần chuyển từ Kho Tổng LYO Group sang ({transfer_locations.find(x => x.id === Number(c_location_id))?.label}).
 			</div>
 		{:else if isStockCheck}
 			<div style="width: 100%; padding: 8px 12px; background-color: #e7f5ff; color: #1864ab; margin-bottom: 10px; font-weight: bold; font-size: 13px; border-radius: 5px; border: 1px solid #a5d8ff;">
@@ -553,8 +506,8 @@
 			</div>
 
 			<div class="page-info">
-				{#if filtered_datasource.length > 0}
-					Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, filtered_datasource.length)}</b> trên tổng <b>{filtered_datasource.length}</b> kết quả
+				{#if datasource.length > 0}
+					Từ <b>{(currentPage - 1) * itemsPerPage + 1}</b> đến <b>{Math.min(currentPage * itemsPerPage, datasource.length)}</b> trên tổng <b>{datasource.length}</b> kết quả
 				{:else}
 					Không có kết quả nào
 				{/if}
