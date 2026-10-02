@@ -66,7 +66,7 @@
 		{ id: "image", header: "Ảnh", cell: ImageCell },
 		{ id: "image_path", hidden: true },
 
-		// 🚚 CỘT CHÍNH CỦA CHUYỂN HÀNG: ĐƯỢC ĐƯA LÊN ĐẦU BẢNG
+		// 🚚 CỘT CHÍNH CỦA CHUYỂN HÀNG
 		{ id: "c_transfer_suggest", hidden: !isStockTransfer, resize: true, width: 140, header: [{ cell: HeaderWithSortUi, text: "🚨 SL CẦN\nCHUYỂN" }] },
 		{ id: "c_on_hand_group", hidden: !isStockTransfer, resize: true, width: 130, header: [{ cell: HeaderWithSortUi, text: "Tồn Kho\nGroup" }] },
 
@@ -172,21 +172,21 @@
 		goto("/authentication");
 	}
 
-	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU CẢI TIẾN CHẶN CÁC MÃ SKU CẤM
+	// 🟢 HÀM TÍNH TOÁN LỌC DỮ LIỆU
 	function applyTabFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
 			if (isStockTransfer) {
-				// 🚚 TRANG CHUYỂN HÀNG
+				// 🚚 TRANG CHUYỂN HÀNG: DỰA TRÊN SẢN LƯỢNG BÁN CỦA KHO CHI NHÁNH NHẬN
 				calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 				let transfer_list: any[] = [];
 				variant_by_id.forEach((v) => {
-					// 🚫 CHẶN COMBO & MÃ SKU CẤM (LYO9566, LYO9131, LYO6928, LYO9874, LYO9858, LYO9873...)
+					// 🚫 CHẶN MÃ SKU CẤM VÀ COMBO
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-					// 1. Tồn Kho Group
+					// 1. Tồn Kho Group (789505)
 					let stock_group = 0;
 					const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 					if (inv_group) {
@@ -240,7 +240,7 @@
 				datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
 			} else if (isStockCheck) {
-				// 📋 TRANG KIỂM HÀNG
+				// 📋 TRANG KIỂM HÀNG: HOÀN TOÀN KHÔNG CẦN ĐƠN HÀNG
 				let stock_check_list: ProductV2[] = [];
 				variant_by_id.forEach((v) => {
 					if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
@@ -314,9 +314,11 @@
 		checkbox_update_key.k += 1;
 	}
 
+	// ⚡ KHỞI TẠO TỐI ƯU THEO ĐÚNG BẢN CHẤT TỪNG TRANG
 	async function initialize() {
 		is_loading = true;
 		try {
+			// 1. Kéo nhanh danh sách Sản phẩm & Tồn Kho từ Sapo
 			let loc_and_variant = await Promise.all([get_locations(), get_active_products()]);
 			if (loc_and_variant[0] && loc_and_variant[0].length > 0) locations = loc_and_variant[0];
 			variant_by_id = loc_and_variant[1] || new Map();
@@ -324,21 +326,27 @@
 			c_location_id = isStockTransfer ? 789503 : Number(locations[0].id);
 			c_location = (isStockTransfer ? transfer_locations : locations)[0];
 
-			if (!isStockCheck) {
+			if (isStockCheck) {
+				// 📋 KIỂM HÀNG: Hiển thị ngay 100%, BỎ QUA hoàn toàn việc kéo đơn hàng!
+				applyTabFilter();
+				is_loading = false;
+			} else {
+				// 🚚 CHUYỂN HÀNG & 🚨 ĐẶT HÀNG: Kéo đơn hàng để tính sản lượng bán
 				let order_and_transfer_records = await Promise.all([
 					fetch_order_record(variant_by_id),
 					fetch_inventory_transfer(variant_by_id),
 				]);
 				order_records = order_and_transfer_records[0] || [];
 				transfer_records = order_and_transfer_records[1] || [];
+
+				applyTabFilter();
+				is_loading = false;
 			}
 
-			applyTabFilter();
 			setLastDataUpdate();
 			low_sales_skus = get_low_sales_skus(datasource);
 		} catch (error) {
 			console.error("Lỗi khởi tạo:", error);
-		} finally {
 			is_loading = false;
 		}
 	}
