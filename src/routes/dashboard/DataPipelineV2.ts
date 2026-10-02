@@ -7,6 +7,8 @@ const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
 export const TARGET_LOCATION_ID_NEW = 789505; 
 export const TARGET_LOCATION_ID_GROUP = 789505; 
 export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; 
+export const TARGET_LOCATION_ID_BA_TRIEU = 789503;       // 🟢 Kho 146 Bà Triệu
+export const TARGET_LOCATION_ID_PHAM_VAN_DONG = 789504;   // 🟢 Kho 180 Phạm Văn Đồng
 
 export interface OrderRecordV2 {
 	sku: string;
