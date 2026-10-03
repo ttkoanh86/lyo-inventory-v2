@@ -83,7 +83,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	const nm = (name || "").trim().toLowerCase();
 	const clean_sku = (sku || "").trim().toUpperCase();
 
-	// 🚫 1. Danh sách 7 mã SKU cấm tuyệt đối
+	// 🚫 1. Danh sách 7 mã SKU cấm tuyệt đối (Đã bổ sung LYO8946)
 	const blocked_skus = new Set([
 		"LYO9566",
 		"LYO9131",
@@ -312,7 +312,7 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
-// 🟢 HÀM KHỞI TẠO ĐẮC THÙ CHỜ TẠO BẢNG XONG MỚI TRẢ VỀ DB (ĐỘC LẬP & AN TOÀN CHO TẤT CẢ TRÌNH DUYỆT MỚI)
+// 🟢 HÀM KHỞI TẠO ĐẮC THÙ CHỜ TẠO BẢNG XONG MỚI TRẢ VỀ DB (AN TOÀN CHO TRÌNH DUYỆT MỚI)
 function get_idb_connection(): Promise<IDBDatabase | null> {
 	return new Promise((resolve) => {
 		try {
@@ -346,7 +346,7 @@ function get_idb_connection(): Promise<IDBDatabase | null> {
 	});
 }
 
-// 🟢 HÀM ĐỌC INDEXEDDB CHUẨN XÁC VỚI DB KẾT NỐI AN TOÀN
+// 🟢 HÀM ĐỌC INDEXEDDB AN TOÀN
 export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	const db = await get_idb_connection();
 	if (!db) return [];
@@ -373,7 +373,7 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	});
 }
 
-// 🟢 HÀM GHI INDEXEDDB CHUẨN XÁC VỚI DB KẾT NỐI AN TOÀN
+// 🟢 HÀM GHI INDEXEDDB AN TOÀN
 export async function updateIndexedDB(records: RecordItem[]) {
 	const db = await get_idb_connection();
 	if (!db) return;
@@ -418,16 +418,16 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG TỐI ƯU CÓ BỘ LỌC CỤ THỂ THEO KHO
+// 🟢 HÀM KÉO ĐƠN CHUẨN LOGIC: CHƯA CÓ CACHE THÌ KÉO ĐỦ 30 NGÀY, ĐÃ CÓ THÌ KÉO BÙ PHẦN MỚI
 export async function fetch_order_record(
 	variant_by_id: Map<number, ProductV2>,
 	target_location_ids: number[] = []
 ) {
 	let existing_keys = new Set<string>();
-	
 	let stored_records = await getStoredOrderRecords();
 	let max_stored_ts = 0;
 
+	// 1. Kiểm tra CSDL đệm hiện tại đã lưu những đơn nào
 	stored_records.forEach((r) => {
 		const record_key = `ORD_${r.order_id}_${r.sku}_${r.location_id}`;
 		existing_keys.add(record_key);
@@ -436,9 +436,13 @@ export async function fetch_order_record(
 
 	const now_ts = new Date().getTime();
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
-	const min_valid_ts = now_ts - thirty_days_ts;
+	const min_valid_ts = now_ts - thirty_days_ts; // Mốc tròn 30 ngày trước
 
-	const fetch_since_ts = max_stored_ts > min_valid_ts ? max_stored_ts : min_valid_ts;
+	// 🎯 XÁC ĐỊNH MỐC DỪNG CHUẨN LOGIC CỦA DÌ:
+	// - Nếu TRÌNH DUYỆT CỦ (Đã có đệm): Dừng khi quét chạm đơn cũ hơn hoặc bằng max_stored_ts (kéo bù phần mới).
+	// - Nếu TRÌNH DUYỆT MỚI (Cache rỗng): Chỉ dừng khi quét chạm đơn cũ hơn 30 ngày (min_valid_ts).
+	const has_cache = stored_records.length > 0 && max_stored_ts > min_valid_ts;
+	const stop_threshold_ts = has_cache ? max_stored_ts : min_valid_ts;
 
 	let new_records: RecordItem[] = [];
 	let page = 1;
@@ -456,14 +460,16 @@ export async function fetch_order_record(
 				const j = resp.data || {};
 				const orders = j.orders || [];
 
-				if (orders.length === 0) { running = false; break; }
-
-				let reached_existing_date = false;
+				if (orders.length === 0) { 
+					running = false; 
+					break; 
+				}
 
 				for (const order of orders) {
 					if (order.status !== "cancelled") {
 						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
 
+						// Bỏ qua đơn nếu không thuộc danh sách kho đang chọn
 						if (allowed_loc_set && !allowed_loc_set.has(actual_loc_id)) {
 							continue;
 						}
@@ -471,12 +477,14 @@ export async function fetch_order_record(
 						const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
 						const order_ts = parseSapoDate(date_str);
 
-						if (order_ts > 0 && order_ts <= fetch_since_ts && stored_records.length > 0) {
-							reached_existing_date = true;
+						// 🛑 KIỂM TRA ĐIỀU KIỆN DỪNG ĐÚNG CHUẨN:
+						if (order_ts > 0 && order_ts <= stop_threshold_ts) {
+							running = false;
 							break;
 						}
 
-						if (order_ts >= min_valid_ts) {
+						// Lưu đơn nằm trong khoảng 30 ngày gần đây
+						if (order_ts >= min_valid_ts && order_ts <= now_ts) {
 							const line_items = order.order_line_items || order.line_items || order.items || [];
 							line_items.forEach((line_item: any, index: number) => {
 								const qty = Number(line_item.quantity) || 0;
@@ -526,14 +534,11 @@ export async function fetch_order_record(
 					}
 				}
 
-				if (reached_existing_date) {
-					running = false;
-					break;
-				}
-
 				page++;
 				await sleep(10);
-			} else { running = false; }
+			} else { 
+				running = false; 
+			}
 		} catch (e: any) {
 			console.error("[LỖI KÉO ĐƠN]:", e);
 			running = false;
