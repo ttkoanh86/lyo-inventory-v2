@@ -176,17 +176,32 @@
 		goto("/authentication");
 	}
 
-	// 🟢 CÔNG THỨC DỰ BÁO CẦN CHUYỂN HÀNG DÀNH RIÊNG CHO KHO CHI NHÁNH
+	// 🟢 CÔNG THỨC CHUẨN 100%: LẤY SỐ BÁN TOÀN HỆ THỐNG ĐỂ TÍNH GỢI Ý CHUYỂN HÀNG
 	function applyTransferFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
+
+			// 1. Kéo sản lượng bán 30 ngày trên toàn hệ thống (Group) để có c_restock chuẩn (Bông Miniso = 54)
+			calculate_restock_data([...order_records, ...transfer_records], variant_by_id, TARGET_LOCATION_ID_GROUP);
+			
+			// Lưu lại số bán toàn hệ thống cho từng sản phẩm
+			const group_sales_map = new Map<number, number>();
+			variant_by_id.forEach((v, id) => {
+				group_sales_map.set(id, v.c_restock || 0);
+			});
+
+			// 2. Kéo dữ liệu tồn thực tế theo Kho Chi Nhánh được chọn
 			calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
 
 			let transfer_list: any[] = [];
-			variant_by_id.forEach((v) => {
+			variant_by_id.forEach((v, id) => {
 				if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-				// 1. Kiểm tra Tồn Kho Group
+				// Lấy lại số bán chuẩn 30 ngày toàn hệ thống
+				const sales_30d_group = group_sales_map.get(id) || 0;
+				v.c_restock = sales_30d_group;
+
+				// Tồn Kho Group
 				let stock_group = 0;
 				const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 				if (inv_group) {
@@ -202,19 +217,18 @@
 
 				if (stock_group <= 0) return;
 
-				// 2. Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận
+				// Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận
 				const inv_target = v.inventory_level_by_location.get(selectedLocId);
 				const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 				const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
 
 				const current_total_branch = stock_target + incoming_target;
-				const sales_30d = v.c_restock || 0;
 
 				let raw_need_transfer = 0;
 
-				if (sales_30d > 0) {
-					if (current_total_branch < 0.5 * sales_30d) {
-						raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
+				if (sales_30d_group > 0) {
+					if (current_total_branch < 0.5 * sales_30d_group) {
+						raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d_group - current_total_branch));
 					}
 				} else {
 					if (current_total_branch === 0 && stock_group >= 6) {
