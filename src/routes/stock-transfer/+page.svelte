@@ -24,7 +24,8 @@
 	import NameCell from "../dashboard/NameCell.svelte";
 	import { vi } from "../dashboard/Localization";
 	import { onMount, setContext } from "svelte";
-	import { writable } from "svelte/store";
+	// 🟢 IMPORT SVELTEMAP TỪ SVELTE/REACTIVITY ĐỂ BỘ LỌC CÓ PHẢN XẠ CHUẨN SVELTE 5
+	import { SvelteMap } from "svelte/reactivity";
 	import { normalizeToEnglish, type Filtering, type Location, type Sorting } from "../dashboard/Template";
 	import { lazyLoadStylesheets } from "../dashboard/lazyLoadScript";
 	import LoadingThrobber from "../dashboard/LoadingThrobber.svelte";
@@ -54,18 +55,15 @@
 		{ id: "brand", resize: true, width: 160, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] }
 	];
 
-	const filter_by_id: Map<string, Filtering> = $state(new Map());
-	const sort_by_id: Map<string, Sorting> = $state(new Map());
+	// 🟢 KHAI BÁO SVELTEMAP GIÚP BỘ LỌC CÓ PHẢN XẠ TỨC THÌ TRÊN SVELTE 5
+	const filter_by_id = new SvelteMap<string, Filtering>();
+	const sort_by_id = new SvelteMap<string, Sorting>();
 	
-	// 🟢 BIẾN TRIGGER ÉP SVELTE 5 TÍNH LẠI BẢNG KHI BẤM PHÍM LỌC
-	let filter_version = $state(0);
-
-	// 🟢 WRITABLE STORE TRUYỀN CONTEXT CHO HEADER POPUP UI
-	let updateKeysStore = writable({ headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] });
+	let updateKeys = $state({ headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] });
 
 	setContext("filterbyid", filter_by_id);
 	setContext("sortbyid", sort_by_id);
-	setContext("updatekeys", updateKeysStore);
+	setContext("updatekeys", updateKeys);
 
 	const responsive_fields = { 800: { columns: columns } };
 
@@ -73,10 +71,8 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU PHẢN XẠ CHUẨN XÁC VỚI FILTER_VERSION
+	// 🟢 TỰ ĐỘNG TÍNH LẠI BẢNG MỖI KHI SVELTEMAP CÓ TỔNG HỢP MỚI DỮ LIỆU
 	let display_datasource = $derived.by(() => {
-		// Đọc biến filter_version để Svelte 5 kích hoạt chạy lại khi bấm nút Lọc/Xóa Lọc
-		const _ver = filter_version; 
 		let result = [...datasource];
 
 		if (filter_by_id.size > 0) {
@@ -181,7 +177,6 @@
 		goto("/authentication");
 	}
 
-	// 🟢 TÍNH DỰ BÁO VÀ NẠP NGUYÊN BẢN STORE ĐỂ POPUP HEADER BẮT ĐƯỢC NHÃN HIỆU
 	function applyTransferFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -241,14 +236,10 @@
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
-			// 🟢 CẬP NHẬT QUA WRITABLE STORE VÀ NÂNG FILTER_VERSION
-			updateKeysStore.update((old) => ({
-				headerSorterKey: old.headerSorterKey + 1,
-				dsource: datasource,
-				dfiltered: datasource
-			}));
+			updateKeys.dsource = datasource;
+			updateKeys.dfiltered = datasource;
+			updateKeys.headerSorterKey++;
 
-			filter_version++;
 			resetPagination();
 			grid_key++;
 		} catch (e) {
@@ -263,7 +254,6 @@
 			selected_skus.clear();
 			filter_by_id.clear();
 			sort_by_id.clear();
-			filter_version++;
 		} finally {
 			is_loading = false;
 		}
@@ -313,27 +303,11 @@
 		}
 	}
 
-	// 🟢 KHỞI TẠO BẮT SỰ KIỆN CLICK TỪ POPUP HEADER ĐỂ TĂNG FILTER_VERSION
 	onMount(() => {
 		try {
 			lazyLoadStylesheets("https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css");
 		} catch (e) {}
-		
-		const handleGlobalClick = (e: MouseEvent) => {
-			const target = e.target as HTMLElement;
-			if (target && (target.innerText === "Ok" || target.innerText === "Xóa bộ lọc" || target.closest(".wx-popup") || target.closest(".header-sorter"))) {
-				setTimeout(() => {
-					filter_version++;
-				}, 100);
-			}
-		};
-
-		window.addEventListener("click", handleGlobalClick);
 		initialize();
-
-		return () => {
-			window.removeEventListener("click", handleGlobalClick);
-		};
 	});
 </script>
 
