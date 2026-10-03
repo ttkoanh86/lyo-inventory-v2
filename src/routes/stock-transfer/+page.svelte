@@ -167,7 +167,7 @@
 	const revoke_broadcast_channel = new BroadcastChannel("revoke");
 	async function logout() {
 		try {
-			await axios.delete(`${baseUrl}/revoke`, { headers: { Authorization: obtain_access_token() });
+			await axios.delete(`${baseUrl}/revoke`, { headers: { Authorization: obtain_access_token() } });
 		} catch (e) {}
 		localStorage.clear();
 		sessionStorage.clear();
