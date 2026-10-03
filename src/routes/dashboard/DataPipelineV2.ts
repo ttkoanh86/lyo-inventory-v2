@@ -1,14 +1,13 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
-// 🟢 Domain Proxy Render Singapore chính thức
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
 
 export const TARGET_LOCATION_ID_NEW = 789505; 
 export const TARGET_LOCATION_ID_GROUP = 789505; 
 export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; 
-export const TARGET_LOCATION_ID_BA_TRIEU = 789503;       // 🟢 Kho 146 Bà Triệu
-export const TARGET_LOCATION_ID_PHAM_VAN_DONG = 789504;   // 🟢 Kho 180 Phạm Văn Đồng
+export const TARGET_LOCATION_ID_BA_TRIEU = 789503;       // Kho 146 Bà Triệu
+export const TARGET_LOCATION_ID_PHAM_VAN_DONG = 789504;   // Kho 180 Phạm Văn Đồng
 
 export interface OrderRecordV2 {
 	sku: string;
@@ -77,7 +76,6 @@ export function parseSapoDate(dateStr: string): number {
 	return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 BỘ LỌC TỰ ĐỘNG CHẶN HÀNG KHUYẾN MÃI, MÃ ẢO & CÁC MÃ SKU ĐẶC BIỆT
 export function is_promotional_item(brand: string, name: string = "", sku: string = "") {
 	const br = (brand || "").trim().toLowerCase();
 	const nm = (name || "").trim().toLowerCase();
@@ -94,7 +92,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	return false;
 }
 
-// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY NGUYÊN BẢN CHUẨN XÁC
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN CHUẨN XÁC: CHỐNG LỖI CỘNG TRÙNG VỌT SỐ
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -104,7 +102,7 @@ export function calculate_restock_data(
 	records.sort((a, b) => b.t_unix - a.t_unix);
 
 	let sales_by_sku = new Map<string, number>();
-	let processed_keys = new Set<string>();
+	let processed_keys = new Set<string>(); // Khóa chống cộng trùng 1 đơn nhiều lần
 
 	const now_ts = new Date().getTime();
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
@@ -121,10 +119,14 @@ export function calculate_restock_data(
 		const rec_loc = Number(record.location_id);
 		const rec_order_id = (record as OrderRecordV2).order_id || 0;
 
-		const unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}_${record.t_unix}`;
+		const unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}`;
 
-		if (clean_sku && rec_loc === active_loc_id && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-			if (!processed_keys.has(unique_key)) {
+		if (clean_sku && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
+			// Điều kiện ghép kho đúng từng trường hợp:
+			const is_match = (rec_loc === active_loc_id) || 
+				(active_loc_id === TARGET_LOCATION_ID_GROUP && (rec_loc === TARGET_LOCATION_ID_GROUP || rec_loc === TARGET_LOCATION_ID_TRUNG_TAM));
+
+			if (is_match && !processed_keys.has(unique_key)) {
 				processed_keys.add(unique_key);
 				const current_sales = sales_by_sku.get(clean_sku) || 0;
 				sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
@@ -220,7 +222,6 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC (KÈM new Set DÚNG CÚ PHÁP)
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -265,7 +266,7 @@ export async function get_active_products() {
 							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
 							inventory_level_by_location: new Map(),
 							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: new Set<number>() // ✅ ĐÃ ĐÚNG "new Set"
+							order_history_by_location: new Set<number>()
 						};
 
 						if (variant.inventories && variant.inventories.length > 0) {
@@ -295,11 +296,10 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
-// 🟢 KHỞI TẠO INDEXEDDB CHỜ XONG BẢNG (TẠO CẢ 2 BẢNG CHO ĐẶT HÀNG VÀ CHUYỂN HÀNG)
 function get_idb_connection(): Promise<IDBDatabase | null> {
 	return new Promise((resolve) => {
 		try {
-			const request = indexedDB.open("LYOInventoryDB_V51", 1);
+			const request = indexedDB.open("LYOInventoryDB_V52", 1);
 
 			request.onupgradeneeded = function (event) {
 				const db = (event.target as IDBOpenDBRequest).result;
@@ -312,8 +312,7 @@ function get_idb_connection(): Promise<IDBDatabase | null> {
 			};
 
 			request.onsuccess = function () {
-				const db = request.result;
-				resolve(db);
+				resolve(request.result);
 			};
 
 			request.onerror = function () {
@@ -325,7 +324,6 @@ function get_idb_connection(): Promise<IDBDatabase | null> {
 	});
 }
 
-// 🟢 ĐỌC DỮ LIỆU TỪ BẢNG ĐỆM TƯƠNG ỨNG VỚI TRANG
 export async function getStoredOrderRecords(store_name: string): Promise<OrderRecordV2[]> {
 	const db = await get_idb_connection();
 	if (!db) return [];
@@ -357,7 +355,6 @@ export async function getStoredOrderRecords(store_name: string): Promise<OrderRe
 	});
 }
 
-// 🟢 GHI DỮ LIỆU VÀO BẢNG ĐỆM TƯƠNG ỨNG VỚI TRANG
 export async function updateIndexedDB(records: RecordItem[], store_name: string) {
 	const db = await get_idb_connection();
 	if (!db) return;
@@ -407,19 +404,14 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC: PHÂN LUỒNG TẠO ĐỆM ĐỘC LẬP HOÀN TOÀN TỪNG TRANG
+// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC: MẶC ĐỊNH LẤY KHO GROUP VÀ TRUNG TÂM CHO ĐẶT HÀNG
 export async function fetch_order_record(
 	variant_by_id: Map<number, ProductV2>,
-	target_location_ids: number[] = []
+	target_location_ids: number[] = [TARGET_LOCATION_ID_GROUP, TARGET_LOCATION_ID_TRUNG_TAM]
 ) {
-	// ⚡ TRANG KIỂM HÀNG KHÔNG TRUYỀN KHO -> BỎ QUA HOÀN TOÀN VIỆC KÉO ĐƠN
-	if (!target_location_ids || target_location_ids.length === 0) {
-		return [];
-	}
-
-	// Tách biệt tên bảng đệm theo kho yêu cầu
-	const is_ordering_page = target_location_ids.includes(TARGET_LOCATION_ID_GROUP) || target_location_ids.includes(TARGET_LOCATION_ID_TRUNG_TAM);
-	const store_name = is_ordering_page ? "OrderRecords_Ordering" : "OrderRecords_Transfer";
+	// Phân luồng bảng lưu trữ độc lập
+	const is_ordering = target_location_ids.includes(TARGET_LOCATION_ID_GROUP) || target_location_ids.includes(TARGET_LOCATION_ID_TRUNG_TAM);
+	const store_name = is_ordering ? "OrderRecords_Ordering" : "OrderRecords_Transfer";
 
 	let existing_keys = new Set<string>();
 	let stored_records = await getStoredOrderRecords(store_name);
@@ -463,7 +455,6 @@ export async function fetch_order_record(
 					if (order.status !== "cancelled") {
 						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
 
-						// 🎯 CHỈ LẤY ĐƠN CỦA ĐÚNG CÁC KHO ĐƯỢC CHỈ ĐỊNH
 						if (!allowed_loc_set.has(actual_loc_id)) {
 							continue;
 						}
@@ -523,7 +514,6 @@ export async function fetch_order_record(
 
 export async function fetch_inventory_transfer(p_variants: Map<number, ProductV2>) { return []; }
 
-// 🟢 HÀM ĐẨY TRỰC TIẾP PHIẾU CHUYỂN HÀNG LÊN SAPO
 export async function create_sapo_stock_transfer(
 	items: ProductV2[], 
 	target_location_id: number
