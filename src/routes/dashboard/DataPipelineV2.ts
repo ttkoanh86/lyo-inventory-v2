@@ -313,11 +313,12 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
-// 🟢 HÀM ĐỌC INDEXEDDB AN TOÀN
+// 🟢 HÀM ĐỌC INDEXEDDB ĐÃ ĐƯỢC PHẪU THUẬT AN TOÀN TRÁNH VĂNG LỖI TRÌNH DUYỆT MỚI
 export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	return new Promise((resolve) => {
 		try {
 			const request = indexedDB.open("LYOInventoryDB_V50", 1);
+
 			request.onupgradeneeded = function (event) {
 				const db = (event.target as IDBOpenDBRequest).result;
 				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
@@ -326,39 +327,53 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 					store.createIndex("site_id", "site_id");
 				}
 			};
+
 			request.onsuccess = function () {
 				const db = request.result;
+
+				// 🛡 BẢO VỆ AN TOÀN: Nếu CSDL chưa kịp tạo xong bảng OrderRecordsV2 thì đóng ngay và bỏ qua đệm
 				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
 					db.close();
 					resolve([]);
 					return;
 				}
+
 				try {
 					const tx = db.transaction("OrderRecordsV2", "readonly");
 					const store = tx.objectStore("OrderRecordsV2");
 					const getAllReq = store.getAll();
+
 					getAllReq.onsuccess = function () {
 						db.close();
 						resolve(getAllReq.result || []);
 					};
-					getAllReq.onerror = function () { db.close(); resolve([]); };
+
+					getAllReq.onerror = function () {
+						db.close();
+						resolve([]);
+					};
 				} catch (err) {
+					// Bắt sạch ngoại lệ transaction để ứng dụng không bị crash văng đơ
 					db.close();
 					resolve([]);
 				}
 			};
-			request.onerror = function () { resolve([]); };
+
+			request.onerror = function () {
+				resolve([]);
+			};
 		} catch (e) {
 			resolve([]);
 		}
 	});
 }
 
-// 🟢 HÀM GHI INDEXEDDB AN TOÀN
+// 🟢 HÀM GHI INDEXEDDB AN TOÀN TUYỆT ĐỐI
 export async function updateIndexedDB(records: RecordItem[]) {
 	return new Promise<void>((resolve) => {
 		try {
 			const request = indexedDB.open("LYOInventoryDB_V50", 1);
+
 			request.onupgradeneeded = function (event) {
 				const db = (event.target as IDBOpenDBRequest).result;
 				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
@@ -367,25 +382,51 @@ export async function updateIndexedDB(records: RecordItem[]) {
 					store.createIndex("site_id", "site_id");
 				}
 			};
+
 			request.onsuccess = function () {
 				const db = request.result;
-				const tx = db.transaction("OrderRecordsV2", "readwrite");
-				const store = tx.objectStore("OrderRecordsV2");
-				records.forEach((r) => {
-					store.put({
-						t_unix: r.t_unix,
-						quantity: r.quantity,
-						sku: (r.sku || "").trim().toUpperCase(),
-						location_id: Number(r.location_id),
-						is_composite: (r as OrderRecordV2).is_composite || false,
-						order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
-						site_id: r.site_id || "site_new",
-						type: (r as OrderRecordV2).order_id ? "order" : "transfer",
+
+				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+					db.close();
+					resolve();
+					return;
+				}
+
+				try {
+					const tx = db.transaction("OrderRecordsV2", "readwrite");
+					const store = tx.objectStore("OrderRecordsV2");
+
+					records.forEach((r) => {
+						store.put({
+							t_unix: r.t_unix,
+							quantity: r.quantity,
+							sku: (r.sku || "").trim().toUpperCase(),
+							location_id: Number(r.location_id),
+							is_composite: (r as OrderRecordV2).is_composite || false,
+							order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
+							site_id: r.site_id || "site_new",
+							type: (r as OrderRecordV2).order_id ? "order" : "transfer",
+						});
 					});
-				});
-				tx.oncomplete = function () { db.close(); resolve(); };
+
+					tx.oncomplete = function () {
+						db.close();
+						resolve();
+					};
+
+					tx.onerror = function () {
+						db.close();
+						resolve();
+					};
+				} catch (err) {
+					db.close();
+					resolve();
+				}
 			};
-			request.onerror = function () { resolve(); };
+
+			request.onerror = function () {
+				resolve();
+			};
 		} catch (e) {
 			resolve();
 		}
@@ -398,10 +439,10 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN HÀNG TỐI ƯU CÓ BỘ LỌC CỤ THỂ THEO KHO (CHỈ KÉO KHO BÀ TRIỆU & PHẠM VĂN ĐỒNG)
+// 🟢 HÀM KÉO ĐƠN HÀNG TỐI ƯU CÓ BỘ LỌC CỤ THỂ THEO KHO
 export async function fetch_order_record(
 	variant_by_id: Map<number, ProductV2>,
-	target_location_ids: number[] = [] // Truyền danh sách ID Kho cần lấy
+	target_location_ids: number[] = []
 ) {
 	let existing_keys = new Set<string>();
 	
@@ -444,7 +485,6 @@ export async function fetch_order_record(
 					if (order.status !== "cancelled") {
 						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
 
-						// 🟢 NẾU TRUYỀN BỘ LỌC KHO: BỎ QUA TOÀN BỘ ĐƠN CỦA KHO KHÔNG LIÊN QUAN (NHƯ KHO GROUP)
 						if (allowed_loc_set && !allowed_loc_set.has(actual_loc_id)) {
 							continue;
 						}
