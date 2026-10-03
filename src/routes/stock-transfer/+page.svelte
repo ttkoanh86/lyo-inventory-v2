@@ -56,7 +56,7 @@
 	const filter_by_id: Map<string, Filtering> = $state(new Map());
 	const sort_by_id: Map<string, Sorting> = $state(new Map());
 	
-	// 🟢 TRUYỀN CONTEXT UPDATEKEYS ĐỦ CHUẨN ĐỂ POPUP LỌC UI ĐỌC ĐƯỢC DANH SÁCH NHÃN HIỆU
+	// 🟢 TRUYỀN CONTEXT UPDATEKEYS ĐỦ CHUẨN DÀNH CHO POPUP HEADER UI
 	let updateKeys = $state({ headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] });
 
 	setContext("filterbyid", filter_by_id);
@@ -69,7 +69,7 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU CHUẨN XÁC DÀNH RIÊNG TRANG CHUYỂN HÀNG
+	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU THUẦN TÚY (TUYỆT ĐỐI KHÔNG SỬA STATE BÊN TRONG DERIVED)
 	let display_datasource = $derived.by(() => {
 		let result = [...datasource];
 
@@ -77,7 +77,7 @@
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// 1. Lọc theo Checkbox nhãn hiệu / SKU (Bắt chính xác mảng Set)
+				// 1. Lọc theo Checkbox nhãn hiệu / SKU
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
@@ -120,8 +120,6 @@
 			});
 		}
 
-		// Cập nhật mảng kết quả sau lọc vào context để UI đồng bộ
-		updateKeys.dfiltered = result;
 		return result;
 	});
 
@@ -169,7 +167,7 @@
 	const revoke_broadcast_channel = new BroadcastChannel("revoke");
 	async function logout() {
 		try {
-			await axios.delete(`${baseUrl}/revoke`, { headers: { Authorization: obtain_access_token() } });
+			await axios.delete(`${baseUrl}/revoke`, { headers: { Authorization: obtain_access_token() });
 		} catch (e) {}
 		localStorage.clear();
 		sessionStorage.clear();
@@ -239,7 +237,7 @@
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
-			// 🟢 KÍCH HOẠT NẠP DỮ LIỆU + TĂNG KEY ĐỂ HEADER POPUP LOAD ĐỦ NHÃN HIỆU
+			// 🟢 NẠP DỮ LIỆU ĐÚNG NƠI AN TOÀN CHO HEADER POPUP LỌC
 			updateKeys.dsource = datasource;
 			updateKeys.dfiltered = datasource;
 			updateKeys.headerSorterKey++;
