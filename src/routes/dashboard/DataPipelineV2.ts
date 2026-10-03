@@ -1,13 +1,14 @@
 import axios from "axios";
 import { type Location } from "./Template";
 
+// 🟢 Domain Proxy Render Singapore chính thức
 const proxyUrl = "https://lyo-inventory-proxy-sg.onrender.com/api";
 
 export const TARGET_LOCATION_ID_NEW = 789505; 
 export const TARGET_LOCATION_ID_GROUP = 789505; 
 export const TARGET_LOCATION_ID_TRUNG_TAM = 789501; 
-export const TARGET_LOCATION_ID_BA_TRIEU = 789503;       // Kho 146 Bà Triệu
-export const TARGET_LOCATION_ID_PHAM_VAN_DONG = 789504;   // Kho 180 Phạm Văn Đồng
+export const TARGET_LOCATION_ID_BA_TRIEU = 789503;       // 🟢 Kho 146 Bà Triệu
+export const TARGET_LOCATION_ID_PHAM_VAN_DONG = 789504;   // 🟢 Kho 180 Phạm Văn Đồng
 
 export interface OrderRecordV2 {
 	sku: string;
@@ -76,6 +77,7 @@ export function parseSapoDate(dateStr: string): number {
 	return new Date(dateStr).getTime() || 0;
 }
 
+// 🟢 BỘ LỌC TỰ ĐỘNG CHẶN HÀNG KHUYẾN MÃI, MÃ ẢO & CÁC MÃ SKU ĐẶC BIỆT
 export function is_promotional_item(brand: string, name: string = "", sku: string = "") {
 	const br = (brand || "").trim().toLowerCase();
 	const nm = (name || "").trim().toLowerCase();
@@ -92,7 +94,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	return false;
 }
 
-// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN CHUẨN XÁC: CHỐNG LỖI CỘNG TRÙNG VỌT SỐ
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN: TRIỆT HẠ LỖI VỌT SỐ BẰNG BỘ LỌC CHỐNG CỘNG TRÙNG
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -102,7 +104,7 @@ export function calculate_restock_data(
 	records.sort((a, b) => b.t_unix - a.t_unix);
 
 	let sales_by_sku = new Map<string, number>();
-	let processed_keys = new Set<string>(); // Khóa chống cộng trùng 1 đơn nhiều lần
+	let processed_keys = new Set<string>(); // Bộ đệm chống tính trùng 1 đơn nhiều lần
 
 	const now_ts = new Date().getTime();
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
@@ -119,14 +121,14 @@ export function calculate_restock_data(
 		const rec_loc = Number(record.location_id);
 		const rec_order_id = (record as OrderRecordV2).order_id || 0;
 
-		const unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}`;
+		const unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}_${record.t_unix}`;
 
 		if (clean_sku && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-			// Điều kiện ghép kho đúng từng trường hợp:
-			const is_match = (rec_loc === active_loc_id) || 
+			// Lọc theo kho tương ứng
+			const is_matching = (rec_loc === active_loc_id) || 
 				(active_loc_id === TARGET_LOCATION_ID_GROUP && (rec_loc === TARGET_LOCATION_ID_GROUP || rec_loc === TARGET_LOCATION_ID_TRUNG_TAM));
 
-			if (is_match && !processed_keys.has(unique_key)) {
+			if (is_matching && !processed_keys.has(unique_key)) {
 				processed_keys.add(unique_key);
 				const current_sales = sales_by_sku.get(clean_sku) || 0;
 				sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
@@ -222,6 +224,7 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
+// 🟢 KÉO SẢN PHẨM CÓ CÚ PHÁP new Set KHÔNG BỊ LỖI RUNTIME
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -266,7 +269,7 @@ export async function get_active_products() {
 							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
 							inventory_level_by_location: new Map(),
 							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: new Set<number>()
+							order_history_by_location: new Set<number>() // ✅ CÚ PHÁP ĐÚNG
 						};
 
 						if (variant.inventories && variant.inventories.length > 0) {
@@ -296,18 +299,17 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
+// 🟢 MỞ CSDL INDEXEDDB CHUẨN DÙNG CHUNG
 function get_idb_connection(): Promise<IDBDatabase | null> {
 	return new Promise((resolve) => {
 		try {
-			const request = indexedDB.open("LYOInventoryDB_V52", 1);
+			const request = indexedDB.open("LYOInventoryDB_V55", 1);
 
 			request.onupgradeneeded = function (event) {
 				const db = (event.target as IDBOpenDBRequest).result;
-				if (!db.objectStoreNames.contains("OrderRecords_Ordering")) {
-					db.createObjectStore("OrderRecords_Ordering", { autoIncrement: true });
-				}
-				if (!db.objectStoreNames.contains("OrderRecords_Transfer")) {
-					db.createObjectStore("OrderRecords_Transfer", { autoIncrement: true });
+				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
+					const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
+					store.createIndex("type", "type");
 				}
 			};
 
@@ -324,24 +326,30 @@ function get_idb_connection(): Promise<IDBDatabase | null> {
 	});
 }
 
-export async function getStoredOrderRecords(store_name: string): Promise<OrderRecordV2[]> {
+// 🟢 ĐỌC ĐỆM VÀ TỰ LỌC LẠI CHỐNG TRÙNG LẶP DỮ LIỆU CŨ
+export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	const db = await get_idb_connection();
 	if (!db) return [];
 
 	return new Promise((resolve) => {
 		try {
-			if (!db.objectStoreNames.contains(store_name)) {
-				db.close();
-				resolve([]);
-				return;
-			}
-			const tx = db.transaction(store_name, "readonly");
-			const store = tx.objectStore(store_name);
+			const tx = db.transaction("OrderRecordsV2", "readonly");
+			const store = tx.objectStore("OrderRecordsV2");
 			const getAllReq = store.getAll();
 
 			getAllReq.onsuccess = function () {
 				db.close();
-				resolve(getAllReq.result || []);
+				const raw_records = getAllReq.result || [];
+				
+				const unique_map = new Map<string, OrderRecordV2>();
+				raw_records.forEach((r: OrderRecordV2) => {
+					const key = `${r.order_id}_${(r.sku || "").trim().toUpperCase()}_${r.location_id}`;
+					if (!unique_map.has(key)) {
+						unique_map.set(key, r);
+					}
+				});
+
+				resolve(Array.from(unique_map.values()));
 			};
 
 			getAllReq.onerror = function () {
@@ -355,19 +363,14 @@ export async function getStoredOrderRecords(store_name: string): Promise<OrderRe
 	});
 }
 
-export async function updateIndexedDB(records: RecordItem[], store_name: string) {
+export async function updateIndexedDB(records: RecordItem[]) {
 	const db = await get_idb_connection();
 	if (!db) return;
 
 	return new Promise<void>((resolve) => {
 		try {
-			if (!db.objectStoreNames.contains(store_name)) {
-				db.close();
-				resolve();
-				return;
-			}
-			const tx = db.transaction(store_name, "readwrite");
-			const store = tx.objectStore(store_name);
+			const tx = db.transaction("OrderRecordsV2", "readwrite");
+			const store = tx.objectStore("OrderRecordsV2");
 
 			records.forEach((r) => {
 				store.put({
@@ -404,17 +407,13 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC: MẶC ĐỊNH LẤY KHO GROUP VÀ TRUNG TÂM CHO ĐẶT HÀNG
+// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC NGUYÊN BẢN: BẮT ĐỦ ĐƠN 30 NGÀY CHO MỌI KHO
 export async function fetch_order_record(
 	variant_by_id: Map<number, ProductV2>,
-	target_location_ids: number[] = [TARGET_LOCATION_ID_GROUP, TARGET_LOCATION_ID_TRUNG_TAM]
+	target_location_ids: number[] = []
 ) {
-	// Phân luồng bảng lưu trữ độc lập
-	const is_ordering = target_location_ids.includes(TARGET_LOCATION_ID_GROUP) || target_location_ids.includes(TARGET_LOCATION_ID_TRUNG_TAM);
-	const store_name = is_ordering ? "OrderRecords_Ordering" : "OrderRecords_Transfer";
-
 	let existing_keys = new Set<string>();
-	let stored_records = await getStoredOrderRecords(store_name);
+	let stored_records = await getStoredOrderRecords();
 	let max_stored_ts = 0;
 
 	stored_records.forEach((r) => {
@@ -427,14 +426,13 @@ export async function fetch_order_record(
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
 	const min_valid_ts = now_ts - thirty_days_ts;
 
-	const has_valid_cache = stored_records.length > 100 && max_stored_ts > min_valid_ts;
+	// CHỈ DỪNG NẾU ĐÃ CÓ LƯỢNG CACHE ĐỦ LỚN (> 300 DÒNG)
+	const has_valid_cache = stored_records.length > 300 && max_stored_ts > min_valid_ts;
 	const stop_threshold_ts = has_valid_cache ? max_stored_ts : min_valid_ts;
 
 	let new_records: RecordItem[] = [];
 	let page = 1;
 	let running = true;
-
-	const allowed_loc_set = new Set(target_location_ids);
 
 	while (running) {
 		try {
@@ -454,10 +452,6 @@ export async function fetch_order_record(
 				for (const order of orders) {
 					if (order.status !== "cancelled") {
 						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
-
-						if (!allowed_loc_set.has(actual_loc_id)) {
-							continue;
-						}
 
 						const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
 						const order_ts = parseSapoDate(date_str);
@@ -505,7 +499,7 @@ export async function fetch_order_record(
 	}
 
 	if (new_records.length > 0) {
-		await updateIndexedDB(new_records, store_name);
+		await updateIndexedDB(new_records);
 	}
 
 	setLastDataUpdate();
