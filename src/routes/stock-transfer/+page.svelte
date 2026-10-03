@@ -24,7 +24,6 @@
 	import NameCell from "../dashboard/NameCell.svelte";
 	import { vi } from "../dashboard/Localization";
 	import { onMount, setContext } from "svelte";
-	// 🟢 IMPORT SVELTEMAP TỪ SVELTE/REACTIVITY ĐỂ BỘ LỌC CÓ PHẢN XẠ CHUẨN SVELTE 5
 	import { SvelteMap } from "svelte/reactivity";
 	import { normalizeToEnglish, type Filtering, type Location, type Sorting } from "../dashboard/Template";
 	import { lazyLoadStylesheets } from "../dashboard/lazyLoadScript";
@@ -55,7 +54,7 @@
 		{ id: "brand", resize: true, width: 160, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] }
 	];
 
-	// 🟢 KHAI BÁO SVELTEMAP GIÚP BỘ LỌC CÓ PHẢN XẠ TỨC THÌ TRÊN SVELTE 5
+	// 🟢 BỘ LỌC DÙNG SVELTEMAP ĐỂ BẮT ĐÚNG TÍN HIỆU PHẢN XẠ TRÊN SVELTE 5
 	const filter_by_id = new SvelteMap<string, Filtering>();
 	const sort_by_id = new SvelteMap<string, Sorting>();
 	
@@ -71,7 +70,7 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 TỰ ĐỘNG TÍNH LẠI BẢNG MỖI KHI SVELTEMAP CÓ TỔNG HỢP MỚI DỮ LIỆU
+	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU TỰ ĐỘNG CHẠY KHI PHÂN LỌC MỚI ĐƯỢC CHỌN
 	let display_datasource = $derived.by(() => {
 		let result = [...datasource];
 
@@ -177,6 +176,7 @@
 		goto("/authentication");
 	}
 
+	// 🟢 CÔNG THỨC DỰ BÁO CẦN CHUYỂN HÀNG DÀNH RIÊNG CHO KHO CHI NHÁNH
 	function applyTransferFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -186,6 +186,7 @@
 			variant_by_id.forEach((v) => {
 				if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
+				// 1. Kiểm tra Tồn Kho Group
 				let stock_group = 0;
 				const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 				if (inv_group) {
@@ -201,6 +202,7 @@
 
 				if (stock_group <= 0) return;
 
+				// 2. Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận
 				const inv_target = v.inventory_level_by_location.get(selectedLocId);
 				const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 				const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
@@ -236,6 +238,7 @@
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
+			// Nạp dữ liệu vào context để Popup UI đọc đúng danh sách Nhãn hiệu
 			updateKeys.dsource = datasource;
 			updateKeys.dfiltered = datasource;
 			updateKeys.headerSorterKey++;
@@ -269,6 +272,7 @@
 		checkbox_update_key.k += 1;
 	}
 
+	// ⚡ KHỞI TẠO TẢI TOÀN BỘ ĐƠN HÀNG (KHÔNG TRUYỀN THAM SỐ MẢNG LỌC HẸP ĐỂ TRÁNH THIẾU DỮ LIỆU BÁN)
 	async function initialize() {
 		is_loading = true;
 		try {
@@ -281,9 +285,8 @@
 			variant_by_id = prods || new Map();
 
 			try {
-				const targetLocations = [TARGET_LOCATION_ID_BA_TRIEU, TARGET_LOCATION_ID_PHAM_VAN_DONG];
 				let res = await Promise.all([
-					fetch_order_record(variant_by_id, targetLocations).catch(() => []),
+					fetch_order_record(variant_by_id).catch(() => []),
 					fetch_inventory_transfer(variant_by_id).catch(() => [])
 				]);
 				order_records = res[0] || [];
