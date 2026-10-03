@@ -77,24 +77,69 @@ export function parseSapoDate(dateStr: string): number {
 	return new Date(dateStr).getTime() || 0;
 }
 
-// 🟢 BỘ LỌC TỰ ĐỘNG CHẶN HÀNG KHUYẾN MÃI, MÃ ẢO & CÁC MÃ SKU ĐẶC BIỆT
+// 🟢 BỘ LỌC TỰ ĐỘNG CHẶN HOÀN TOÀN HÀNG KHUYẾN MÃI, SET QUÀ TẶNG, COMBO, MÃ LYO5... ÁP DỤNG CHO TOÀN BỘ CÁC TRANG
 export function is_promotional_item(brand: string, name: string = "", sku: string = "") {
 	const br = (brand || "").trim().toLowerCase();
 	const nm = (name || "").trim().toLowerCase();
 	const clean_sku = (sku || "").trim().toUpperCase();
 
+	// 🚫 1. Danh sách mã SKU cấm tuyệt đối
 	const blocked_skus = new Set([
-		"LYO9566", "LYO9131", "LYO6928", "LYO9874", "LYO8946", "LYO9858", "LYO9873"
+		"LYO9566",
+		"LYO9131",
+		"LYO6928",
+		"LYO9874",
+		"LYO8946",
+		"LYO9858",
+		"LYO9873"
 	]);
 
-	if (blocked_skus.has(clean_sku)) return true;
-	if (br === "tặng" || br === "sale" || br.includes("kđh") || br === "kđh" || br.includes("khuyến mãi")) return true;
-	if (nm.includes("combo") || nm.includes("- sale") || nm.includes("-sale") || nm.includes("sale ") || nm.includes("(tặng)") || nm.includes("kđh")) return true;
+	if (blocked_skus.has(clean_sku)) {
+		return true;
+	}
+
+	// 🚫 2. Chặn toàn bộ dải mã ảo bắt đầu bằng LYO5, LYO6, LYO8, LYO9
+	if (
+		clean_sku.startsWith("LYO5") || 
+		clean_sku.startsWith("LYO6") || 
+		clean_sku.startsWith("LYO8") || 
+		clean_sku.startsWith("LYO9")
+	) {
+		return true;
+	}
+
+	// 🚫 3. Chặn theo nhãn hiệu khuyến mãi
+	if (
+		br === "tặng" || 
+		br === "sale" || 
+		br.includes("kđh") || 
+		br === "kđh" || 
+		br.includes("khuyến mãi") ||
+		br.includes("quà tặng")
+	) {
+		return true;
+	}
+
+	// 🚫 4. Chặn triệt để tên chứa Combo, Set, Quà tặng, Hàng tặng, Mã Khuyến Mãi
+	if (
+		nm.includes("combo") || 
+		nm.includes("set ") || 
+		nm.includes("set quà") || 
+		nm.includes("quà tặng") || 
+		nm.includes("gift") || 
+		nm.includes("- sale") || 
+		nm.includes("-sale") || 
+		nm.includes("sale ") || 
+		nm.includes("(tặng)") || 
+		nm.includes("kđh")
+	) {
+		return true;
+	}
 
 	return false;
 }
 
-// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN: TRIỆT HẠ LỖI VỌT SỐ BẰNG BỘ LỌC CHỐNG CỘNG TRÙNG
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY CHUẨN XÁC THEO ĐÚNG TỪNG KHO
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -104,7 +149,7 @@ export function calculate_restock_data(
 	records.sort((a, b) => b.t_unix - a.t_unix);
 
 	let sales_by_sku = new Map<string, number>();
-	let processed_keys = new Set<string>(); // Bộ đệm chống tính trùng 1 đơn nhiều lần
+	let processed_records = new Set<string>();
 
 	const now_ts = new Date().getTime();
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
@@ -121,15 +166,18 @@ export function calculate_restock_data(
 		const rec_loc = Number(record.location_id);
 		const rec_order_id = (record as OrderRecordV2).order_id || 0;
 
-		const unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}_${record.t_unix}`;
+		const record_unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}_${record.t_unix}`;
 
 		if (clean_sku && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-			// Lọc theo kho tương ứng
-			const is_matching = (rec_loc === active_loc_id) || 
-				(active_loc_id === TARGET_LOCATION_ID_GROUP && (rec_loc === TARGET_LOCATION_ID_GROUP || rec_loc === TARGET_LOCATION_ID_TRUNG_TAM));
+			let is_matching_loc = false;
+			if (active_loc_id === TARGET_LOCATION_ID_GROUP) {
+				is_matching_loc = (rec_loc === TARGET_LOCATION_ID_GROUP || rec_loc === TARGET_LOCATION_ID_TRUNG_TAM);
+			} else {
+				is_matching_loc = (rec_loc === active_loc_id);
+			}
 
-			if (is_matching && !processed_keys.has(unique_key)) {
-				processed_keys.add(unique_key);
+			if (is_matching_loc && !processed_records.has(record_unique_key)) {
+				processed_records.add(record_unique_key);
 				const current_sales = sales_by_sku.get(clean_sku) || 0;
 				sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
 			}
@@ -224,7 +272,7 @@ export function normalizeString(input: string): string {
 	return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
 }
 
-// 🟢 KÉO SẢN PHẨM CÓ CÚ PHÁP new Set KHÔNG BỊ LỖI RUNTIME
+// 🟢 KÉO SẢN PHẨM NGUYÊN BẢN GỐC (KÈM BỘ LỌC DÃ ĐƯỢC NÂNG CẤP CHẶN SẠCH MÃ ẢO)
 export async function get_active_products() {
 	let p_variant_by_ids: Map<number, ProductV2> = new Map();
 	let running = true;
@@ -254,6 +302,7 @@ export async function get_active_products() {
 						const full_var_name = variant.name || prod_name;
 						const var_sku = (variant.sku || "").trim().toUpperCase();
 
+						// 🎯 LỌC CHẶN NGAY TỪ BƯỚC NẠP SẢN PHẨM GỐC CHO TẤT CẢ CÁC TRANG
 						if (is_promotional_item(brand_name, full_var_name, var_sku)) return;
 
 						let p_variant: ProductV2 = {
@@ -269,7 +318,7 @@ export async function get_active_products() {
 							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
 							inventory_level_by_location: new Map(),
 							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: new Set<number>() // ✅ CÚ PHÁP ĐÚNG
+							order_history_by_location: new Set<number>()
 						};
 
 						if (variant.inventories && variant.inventories.length > 0) {
@@ -299,11 +348,10 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
-// 🟢 MỞ CSDL INDEXEDDB CHUẨN DÙNG CHUNG
 function get_idb_connection(): Promise<IDBDatabase | null> {
 	return new Promise((resolve) => {
 		try {
-			const request = indexedDB.open("LYOInventoryDB_V55", 1);
+			const request = indexedDB.open("LYOInventoryDB_V57", 1);
 
 			request.onupgradeneeded = function (event) {
 				const db = (event.target as IDBOpenDBRequest).result;
@@ -326,7 +374,6 @@ function get_idb_connection(): Promise<IDBDatabase | null> {
 	});
 }
 
-// 🟢 ĐỌC ĐỆM VÀ TỰ LỌC LẠI CHỐNG TRÙNG LẶP DỮ LIỆU CŨ
 export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 	const db = await get_idb_connection();
 	if (!db) return [];
@@ -407,7 +454,6 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN CHUẨN XÁC NGUYÊN BẢN: BẮT ĐỦ ĐƠN 30 NGÀY CHO MỌI KHO
 export async function fetch_order_record(
 	variant_by_id: Map<number, ProductV2>,
 	target_location_ids: number[] = []
@@ -426,7 +472,6 @@ export async function fetch_order_record(
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
 	const min_valid_ts = now_ts - thirty_days_ts;
 
-	// CHỈ DỪNG NẾU ĐÃ CÓ LƯỢNG CACHE ĐỦ LỚN (> 300 DÒNG)
 	const has_valid_cache = stored_records.length > 300 && max_stored_ts > min_valid_ts;
 	const stop_threshold_ts = has_valid_cache ? max_stored_ts : min_valid_ts;
 
