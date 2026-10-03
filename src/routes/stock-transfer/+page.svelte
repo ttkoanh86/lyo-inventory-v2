@@ -55,7 +55,9 @@
 
 	const filter_by_id: Map<string, Filtering> = $state(new Map());
 	const sort_by_id: Map<string, Sorting> = $state(new Map());
-	let updateKeys = $state({ headerSorterKey: 0, dsource: [], dfiltered: [] });
+	
+	// 🟢 TRUYỀN ĐỦ DỮ LIỆU ĐỂ POPUP HEADER UI HIỂN THỊ DANH SÁCH NHÃN HIỆU/SKU
+	let updateKeys = $state({ headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] });
 
 	setContext("filterbyid", filter_by_id);
 	setContext("sortbyid", sort_by_id);
@@ -67,7 +69,7 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 XỬ LÝ LỌC TRỰC TIẾP PHẢN XẠ BẰNG $DERIVED.BY DÀNH RIÊNG CHUYỂN HÀNG
+	// 🟢 XỬ LÝ LỌC PHẢN XẠ SẠCH BẰNG $DERIVED.BY
 	let display_datasource = $derived.by(() => {
 		let result = [...datasource];
 
@@ -75,6 +77,7 @@
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
+				// 1. Lọc theo Checkbox nhãn hiệu / SKU
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
@@ -86,6 +89,7 @@
 					});
 				}
 
+				// 2. Lọc theo ô từ khóa gõ tay
 				if (filter.value !== undefined && filter.value !== null && typeof filter.value === "string" && filter.value.trim() !== "") {
 					const searchStr = normalizeToEnglish(filter.value.trim().toLowerCase());
 					result = result.filter((item) => {
@@ -167,7 +171,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 CÔNG THỨC DỰ BÁO CẦN CHUYỂN HÀNG CỦA 2 KHO CHI NHÁNH
+	// 🟢 CÔNG THỨC D DỰ BÁO CẦN CHUYỂN HÀNG DÀNH RIÊNG CHO 2 KHO CHI NHÁNH
 	function applyTransferFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -177,7 +181,7 @@
 			variant_by_id.forEach((v) => {
 				if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-				// 1. Kiểm tra Tồn Kho Group (Chỉ lấy số lượng tồn kho thực tế, không tính bán)
+				// 1. Kiểm tra Tồn Kho Group (Chỉ lấy số tồn thực tế, không tính bán)
 				let stock_group = 0;
 				const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 				if (inv_group) {
@@ -193,7 +197,7 @@
 
 				if (stock_group <= 0) return;
 
-				// 2. Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận (146 Bà Triệu hoặc 180 Phạm Văn Đồng)
+				// 2. Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận
 				const inv_target = v.inventory_level_by_location.get(selectedLocId);
 				const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 				const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
@@ -228,6 +232,11 @@
 			});
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
+
+			// 🟢 NẠP CẬP NHẬT TRỰC TIẾP DỮ LIỆU CHO HEADER POPUP LỌC UI
+			updateKeys.dsource = datasource;
+			updateKeys.headerSorterKey++;
+
 			resetPagination();
 			grid_key++;
 		} catch (e) {
@@ -257,53 +266,37 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ HÀM KHỞI TẠO AN TOÀN TRÁNH VĂNG LỖI INDEXEDDB TRÊN TRÌNH DUYỆT MỚI
+	// ⚡ KHỞI TẠO ĐỘC LẬP CHỈ TẢI ĐƠN CỦA BÀ TRIỆU & PHẠM VĂN ĐỒNG
 	async function initialize() {
 		is_loading = true;
-		console.log("🚀 [STOCK TRANSFER] Bắt đầu khởi tạo dữ liệu trang Chuyển Hàng...");
-
 		try {
-			// 1. Tải danh sách sản phẩm an toàn
+			let prods = new Map<number, ProductV2>();
 			try {
-				variant_by_id = await get_active_products();
+				prods = await get_active_products();
 			} catch (eProd) {
-				console.warn("⚠️ [STOCK TRANSFER] Không đọc được đệm sản phẩm IDB, đang bỏ qua đệm:", eProd);
-				variant_by_id = new Map();
+				prods = new Map();
 			}
+			variant_by_id = prods || new Map();
 
-			// 2. Tải lịch sử đơn hàng của riêng 2 kho chi nhánh
 			try {
 				const targetLocations = [TARGET_LOCATION_ID_BA_TRIEU, TARGET_LOCATION_ID_PHAM_VAN_DONG];
 				let res = await Promise.all([
-					fetch_order_record(variant_by_id, targetLocations).catch((e) => {
-						console.warn("⚠️ [STOCK TRANSFER] Lỗi fetch_order_record:", e);
-						return [];
-					}),
-					fetch_inventory_transfer(variant_by_id).catch((e) => {
-						console.warn("⚠️ [STOCK TRANSFER] Lỗi fetch_inventory_transfer:", e);
-						return [];
-					})
+					fetch_order_record(variant_by_id, targetLocations).catch(() => []),
+					fetch_inventory_transfer(variant_by_id).catch(() => [])
 				]);
 				order_records = res[0] || [];
 				transfer_records = res[1] || [];
 			} catch (eOrders) {
-				console.warn("⚠️ [STOCK TRANSFER] Bắt lỗi tổng lịch sử đơn hàng:", eOrders);
 				order_records = [];
 				transfer_records = [];
 			}
 
-			// 3. Tính toán gợi ý chuyển hàng
 			applyTransferFilter();
 
-			try {
-				setLastDataUpdate();
-			} catch (e) {}
-
+			try { setLastDataUpdate(); } catch (e) {}
 		} catch (error) {
-			console.error("❌ [STOCK TRANSFER] Lỗi khởi tạo tổng:", error);
+			console.error("Lỗi khởi tạo Chuyển hàng:", error);
 		} finally {
-			// 🟢 BẮT BỤC LUÔN TẮT THROBBER DÙ CÓ LỖI IDB NÀO XẢY RA
-			console.log("🏁 [STOCK TRANSFER] Hoàn tất tải, tắt màn hình Loading.");
 			is_loading = false;
 		}
 	}
