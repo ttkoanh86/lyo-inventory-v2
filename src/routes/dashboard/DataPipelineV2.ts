@@ -83,7 +83,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	const nm = (name || "").trim().toLowerCase();
 	const clean_sku = (sku || "").trim().toUpperCase();
 
-	// 🚫 1. Danh sách 7 mã SKU cấm tuyệt đối (Đã bổ sung LYO8946)
+	// 🚫 1. Danh sách 7 mã SKU cấm tuyệt đối
 	const blocked_skus = new Set([
 		"LYO9566",
 		"LYO9131",
@@ -143,7 +143,6 @@ export function calculate_restock_data(
 		const clean_sku = (record.sku || "").trim().toUpperCase();
 		const rec_loc = Number(record.location_id);
 
-		// Bắt chính xác đơn thuộc kho chi nhánh đang chọn
 		if (clean_sku && rec_loc === active_loc_id && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
 			const current_sales = sales_by_sku.get(clean_sku) || 0;
 			sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
@@ -313,8 +312,8 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
-// 🟢 HÀM ĐỌC INDEXEDDB ĐÃ ĐƯỢC PHẪU THUẬT AN TOÀN TRÁNH VĂNG LỖI TRÌNH DUYỆT MỚI
-export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
+// 🟢 HÀM KHỞI TẠO ĐẮC THÙ CHỜ TẠO BẢNG XONG MỚI TRẢ VỀ DB (ĐỘC LẬP & AN TOÀN CHO TẤT CẢ TRÌNH DUYỆT MỚI)
+function get_idb_connection(): Promise<IDBDatabase | null> {
 	return new Promise((resolve) => {
 		try {
 			const request = indexedDB.open("LYOInventoryDB_V50", 1);
@@ -330,104 +329,84 @@ export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
 
 			request.onsuccess = function () {
 				const db = request.result;
-
-				// 🛡 BẢO VỆ AN TOÀN: Nếu CSDL chưa kịp tạo xong bảng OrderRecordsV2 thì đóng ngay và bỏ qua đệm
 				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
 					db.close();
-					resolve([]);
+					resolve(null);
 					return;
 				}
-
-				try {
-					const tx = db.transaction("OrderRecordsV2", "readonly");
-					const store = tx.objectStore("OrderRecordsV2");
-					const getAllReq = store.getAll();
-
-					getAllReq.onsuccess = function () {
-						db.close();
-						resolve(getAllReq.result || []);
-					};
-
-					getAllReq.onerror = function () {
-						db.close();
-						resolve([]);
-					};
-				} catch (err) {
-					// Bắt sạch ngoại lệ transaction để ứng dụng không bị crash văng đơ
-					db.close();
-					resolve([]);
-				}
+				resolve(db);
 			};
 
 			request.onerror = function () {
-				resolve([]);
+				resolve(null);
 			};
 		} catch (e) {
+			resolve(null);
+		}
+	});
+}
+
+// 🟢 HÀM ĐỌC INDEXEDDB CHUẨN XÁC VỚI DB KẾT NỐI AN TOÀN
+export async function getStoredOrderRecords(): Promise<OrderRecordV2[]> {
+	const db = await get_idb_connection();
+	if (!db) return [];
+
+	return new Promise((resolve) => {
+		try {
+			const tx = db.transaction("OrderRecordsV2", "readonly");
+			const store = tx.objectStore("OrderRecordsV2");
+			const getAllReq = store.getAll();
+
+			getAllReq.onsuccess = function () {
+				db.close();
+				resolve(getAllReq.result || []);
+			};
+
+			getAllReq.onerror = function () {
+				db.close();
+				resolve([]);
+			};
+		} catch (err) {
+			db.close();
 			resolve([]);
 		}
 	});
 }
 
-// 🟢 HÀM GHI INDEXEDDB AN TOÀN TUYỆT ĐỐI
+// 🟢 HÀM GHI INDEXEDDB CHUẨN XÁC VỚI DB KẾT NỐI AN TOÀN
 export async function updateIndexedDB(records: RecordItem[]) {
+	const db = await get_idb_connection();
+	if (!db) return;
+
 	return new Promise<void>((resolve) => {
 		try {
-			const request = indexedDB.open("LYOInventoryDB_V50", 1);
+			const tx = db.transaction("OrderRecordsV2", "readwrite");
+			const store = tx.objectStore("OrderRecordsV2");
 
-			request.onupgradeneeded = function (event) {
-				const db = (event.target as IDBOpenDBRequest).result;
-				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-					const store = db.createObjectStore("OrderRecordsV2", { autoIncrement: true });
-					store.createIndex("type", "type");
-					store.createIndex("site_id", "site_id");
-				}
-			};
+			records.forEach((r) => {
+				store.put({
+					t_unix: r.t_unix,
+					quantity: r.quantity,
+					sku: (r.sku || "").trim().toUpperCase(),
+					location_id: Number(r.location_id),
+					is_composite: (r as OrderRecordV2).is_composite || false,
+					order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
+					site_id: r.site_id || "site_new",
+					type: (r as OrderRecordV2).order_id ? "order" : "transfer",
+				});
+			});
 
-			request.onsuccess = function () {
-				const db = request.result;
-
-				if (!db.objectStoreNames.contains("OrderRecordsV2")) {
-					db.close();
-					resolve();
-					return;
-				}
-
-				try {
-					const tx = db.transaction("OrderRecordsV2", "readwrite");
-					const store = tx.objectStore("OrderRecordsV2");
-
-					records.forEach((r) => {
-						store.put({
-							t_unix: r.t_unix,
-							quantity: r.quantity,
-							sku: (r.sku || "").trim().toUpperCase(),
-							location_id: Number(r.location_id),
-							is_composite: (r as OrderRecordV2).is_composite || false,
-							order_id: (r as OrderRecordV2).order_id || (r as TransferRecord).transfer_id,
-							site_id: r.site_id || "site_new",
-							type: (r as OrderRecordV2).order_id ? "order" : "transfer",
-						});
-					});
-
-					tx.oncomplete = function () {
-						db.close();
-						resolve();
-					};
-
-					tx.onerror = function () {
-						db.close();
-						resolve();
-					};
-				} catch (err) {
-					db.close();
-					resolve();
-				}
-			};
-
-			request.onerror = function () {
+			tx.oncomplete = function () {
+				db.close();
 				resolve();
 			};
-		} catch (e) {
+
+			tx.onerror = function () {
+				db.close();
+				resolve();
+			};
+		} catch (err) {
+			db.close();
 			resolve();
 		}
 	});
