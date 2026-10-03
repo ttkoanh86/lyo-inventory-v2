@@ -118,7 +118,7 @@ export function is_promotional_item(brand: string, name: string = "", sku: strin
 	return false;
 }
 
-// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY CHUẨN XÁC THEO TỪNG KHO CHI NHÁNH
+// 🟢 THUẬT TOÁN TÍNH SẢN LƯỢNG BÁN 30 NGÀY CHUẨN XÁC - CÓ CHỐNG LỖI CỘNG TRÙNG ĐƠN
 export function calculate_restock_data(
 	records: RecordItem[],
 	variant_by_id: Map<number, ProductV2>,
@@ -128,6 +128,7 @@ export function calculate_restock_data(
 	records.sort((a, b) => b.t_unix - a.t_unix);
 
 	let sales_by_sku = new Map<string, number>();
+	let processed_records = new Set<string>(); // Bộ đệm chống cộng trùng
 
 	const now_ts = new Date().getTime();
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
@@ -142,10 +143,20 @@ export function calculate_restock_data(
 	for (let record of records) {
 		const clean_sku = (record.sku || "").trim().toUpperCase();
 		const rec_loc = Number(record.location_id);
+		const rec_order_id = (record as OrderRecordV2).order_id || 0;
 
-		if (clean_sku && rec_loc === active_loc_id && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
-			const current_sales = sales_by_sku.get(clean_sku) || 0;
-			sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+		const unique_key = `${rec_order_id}_${clean_sku}_${rec_loc}_${record.t_unix}`;
+
+		if (clean_sku && record.t_unix >= min_valid_ts && record.t_unix <= now_ts) {
+			// Lọc đúng kho yêu cầu (hoặc gom Group + Trung Tâm nếu tính cho Kho Group)
+			const is_matching_loc = rec_loc === active_loc_id || 
+				(active_loc_id === TARGET_LOCATION_ID_GROUP && (rec_loc === TARGET_LOCATION_ID_GROUP || rec_loc === TARGET_LOCATION_ID_TRUNG_TAM));
+
+			if (is_matching_loc && !processed_records.has(unique_key)) {
+				processed_records.add(unique_key);
+				const current_sales = sales_by_sku.get(clean_sku) || 0;
+				sales_by_sku.set(clean_sku, current_sales + (Number(record.quantity) || 0));
+			}
 		}
 	}
 
@@ -282,7 +293,7 @@ export async function get_active_products() {
 							import_price: variant.variant_import_price || 0, retail_price: variant.variant_retail_price || 0, retail_price_ecomm: 0,
 							inventory_level_by_location: new Map(),
 							composite_item_quantity_by_variant_id: new Map(),
-							order_history_by_location: new Set<number>()
+							order_history_by_location: Set<number>()
 						};
 
 						if (variant.inventories && variant.inventories.length > 0) {
@@ -312,7 +323,7 @@ export async function get_active_products() {
 	return p_variant_by_ids;
 }
 
-// 🟢 HÀM KHỞI TẠO ĐẮC THÙ CHỜ TẠO BẢNG XONG MỚI TRẢ VỀ DB (AN TOÀN CHO TRÌNH DUYỆT MỚI)
+// 🟢 HÀM KHỞI TẠO CSDL INDEXEDDB AN TOÀN
 function get_idb_connection(): Promise<IDBDatabase | null> {
 	return new Promise((resolve) => {
 		try {
@@ -418,16 +429,11 @@ export function get_low_sales_skus(p_variants: ProductV2[]) {
 	return _r;
 }
 
-// 🟢 HÀM KÉO ĐƠN THÔNG MINH THEO TỪNG KHO: ĐẢM BẢO TRÌNH DUYỆT MỚI KÉO ĐỦ 100% ĐƠN 30 NGÀY
+// 🟢 HÀM KÉO ĐƠN THÔNG MINH: MẶC ĐỊNH LẤY KHO GROUP & TRUNG TÂM CHO ĐẶT HÀNG
 export async function fetch_order_record(
 	variant_by_id: Map<number, ProductV2>,
-	target_location_ids: number[] = []
+	target_location_ids: number[] = [TARGET_LOCATION_ID_GROUP, TARGET_LOCATION_ID_TRUNG_TAM]
 ) {
-	// ⚡ NẾU KHÔNG TRUYỀN KHO NÀO (NHƯ TRANG KIỂM HÀNG) -> BỎ QUA KÉO ĐƠN VÀ TRẢ VỀ RỖNG NGAY LẬP TỨC
-	if (!target_location_ids || target_location_ids.length === 0) {
-		return [];
-	}
-
 	let existing_keys = new Set<string>();
 	let stored_records = await getStoredOrderRecords();
 	let max_stored_ts = 0;
@@ -442,8 +448,6 @@ export async function fetch_order_record(
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
 	const min_valid_ts = now_ts - thirty_days_ts;
 
-	// 🎯 TRÌNH DUYỆT MỚI (stored_records.length === 0) -> has_valid_cache SẼ BẰNG FALSE
-	// BẮT BUỘC HỆ THỐNG PHẢI QUÉT LIÊN TỤC CHO ĐẾN KHI GẶP ĐƠN CŨ HƠN 30 NGÀY (min_valid_ts)
 	const has_valid_cache = stored_records.length > 0 && max_stored_ts > min_valid_ts;
 	const stop_threshold_ts = has_valid_cache ? max_stored_ts : min_valid_ts;
 
@@ -451,7 +455,12 @@ export async function fetch_order_record(
 	let page = 1;
 	let running = true;
 
-	const allowed_loc_set = new Set(target_location_ids);
+	// Nếu truyền target_location_ids rỗng, giữ nguyên mặc định Group + Trung tâm
+	const locs_to_use = (target_location_ids && target_location_ids.length > 0) 
+		? target_location_ids 
+		: [TARGET_LOCATION_ID_GROUP, TARGET_LOCATION_ID_TRUNG_TAM];
+		
+	const allowed_loc_set = new Set(locs_to_use);
 
 	while (running) {
 		try {
@@ -472,7 +481,6 @@ export async function fetch_order_record(
 					if (order.status !== "cancelled") {
 						const actual_loc_id = Number(order.location_id || order.assignee_location_id || TARGET_LOCATION_ID_GROUP);
 
-						// 🎯 CHỈ NHẶT ĐƠN THUỘC ĐÚNG CÁC KHO ĐƯỢC CỦA TRANG YÊU CẦU
 						if (!allowed_loc_set.has(actual_loc_id)) {
 							continue;
 						}
@@ -480,13 +488,11 @@ export async function fetch_order_record(
 						const date_str = order.completed_on || order.finalized_on || order.created_on || order.created_at;
 						const order_ts = parseSapoDate(date_str);
 
-						// Dừng khi đã có cache hợp lệ và chạm tới đơn cũ đã lưu
 						if (order_ts > 0 && order_ts <= stop_threshold_ts && has_valid_cache) {
 							running = false;
 							break;
 						}
 
-						// Bỏ qua và dừng khi đơn đã cũ hơn 30 ngày
 						if (order_ts > 0 && order_ts < min_valid_ts) {
 							running = false;
 							break;
