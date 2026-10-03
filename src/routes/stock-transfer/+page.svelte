@@ -56,7 +56,7 @@
 	const filter_by_id: Map<string, Filtering> = $state(new Map());
 	const sort_by_id: Map<string, Sorting> = $state(new Map());
 	
-	// 🟢 TRUYỀN ĐỦ DỮ LIỆU ĐỂ POPUP HEADER UI HIỂN THỊ DANH SÁCH NHÃN HIỆU/SKU
+	// 🟢 TRUYỀN CONTEXT UPDATEKEYS ĐỦ CHUẨN ĐỂ POPUP LỌC UI ĐỌC ĐƯỢC DANH SÁCH NHÃN HIỆU
 	let updateKeys = $state({ headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] });
 
 	setContext("filterbyid", filter_by_id);
@@ -69,7 +69,7 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 XỬ LÝ LỌC PHẢN XẠ SẠCH BẰNG $DERIVED.BY
+	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU CHUẨN XÁC DÀNH RIÊNG TRANG CHUYỂN HÀNG
 	let display_datasource = $derived.by(() => {
 		let result = [...datasource];
 
@@ -77,14 +77,16 @@
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// 1. Lọc theo Checkbox nhãn hiệu / SKU
+				// 1. Lọc theo Checkbox nhãn hiệu / SKU (Bắt chính xác mảng Set)
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
 						normSet.add(normalizeToEnglish(String(v || "").trim().toLowerCase()));
 					});
+
 					result = result.filter((item) => {
-						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").trim().toLowerCase());
+						const rawVal = item[fieldId] ?? item[fieldId.toLowerCase()] ?? "";
+						const itemVal = normalizeToEnglish(String(rawVal).trim().toLowerCase());
 						return normSet.has(itemVal);
 					});
 				}
@@ -93,13 +95,15 @@
 				if (filter.value !== undefined && filter.value !== null && typeof filter.value === "string" && filter.value.trim() !== "") {
 					const searchStr = normalizeToEnglish(filter.value.trim().toLowerCase());
 					result = result.filter((item) => {
-						const itemVal = normalizeToEnglish(String(item[fieldId] ?? "").toLowerCase());
+						const rawVal = item[fieldId] ?? item[fieldId.toLowerCase()] ?? "";
+						const itemVal = normalizeToEnglish(String(rawVal).toLowerCase());
 						return itemVal.includes(searchStr);
 					});
 				}
 			});
 		}
 
+		// Sắp xếp cột A-Z, Z-A hoặc Số
 		if (sort_by_id.size > 0) {
 			sort_by_id.forEach((sort: any, fieldId: string) => {
 				if (sort && (sort.order !== undefined || sort.dir !== undefined)) {
@@ -116,6 +120,8 @@
 			});
 		}
 
+		// Cập nhật mảng kết quả sau lọc vào context để UI đồng bộ
+		updateKeys.dfiltered = result;
 		return result;
 	});
 
@@ -171,7 +177,7 @@
 		goto("/authentication");
 	}
 
-	// 🟢 CÔNG THỨC D DỰ BÁO CẦN CHUYỂN HÀNG DÀNH RIÊNG CHO 2 KHO CHI NHÁNH
+	// 🟢 CÔNG THỨC DỰ BÁO CẦN CHUYỂN HÀNG DÀNH RIÊNG CHO KHO CHI NHÁNH
 	function applyTransferFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
@@ -181,7 +187,7 @@
 			variant_by_id.forEach((v) => {
 				if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-				// 1. Kiểm tra Tồn Kho Group (Chỉ lấy số tồn thực tế, không tính bán)
+				// 1. Kiểm tra Tồn Kho Group
 				let stock_group = 0;
 				const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 				if (inv_group) {
@@ -233,8 +239,9 @@
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
-			// 🟢 NẠP CẬP NHẬT TRỰC TIẾP DỮ LIỆU CHO HEADER POPUP LỌC UI
+			// 🟢 KÍCH HOẠT NẠP DỮ LIỆU + TĂNG KEY ĐỂ HEADER POPUP LOAD ĐỦ NHÃN HIỆU
 			updateKeys.dsource = datasource;
+			updateKeys.dfiltered = datasource;
 			updateKeys.headerSorterKey++;
 
 			resetPagination();
