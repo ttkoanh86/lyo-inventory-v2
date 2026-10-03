@@ -56,8 +56,8 @@
 	const filter_by_id: Map<string, Filtering> = $state(new Map());
 	const sort_by_id: Map<string, Sorting> = $state(new Map());
 	
-	// 🟢 TRUYỀN CONTEXT UPDATEKEYS ĐỦ CHUẨN DÀNH CHO POPUP HEADER UI
-	let updateKeys = $state({ headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] });
+	// 🟢 DÙNG PHẦN TỬ THUẦN KHÔNG DÙNG $STATE CHO CONTEXT ĐỂ TRÁNH STATE_UNSAFE_MUTATION
+	let updateKeys = { headerSorterKey: 0, dsource: [] as any[], dfiltered: [] as any[] };
 
 	setContext("filterbyid", filter_by_id);
 	setContext("sortbyid", sort_by_id);
@@ -69,7 +69,7 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU THUẦN TÚY (TUYỆT ĐỐI KHÔNG SỬA STATE BÊN TRONG DERIVED)
+	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU CHUẨN XÁC DÀNH RIÊNG CHUYỂN HÀNG
 	let display_datasource = $derived.by(() => {
 		let result = [...datasource];
 
@@ -77,7 +77,6 @@
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// 1. Lọc theo Checkbox nhãn hiệu / SKU
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
@@ -91,7 +90,6 @@
 					});
 				}
 
-				// 2. Lọc theo ô từ khóa gõ tay
 				if (filter.value !== undefined && filter.value !== null && typeof filter.value === "string" && filter.value.trim() !== "") {
 					const searchStr = normalizeToEnglish(filter.value.trim().toLowerCase());
 					result = result.filter((item) => {
@@ -103,7 +101,6 @@
 			});
 		}
 
-		// Sắp xếp cột A-Z, Z-A hoặc Số
 		if (sort_by_id.size > 0) {
 			sort_by_id.forEach((sort: any, fieldId: string) => {
 				if (sort && (sort.order !== undefined || sort.dir !== undefined)) {
@@ -185,7 +182,6 @@
 			variant_by_id.forEach((v) => {
 				if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-				// 1. Kiểm tra Tồn Kho Group
 				let stock_group = 0;
 				const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 				if (inv_group) {
@@ -201,7 +197,6 @@
 
 				if (stock_group <= 0) return;
 
-				// 2. Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận
 				const inv_target = v.inventory_level_by_location.get(selectedLocId);
 				const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 				const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
@@ -237,7 +232,7 @@
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
-			// 🟢 NẠP DỮ LIỆU ĐÚNG NƠI AN TOÀN CHO HEADER POPUP LỌC
+			// GÁN NẠP DỮ LIỆU ĐUÔI AN TOÀN CHO POPUP LỌC
 			updateKeys.dsource = datasource;
 			updateKeys.dfiltered = datasource;
 			updateKeys.headerSorterKey++;
@@ -271,7 +266,6 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ KHỞI TẠO ĐỘC LẬP CHỈ TẢI ĐƠN CỦA BÀ TRIỆU & PHẠM VĂN ĐỒNG
 	async function initialize() {
 		is_loading = true;
 		try {
