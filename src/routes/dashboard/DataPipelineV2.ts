@@ -438,8 +438,8 @@ export async function fetch_order_record(
 	const thirty_days_ts = 30 * 24 * 60 * 60 * 1000;
 	const min_valid_ts = now_ts - thirty_days_ts; // Mốc tròn 30 ngày trước
 
-	// 🎯 KIỂM TRA MẢNG ĐỆM: CHỈ COI CACHE HỢP LỆ NẾU CÓ TRÊN 200 ĐƠN VÀ ĐỦ NGÀY
-	const has_valid_cache = stored_records.length > 200 && max_stored_ts > min_valid_ts;
+	// 🎯 KIỂM TRA MẢNG ĐỆM: CHỈ COI CACHE HỢP LỆ NẾU CÓ TRÊN 500 ĐƠN VÀ ĐỦ NGÀY
+	const has_valid_cache = stored_records.length > 500 && max_stored_ts > min_valid_ts;
 	const stop_threshold_ts = has_valid_cache ? max_stored_ts : min_valid_ts;
 
 	let new_records: RecordItem[] = [];
