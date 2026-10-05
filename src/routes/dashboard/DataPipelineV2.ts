@@ -49,11 +49,7 @@ export interface ProductV2 {
 	c_restock_third: number;
 	c_restock_half: number;
 	c_restock: number;
-	Lỗi build này xảy ra do file `DataPipelineV2.ts` bị dán thiếu nội dung ở dòng 54 (mới chỉ dán nửa chừng thì kết thúc file). Dưới đây là mã nguồn nguyên bản đầy đủ của file này, không chứa bất kỳ văn bản dư thừa nào.
-
-Dì hãy dán toàn bộ đoạn code dưới đây vào file `src/routes/dashboard/DataPipelineV2.ts`:
-
-```typescript
+	
 import axios from "axios";
 import { type Location } from "./Template";
 
