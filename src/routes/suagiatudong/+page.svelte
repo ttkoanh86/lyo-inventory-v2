@@ -7,8 +7,7 @@
 	let error_message = $state("");
 
 	async function handle_auto_adjust() {
-		const clean_code = order_input.trim();
-		if (!clean_code) {
+		if (!order_input.trim()) {
 			alert("Vui lòng nhập Mã đơn hàng cần sửa giá!");
 			return;
 		}
@@ -18,14 +17,14 @@
 		error_message = "";
 
 		try {
-			const res = await adjust_order_prices_auto(clean_code);
+			const res = await adjust_order_prices_auto(order_input);
 			if (res && res.success) {
 				result_data = res;
 			} else {
 				error_message = res?.message || "Không thể thực hiện điều chỉnh giá đơn hàng!";
 			}
-		} catch (e: any) {
-			error_message = "Xảy ra lỗi kết nối trong quá trình xử lý!";
+		} catch (e) {
+			error_message = "Xảy ra lỗi trong quá trình tự động sửa giá!";
 		} finally {
 			is_loading = false;
 		}
@@ -43,7 +42,7 @@
 <div class="container">
 	<div class="header">
 		<h2>⚡ TỰ ĐỘNG SỬA GIÁ ĐƠN SỈ SAPO</h2>
-		<p>Nhập Mã đơn hàng sỉ (VD: <b>SON02290</b>) để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng[cite: 8, 9].</p>
+		<p>Nhập Mã đơn hàng sỉ để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng[cite: 8, 9].</p>
 	</div>
 
 	<div class="search-box">
