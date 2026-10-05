@@ -596,7 +596,7 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
-// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CÂN BẰNG: TRUY CẬP CHUẨN BAN ĐẦU + CHỈ HIỂN THỊ SP ĐỔI GIÁ
+// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHÍNH XÁC 100% - CHỈ LẤY ĐƠN BẮT ĐẦU BẰNG CHỮ "SON" HOẶC KHỚP MÃ SỈ
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -607,9 +607,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// 1. Kéo danh sách đơn từ Sapo bằng query gốc
+		// 1. Kéo danh sách đơn từ Sapo (Kéo 25 đơn để lọc không bị sót đơn sỉ)
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-			params: { query: clean_query, limit: 10 },
+			params: { query: clean_query, limit: 25 },
 			timeout: 20000,
 			...authHeaders
 		});
@@ -618,14 +618,24 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}" trên Sapo!` };
 		}
 
-		// Lấy đúng đơn sỉ khớp mã code/name (VD: SON02290)
 		const orders_list = resp.data.orders;
-		const order = orders_list.find((o: any) => {
-			const c_code = (o.code || "").toUpperCase();
-			const c_name = (o.name || "").toUpperCase();
-			return c_code === clean_query || c_name === clean_query;
-		}) || orders_list[0];
 
+		// 🎯 BỘ LỌC CHUẨN 100%: Tìm đúng đơn có 'code' hoặc 'name' bằng đúng "SON02290"
+		// Bỏ qua tất cả các đơn sàn có mã số dài loằng ngoằng (VD: 58642791...)
+		const target_order = orders_list.find((o: any) => {
+			const c_code = (o.code || "").toUpperCase().trim();
+			const c_name = (o.name || "").toUpperCase().trim();
+			return c_code === clean_query || c_name === clean_query;
+		});
+
+		if (!target_order) {
+			return { 
+				success: false, 
+				message: `Không tìm thấy đơn sỉ nào có mã chính xác là "${clean_query}". Hệ thống chỉ tìm thấy các đơn sàn!` 
+			};
+		}
+
+		const order = target_order;
 		const display_order_code = order.code || order.name || clean_query;
 		const line_items = order.order_line_items || order.line_items || [];
 
@@ -637,7 +647,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		let details: any[] = [];
 		let payload_line_items: any[] = [];
 
-		// 2. Duyệt qua TẤT CẢ sản phẩm trong đơn gốc
+		// 2. Chạy qua TẤT CẢ sản phẩm trong đơn sỉ chuẩn
 		for (const item of line_items) {
 			const qty = Number(item.quantity) || 0;
 			const variant_id = item.variant_id;
@@ -690,7 +700,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 			const is_changed = Math.abs(target_price - current_price) > 1;
 
-			// 🟢 CHỈ THÊM VÀO MẢNG HIỂN THỊ CÁC SẢN PHẨM CÓ ĐỔI GIÁ
+			// 🟢 CHỈ HIỂN THỊ TRÊN BẢNG CÁC SẢN PHẨM CÓ ĐỔI GIÁ
 			if (is_changed) {
 				updated_items_count++;
 				details.push({
@@ -704,7 +714,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				});
 			}
 
-			// 🔴 MẢNG GỬI SAPO VẪN CHỨA ĐẦY ĐỦ CÁC DÒNG SẢN PHẨM GỐC
+			// 🔴 DỮ LIỆU GỬI ĐỂ SỬA ĐƠN TRÊN SAPO
 			payload_line_items.push({
 				id: item.id,
 				variant_id: item.variant_id,
@@ -713,7 +723,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			});
 		}
 
-		// 3. Nếu có sản phẩm cần sửa giá -> Gửi cập nhật lên Sapo
+		// 3. Nếu có thay đổi giá -> Gửi lệnh PUT cập nhật Sapo
 		if (updated_items_count > 0) {
 			const update_payload = {
 				order: {
