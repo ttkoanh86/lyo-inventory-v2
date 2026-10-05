@@ -605,7 +605,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// 🎯 1. DANH SÁCH TỪ KHÓA NHÓM SẢN PHẨM CHO PHÉP CỘNG DỒN SỐ LƯỢNG
-		// Sau này muốn thêm nhóm nào (VD: "MẶT NẠ", "KEM CHỐNG NẮNG"...), bạn chỉ cần thêm từ khóa vào mảng này
 		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY"];
 
 		const token = obtain_access_token();
@@ -669,11 +668,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const qty = Number(item.quantity) || 0;
 			const full_name = (item.product_name || item.name || item.title || item.variant_name || "").toUpperCase();
 
-			// Kiểm tra xem sản phẩm có nằm trong danh sách cho phép cộng dồn không
 			const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(keyword => full_name.includes(keyword));
 
 			if (is_allowed_category) {
-				// Khóa phân loại: Kết hợp Product ID + Đơn giá gốc
 				const group_key = `${p_id}_PRICE_${base_price}`;
 				group_qty_map[group_key] = (group_qty_map[group_key] || 0) + qty;
 			}
@@ -693,11 +690,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const item_name = item.product_name || item.name || item.title || item.variant_name || "Sản phẩm";
 			const full_name_upper = item_name.toUpperCase();
 
-			// Kiểm tra xem sản phẩm này có được phép dùng tổng số lượng cộng dồn không
 			const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(keyword => full_name_upper.includes(keyword));
 			const group_key = `${p_id}_PRICE_${current_price}`;
 
-			// Nếu thuộc nhóm cho phép -> Dùng tổng số lượng cộng dồn; Nếu không -> Dùng số lượng cá nhân
 			const effective_qty = is_allowed_category && group_qty_map[group_key] 
 				? group_qty_map[group_key] 
 				: qty;
@@ -731,7 +726,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const price_sl20 = extractPrice(["1SP SL20", "SL20", "1SP_SL20"]);
 						const price_bansi = extractPrice(["BANSI", "BÁN BUÔN", "BAN BUON"]);
 
-						// 🎯 XÉT ĐIỀU KIỆN DỰA TRÊN SỐ LƯỢNG ĐƯỢC TÍNH (effective_qty)
 						if (effective_qty >= 50 && price_vvip && price_vvip > 0) {
 							target_price = price_vvip;
 							applied_rule = is_allowed_category 
@@ -810,9 +804,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 	} catch (e: any) {
 		console.error("Lỗi sửa giá tự động:", e);
-		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
-	}
-}
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
