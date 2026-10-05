@@ -596,7 +596,7 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
-// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHUẨN XÁC THEO MÃ ĐƠN CODE/ID SAPO
+// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CÂN BẰNG: TRUY CẬP CHUẨN BAN ĐẦU + CHỈ HIỂN THỊ SP ĐỔI GIÁ
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -604,12 +604,13 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return { success: false, message: "Vui lòng nhập Mã đơn hàng hoặc ID đơn!" };
 		}
 
-		const authHeaders = { headers: { Authorization: obtain_access_token() } };
+		const token = obtain_access_token();
+		const authHeaders = { headers: { Authorization: token } };
 
-		// BƯỚC 1: Tìm kiếm đơn hàng theo mã code (SON02290) để lấy ID chuẩn (240792992)
+		// 1. Kéo danh sách đơn từ Sapo bằng query gốc
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-			params: { code: clean_query, limit: 5 },
-			timeout: 10000,
+			params: { query: clean_query, limit: 10 },
+			timeout: 20000,
 			...authHeaders
 		});
 
@@ -617,28 +618,14 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}" trên Sapo!` };
 		}
 
+		// Lấy đúng đơn sỉ khớp mã code/name (VD: SON02290)
 		const orders_list = resp.data.orders;
-
-		// Khớp chính xác mã code hoặc name
-		const matched_order = orders_list.find((o: any) => {
+		const order = orders_list.find((o: any) => {
 			const c_code = (o.code || "").toUpperCase();
 			const c_name = (o.name || "").toUpperCase();
 			return c_code === clean_query || c_name === clean_query;
 		}) || orders_list[0];
 
-		const order_id = matched_order.id; // Lấy ra ID dạng số: 240792992
-
-		// BƯỚC 2: Kéo FULL dữ liệu chi tiết của đơn hàng bằng ID
-		const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
-			timeout: 10000,
-			...authHeaders
-		});
-
-		if (detail_resp.status !== 200 || !detail_resp.data?.order) {
-			return { success: false, message: `Không thể kéo chi tiết đơn hàng ID ${order_id}!` };
-		}
-
-		const order = detail_resp.data.order;
 		const display_order_code = order.code || order.name || clean_query;
 		const line_items = order.order_line_items || order.line_items || [];
 
@@ -648,10 +635,10 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 		let updated_items_count = 0;
 		let details: any[] = [];
+		let payload_line_items: any[] = [];
 
-		// BƯỚC 3: Đối soát giá từng sản phẩm với Bảng giá Variant từ Sapo
-		for (let i = 0; i < line_items.length; i++) {
-			const item = line_items[i];
+		// 2. Duyệt qua TẤT CẢ sản phẩm trong đơn gốc
+		for (const item of line_items) {
 			const qty = Number(item.quantity) || 0;
 			const variant_id = item.variant_id;
 			const current_price = Number(item.price) || 0;
@@ -663,7 +650,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			if (variant_id) {
 				try {
 					const var_resp = await axios.get(`${proxyUrl}/admin/variants/${variant_id}.json`, {
-						timeout: 7000,
+						timeout: 8000,
 						...authHeaders
 					});
 
@@ -684,7 +671,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const price_sl20 = getPriceByCode("1SP SL20");
 						const price_vvip = getPriceByCode("BANBUON");
 
-						// Quy tắc đổi giá theo số lượng
+						// 🎯 QUY TẮC ĐIỀU CHỈNH GIÁ:
 						if (qty >= 50 && price_vvip && price_vvip > 0) {
 							target_price = price_vvip;
 							applied_rule = "Giá VVIP (BANBUON)";
@@ -703,6 +690,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 			const is_changed = Math.abs(target_price - current_price) > 1;
 
+			// 🟢 CHỈ THÊM VÀO MẢNG HIỂN THỊ CÁC SẢN PHẨM CÓ ĐỔI GIÁ
 			if (is_changed) {
 				updated_items_count++;
 				details.push({
@@ -714,23 +702,28 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					rule: applied_rule,
 					changed: true
 				});
-
-				// Thay đổi đơn giá trực tiếp trên mảng gốc
-				line_items[i].price = target_price;
 			}
+
+			// 🔴 MẢNG GỬI SAPO VẪN CHỨA ĐẦY ĐỦ CÁC DÒNG SẢN PHẨM GỐC
+			payload_line_items.push({
+				id: item.id,
+				variant_id: item.variant_id,
+				quantity: qty,
+				price: target_price
+			});
 		}
 
-		// BƯỚC 4: Gửi lệnh PUT cập nhật trực tiếp lên Sapo theo Order ID
+		// 3. Nếu có sản phẩm cần sửa giá -> Gửi cập nhật lên Sapo
 		if (updated_items_count > 0) {
 			const update_payload = {
 				order: {
 					id: order.id,
-					order_line_items: line_items
+					order_line_items: payload_line_items
 				}
 			};
 
 			const put_resp = await axios.put(`${proxyUrl}/admin/orders/${order.id}.json`, update_payload, {
-				timeout: 10000,
+				timeout: 15000,
 				...authHeaders
 			});
 
@@ -742,7 +735,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					details: details
 				};
 			} else {
-				return { success: false, message: "Sapo từ chối cập nhật đơn giá. Vui lòng kiểm tra lại quyền Token API!" };
+				return { success: false, message: "Lỗi kết nối khi gửi bảng giá mới lên Sapo!" };
 			}
 		} else {
 			return {
