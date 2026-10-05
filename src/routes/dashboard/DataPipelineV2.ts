@@ -596,7 +596,7 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
-// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHUẨN XÁC & CHỈ HIỂN THỊ SP CẦN SỬA
+// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHUẨN MÃ SAPO & CHỈ HIỂN THỊ SP CẦN SỬA
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
 		const clean_query = order_code_or_id.trim();
@@ -627,7 +627,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		let updated_items_count = 0;
 		let details: any[] = [];
 
-		// 2. Kéo giá Variant từ Sapo để đối soát
+		// 2. Lấy giá Variant từ Sapo theo đúng Mã Bảng Giá
 		const updated_line_items = await Promise.all(
 			line_items.map(async (item: any) => {
 				const qty = Number(item.quantity) || 0;
@@ -649,20 +649,30 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 							const variant = var_resp.data.variant;
 							const prices = variant.variant_prices || [];
 
-							// Lấy giá các bảng giá tương ứng từ Sapo
-							const price_bansi = prices.find((p: any) => p.price_list_code === "BANSI")?.price || current_price;
-							const price_sl20 = prices.find((p: any) => p.price_list_code === "1SP SL20")?.price;
-							const price_vvip = prices.find((p: any) => p.price_list_code === "BANBUON")?.price;
+							// Hàm tìm giá theo đúng Mã (code) hoặc Tên (name) từ Bảng chính sách giá Sapo
+							const getPriceByCode = (targetCode: string) => {
+								const found = prices.find((p: any) => {
+									const code = (p.price_list_code || p.code || "").toUpperCase().trim();
+									const name = (p.price_list_name || p.name || "").toUpperCase().trim();
+									return code === targetCode || name === targetCode;
+								});
+								return found ? Number(found.price) : null;
+							};
 
-							// 🎯 ÁP DỤNG QUY TẮC ĐƠN SỈ
-							if (qty >= 50 && price_vvip && Number(price_vvip) > 0) {
-								target_price = Number(price_vvip);
-								applied_rule = "Giá VVIP (SL ≥ 50)";
-							} else if (qty >= 20 && qty < 50 && price_sl20 && Number(price_sl20) > 0) {
-								target_price = Number(price_sl20);
-								applied_rule = "Giá 1SP SL20 (20 ≤ SL < 50)";
-							} else if (price_bansi && Number(price_bansi) > 0) {
-								target_price = Number(price_bansi);
+							// Lấy giá theo đúng mã Sapo: BANSI, 1SP SL20, BANBUON
+							const price_bansi = getPriceByCode("BANSI") || current_price;
+							const price_sl20 = getPriceByCode("1SP SL20");
+							const price_vvip = getPriceByCode("BANBUON");
+
+							// 🎯 QUY TẮC ĐIỀU CHỈNH GIÁ THEO SỐ LƯỢNG:
+							if (qty >= 50 && price_vvip && price_vvip > 0) {
+								target_price = price_vvip;
+								applied_rule = "Giá VVIP (BANBUON)";
+							} else if (qty >= 20 && qty < 50 && price_sl20 && price_sl20 > 0) {
+								target_price = price_sl20;
+								applied_rule = "Giá 1SP SL20";
+							} else if (price_bansi && price_bansi > 0) {
+								target_price = price_bansi;
 								applied_rule = "Giá Bán buôn (BANSI)";
 							}
 						}
@@ -673,7 +683,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 				const is_changed = Math.abs(target_price - current_price) > 1;
 
-				// 🟢 CHỈ ĐƯA VÀO DANH SÁCH CHI TIẾT NẾU SẢN PHẨM CÓ THAY ĐỔI GIÁ
+				// 🟢 CHỈ HIỂN THỊ CÁC SẢN PHẨM CÓ THAY ĐỔI GIÁ
 				if (is_changed) {
 					updated_items_count++;
 					details.push({
@@ -694,7 +704,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			})
 		);
 
-		// 3. Nếu có sản phẩm cần điều chỉnh giá -> Cập nhật Sapo
+		// 3. Nếu có thay đổi giá -> Gửi lệnh PUT cập nhật đơn hàng lên Sapo
 		if (updated_items_count > 0) {
 			const update_payload = {
 				order: {
