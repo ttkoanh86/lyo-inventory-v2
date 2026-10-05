@@ -7,7 +7,8 @@
 	let error_message = $state("");
 
 	async function handle_auto_adjust() {
-		if (!order_input.trim()) {
+		const clean_code = order_input.trim();
+		if (!clean_code) {
 			alert("Vui lòng nhập Mã đơn hàng cần sửa giá!");
 			return;
 		}
@@ -17,21 +18,21 @@
 		error_message = "";
 
 		try {
-			const res = await adjust_order_prices_auto(order_input);
-			if (res.success) {
+			const res = await adjust_order_prices_auto(clean_code);
+			if (res && res.success) {
 				result_data = res;
 			} else {
-				error_message = res.message;
+				error_message = res?.message || "Không thể thực hiện điều chỉnh giá đơn hàng!";
 			}
-		} catch (e) {
-			error_message = "Xảy ra lỗi trong quá trình tự động sửa giá!";
+		} catch (e: any) {
+			error_message = "Xảy ra lỗi kết nối trong quá trình xử lý!";
 		} finally {
 			is_loading = false;
 		}
 	}
 
 	function formatCurrency(num: number) {
-		return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(num);
+		return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(num || 0);
 	}
 </script>
 
@@ -42,7 +43,7 @@
 <div class="container">
 	<div class="header">
 		<h2>⚡ TỰ ĐỘNG SỬA GIÁ ĐƠN SỈ SAPO</h2>
-		<p>Nhập Mã đơn hàng sỉ để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng.</p>
+		<p>Nhập Mã đơn hàng sỉ (VD: <b>SON02290</b>) để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng[cite: 8, 9].</p>
 	</div>
 
 	<div class="search-box">
