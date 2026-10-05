@@ -12,7 +12,6 @@
 		type ProductV2,
 		type OrderRecordV2,
 		type TransferRecord,
-		fetch_inventory_transfer,
 		setLastDataUpdate,
 		is_promotional_item,
 		TARGET_LOCATION_ID_GROUP,
@@ -54,7 +53,6 @@
 		{ id: "brand", resize: true, width: 160, header: [{ cell: HeaderWithSortUi, text: "Nhãn hiệu" }] }
 	];
 
-	// 🟢 BỘ LỌC DÙNG SVELTEMAP ĐỂ BẮT ĐÚNG TÍN HIỆU PHẢN XẠ TRÊN SVELTE 5
 	const filter_by_id = new SvelteMap<string, Filtering>();
 	const sort_by_id = new SvelteMap<string, Sorting>();
 	
@@ -70,7 +68,6 @@
 	let currentPage = $state(1);
 	let itemsPerPage = $state(50);
 
-	// 🟢 THUẬT TOÁN LỌC DỮ LIỆU TỰ ĐỘNG CHẠY KHI PHÂN LỌC MỚI ĐƯỢC CHỌN
 	let display_datasource = $derived.by(() => {
 		let result = [...datasource];
 
@@ -78,7 +75,6 @@
 			filter_by_id.forEach((filter: any, fieldId: string) => {
 				if (!filter) return;
 
-				// 1. Lọc theo Checkbox nhãn hiệu / SKU
 				if (filter.includes && filter.includes instanceof Set && filter.includes.size > 0) {
 					const normSet = new Set<string>();
 					filter.includes.forEach((v: any) => {
@@ -92,7 +88,6 @@
 					});
 				}
 
-				// 2. Lọc theo ô từ khóa gõ tay
 				if (filter.value !== undefined && filter.value !== null && typeof filter.value === "string" && filter.value.trim() !== "") {
 					const searchStr = normalizeToEnglish(filter.value.trim().toLowerCase());
 					result = result.filter((item) => {
@@ -104,7 +99,6 @@
 			});
 		}
 
-		// Sắp xếp cột A-Z, Z-A hoặc Số
 		if (sort_by_id.size > 0) {
 			sort_by_id.forEach((sort: any, fieldId: string) => {
 				if (sort && (sort.order !== undefined || sort.dir !== undefined)) {
@@ -141,7 +135,6 @@
 
 	let variant_by_id = new Map<number, ProductV2>();
 	let order_records: OrderRecordV2[] = [];
-	let transfer_records: TransferRecord[] = [];
 	
 	let c_location_id: number = $state(TARGET_LOCATION_ID_BA_TRIEU);
 	let grid_key = $state(0);
@@ -176,59 +169,38 @@
 		goto("/authentication");
 	}
 
-	// 🟢 CÔNG THỨC CHUẨN 100%: LẤY SỐ BÁN TOÀN HỆ THỐNG ĐỂ TÍNH GỢI Ý CHUYỂN HÀNG
+	// 🟢 HÀM TÍNH GỢI Ý CHUYỂN HÀNG CHUẨN XÁC THEO SẢN LƯỢNG BÁN CỦA KHO CHI NHÁNH
 	function applyTransferFilter() {
 		try {
 			const selectedLocId = Number(c_location_id);
 
-			// 1. Kéo sản lượng bán 30 ngày trên toàn hệ thống (Group) để có c_restock chuẩn (Bông Miniso = 54)
-			calculate_restock_data([...order_records, ...transfer_records], variant_by_id, TARGET_LOCATION_ID_GROUP);
-			
-			// Lưu lại số bán toàn hệ thống cho từng sản phẩm
-			const group_sales_map = new Map<number, number>();
-			variant_by_id.forEach((v, id) => {
-				group_sales_map.set(id, v.c_restock || 0);
-			});
-
-			// 2. Kéo dữ liệu tồn thực tế theo Kho Chi Nhánh được chọn
-			calculate_restock_data([...order_records, ...transfer_records], variant_by_id, selectedLocId);
+			// Tính doanh số bán 30 ngày tại Kho Chi Nhánh Nhận
+			calculate_restock_data(order_records, variant_by_id, selectedLocId);
 
 			let transfer_list: any[] = [];
-			variant_by_id.forEach((v, id) => {
+			variant_by_id.forEach((v) => {
 				if (v.is_composite || is_promotional_item(v.brand, v.name, v.sku)) return;
 
-				// Lấy lại số bán chuẩn 30 ngày toàn hệ thống
-				const sales_30d_group = group_sales_map.get(id) || 0;
-				v.c_restock = sales_30d_group;
-
-				// Tồn Kho Group
 				let stock_group = 0;
 				const inv_group = v.inventory_level_by_location.get(TARGET_LOCATION_ID_GROUP);
 				if (inv_group) {
 					stock_group = Math.max(0, Math.round(inv_group.available ?? inv_group.on_hand ?? 0));
-				} else {
-					for (let [locId, inv] of v.inventory_level_by_location) {
-						if (locId !== TARGET_LOCATION_ID_BA_TRIEU && locId !== TARGET_LOCATION_ID_PHAM_VAN_DONG) {
-							stock_group = Math.max(0, Math.round(inv.available ?? inv.on_hand ?? 0));
-							if (stock_group > 0) break;
-						}
-					}
 				}
 
 				if (stock_group <= 0) return;
 
-				// Tồn thực tế & Hàng đang về tại Kho Chi Nhánh Nhận
 				const inv_target = v.inventory_level_by_location.get(selectedLocId);
 				const stock_target = inv_target ? Math.max(0, Math.round(inv_target.available ?? inv_target.on_hand ?? 0)) : 0;
 				const incoming_target = inv_target ? Math.max(0, Math.round(inv_target.incoming ?? 0)) : 0;
 
 				const current_total_branch = stock_target + incoming_target;
+				const sales_30d = v.c_restock || 0;
 
 				let raw_need_transfer = 0;
 
-				if (sales_30d_group > 0) {
-					if (current_total_branch < 0.5 * sales_30d_group) {
-						raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d_group - current_total_branch));
+				if (sales_30d > 0) {
+					if (current_total_branch < 0.5 * sales_30d) {
+						raw_need_transfer = Math.max(0, Math.round(0.5 * sales_30d - current_total_branch));
 					}
 				} else {
 					if (current_total_branch === 0 && stock_group >= 6) {
@@ -252,7 +224,6 @@
 
 			datasource = transfer_list.sort((a, b) => b.c_transfer_suggest - a.c_transfer_suggest);
 
-			// Nạp dữ liệu vào context để Popup UI đọc đúng danh sách Nhãn hiệu
 			updateKeys.dsource = datasource;
 			updateKeys.dfiltered = datasource;
 			updateKeys.headerSorterKey++;
@@ -286,29 +257,11 @@
 		checkbox_update_key.k += 1;
 	}
 
-	// ⚡ KHỞI TẠO TẢI TOÀN BỘ ĐƠN HÀNG (KHÔNG TRUYỀN THAM SỐ MẢNG LỌC HẸP ĐỂ TRÁNH THIẾU DỮ LIỆU BÁN)
 	async function initialize() {
 		is_loading = true;
 		try {
-			let prods = new Map<number, ProductV2>();
-			try {
-				prods = await get_active_products();
-			} catch (eProd) {
-				prods = new Map();
-			}
-			variant_by_id = prods || new Map();
-
-			try {
-				let res = await Promise.all([
-					fetch_order_record(variant_by_id).catch(() => []),
-					fetch_inventory_transfer(variant_by_id).catch(() => [])
-				]);
-				order_records = res[0] || [];
-				transfer_records = res[1] || [];
-			} catch (eOrders) {
-				order_records = [];
-				transfer_records = [];
-			}
+			variant_by_id = await get_active_products();
+			order_records = await fetch_order_record(variant_by_id);
 
 			applyTransferFilter();
 
