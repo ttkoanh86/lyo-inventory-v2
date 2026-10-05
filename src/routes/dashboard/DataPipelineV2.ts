@@ -48,22 +48,7 @@ export interface ProductV2 {
 	barcode: string;
 	image_path: string;
 	c_restock_third: number;
-	c_restock_half: number;
-	c_restock: number;Cháu ghi nhận chính xác 100% nguyên lý này của dì: **Chức năng Sửa Giá Tự Động (`/suagiatudong`) hoàn toàn độc lập, tách biệt hoàn toàn khỏi luồng kéo đơn 30 ngày và CSDL đệm IndexedDB (`LYOInventoryDB`) của 3 trang cũ.**
-
----
-
-### 💡 BẢO ĐẢM VỀ TÍNH ĐỘC LẬP & TỐI ƯU CỦA CHỨC NĂNG MỚI:
-
-1. **Không chạm vào CSDL đệm IndexedDB:** Hàm sửa giá gọi API trực tiếp tới Sapo qua ProxyRender bằng ID/Mã đơn hàng được nhập. Do không sử dụng CSDL đệm đụng chạm đến bảng `OrderRecordsV2`, chức năng này **cam kết 100% không gây vọt số, lệch đơn hay văng lỗi DB trên cả trình duyệt mới lẫn trình duyệt cũ**.
-2. **Không ảnh hưởng tới Đặt Hàng, Kiểm Hàng, Chuyển Hàng:** Cả 3 chức năng cũ vẫn sử dụng đúng logic tính toán nguyên bản. Việc thêm hàm sửa giá chỉ là bổ sung thêm một công cụ tiện ích phụ phụ trợ.
-3. **Mở trang tức thì (Dưới 0.1 giây):** Khi truy cập `/suagiatudong`, trang web chỉ hiển thị ngay form nhập mã đơn hàng mà **không chạy bất kỳ lệnh kéo sản phẩm hay đơn hàng ngầm nào**. Code tìm đơn và sửa giá chỉ được kích hoạt duy nhất khi nhân viên nhấn nút **"⚡ TỰ ĐỘNG CẬP NHẬT GIÁ"**.
-
----
-
-### 📄 1. FILE ĐẦY ĐỦ: `src/routes/dashboard/DataPipelineV2.ts`
-
-Dì copy toàn bộ mã nguồn bên dưới dán thay thế hoàn toàn file **`src/routes/dashboard/DataPipelineV2.ts`**:
+	c_restock_half: number;Dưới đây là file đầy đủ `src/routes/dashboard/DataPipelineV2.ts` bao gồm toàn bộ các logic phân luồng, thuật toán tính restock, bộ lọc chặn hàng khuyến mãi/set quà tặng/mã ảo, cùng hàm `adjust_order_prices_auto` dành cho tính năng sửa giá tự động:
 
 ```typescript
 import axios from "axios";
@@ -117,5 +102,4 @@ export interface ProductV2 {
 	image_path: string;
 	c_restock_third: number;
 	c_restock_half: number;
-	c_restock: number;
-	c_
+	c
