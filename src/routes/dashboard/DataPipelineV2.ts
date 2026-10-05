@@ -596,7 +596,7 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
-// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHUẨN XÁC DỮ LIỆU LINE_ITEMS - CHỐNG LỖI 422 SAPO
+// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHUẨN PAYLOAD REST API SAPO - CHỐNG LỖI 422
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -607,7 +607,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// 1. Kéo danh sách đơn từ Sapo bằng query=SON02290
+		// 1. Tìm đơn sỉ SON02290
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 			params: { query: clean_query, limit: 25 },
 			timeout: 20000,
@@ -620,7 +620,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 		const orders_list = resp.data.orders;
 
-		// Bắt chính xác đơn sỉ SON02290
 		const target_summary = orders_list.find((o: any) => {
 			const c_code = (o.code || "").toUpperCase().trim();
 			const c_name = (o.name || "").toUpperCase().trim();
@@ -634,9 +633,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			};
 		}
 
-		const order_id = target_summary.id; // ID: 240792992
+		const order_id = target_summary.id; // ID 240792992
 
-		// 2. Kéo FULL dữ liệu chi tiết đơn hàng theo ID
+		// 2. Kéo FULL dữ liệu chi tiết của đơn hàng
 		const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
 			timeout: 20000,
 			...authHeaders
@@ -656,8 +655,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 		let updated_items_count = 0;
 		let details: any[] = [];
+		let payload_line_items: any[] = [];
 
-		// 3. Chạy qua từng sản phẩm và cập nhật trực tiếp vào mảng line_items gốc
+		// 3. Tính toán đơn giá mới cho từng mặt hàng
 		for (let i = 0; i < line_items.length; i++) {
 			const item = line_items[i];
 			const qty = Number(item.quantity) || 0;
@@ -679,7 +679,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const variant = var_resp.data.variant;
 						const prices = variant.variant_prices || [];
 
-						// Hàm quét bảng giá đa năng từ Sapo
 						const extractPrice = (keys: string[]) => {
 							for (const p of prices) {
 								const strData = JSON.stringify(p).toUpperCase();
@@ -695,7 +694,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const price_sl20 = extractPrice(["1SP SL20", "SL20", "1SP_SL20"]);
 						const price_bansi = extractPrice(["BANSI", "BÁN BUÔN", "BAN BUON"]);
 
-						// Quy tắc điều chỉnh giá theo số lượng
 						if (qty >= 50 && price_vvip && price_vvip > 0) {
 							target_price = price_vvip;
 							applied_rule = "Giá VVIP (BANBUON)";
@@ -714,7 +712,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 			const is_changed = Math.abs(target_price - current_price) > 1;
 
-			// 🟢 CHỈ THÊM VÀO MẢNG HIỂN THỊ NẾU CÓ ĐỔI GIÁ
 			if (is_changed) {
 				updated_items_count++;
 				details.push({
@@ -726,18 +723,23 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					rule: applied_rule,
 					changed: true
 				});
-
-				// Cập nhật đơn giá trực tiếp vào mảng đối tượng nguyên bản của Sapo
-				line_items[i].price = target_price;
 			}
+
+			// Cấu trúc payload dòng sản phẩm chuẩn xác của Sapo
+			payload_line_items.push({
+				id: item.id,
+				variant_id: item.variant_id,
+				quantity: qty,
+				price: target_price
+			});
 		}
 
-		// 4. Nếu có thay đổi giá -> Gửi nguyên vẹn mảng line_items cập nhật lên Sapo
+		// 4. Gửi lệnh cập nhật đơn hàng lên Sapo
 		if (updated_items_count > 0) {
 			const update_payload = {
 				order: {
 					id: order.id,
-					order_line_items: line_items
+					order_line_items: payload_line_items
 				}
 			};
 
@@ -765,9 +767,14 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			};
 		}
 	} catch (e: any) {
-		console.error("Lỗi sửa giá tự động:", e);
+		console.error("Lỗi chi tiết từ Sapo khi sửa giá:", e.response?.data || e.message);
+		
 		if (e.response && e.response.status === 422) {
-			return { success: false, message: "Sapo yêu cầu quyền chỉnh sửa đơn hàng (Write Orders). Vui lòng kiểm tra Token!" };
+			const sapo_err = JSON.stringify(e.response.data || {});
+			return { 
+				success: false, 
+				message: `Sapo từ chối sửa giá (Lỗi 422): ${sapo_err}` 
+			};
 		}
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
