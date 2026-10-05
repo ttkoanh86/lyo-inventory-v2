@@ -49,7 +49,7 @@
 		<input 
 			type="text" 
 			bind:value={order_input} 
-			placeholder="Nhập mã đơn hàng Sapo (VD: SON102934)..." 
+			placeholder="Nhập mã đơn hàng Sapo (VD: SON02290)..." 
 			onkeydown={(e) => { if (e.key === 'Enter') handle_auto_adjust(); }}
 		/>
 		<button class="btn-submit" onclick={handle_auto_adjust} disabled={is_loading}>
@@ -68,41 +68,37 @@
 			{result_data.message} (Mã đơn: <b>{result_data.order_code}</b>)
 		</div>
 
-		<div class="result-table">
-			<h3>📋 CHI TIẾT CÁC MẶT HÀNG TRONG ĐƠN SỈ:</h3>
-			<table>
-				<thead>
-					<tr>
-						<th>SKU</th>
-						<th>Tên sản phẩm</th>
-						<th>Số lượng</th>
-						<th>Giá cũ</th>
-						<th>Giá mới áp dụng</th>
-						<th>Bảng giá áp dụng</th>
-						<th>Trạng thái</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each result_data.details as item}
-						<tr class:highlight={item.changed}>
-							<td><b>{item.sku}</b></td>
-							<td>{item.name}</td>
-							<td><b>{item.quantity}</b></td>
-							<td class="old-price">{formatCurrency(item.old_price)}</td>
-							<td class="new-price">{formatCurrency(item.new_price)}</td>
-							<td><span class="badge">{item.rule}</span></td>
-							<td>
-								{#if item.changed}
-									<span class="status-changed">✅ Đã cập nhật giá mới</span>
-								{:else}
-									<span class="status-same">Giữ nguyên giá sỉ</span>
-								{/if}
-							</td>
+		{#if result_data.details && result_data.details.length > 0}
+			<div class="result-table">
+				<h3>📋 CÁC SẢN PHẨM ĐÃ ĐƯỢC ĐIỀU CHỈNH GIÁ:</h3>
+				<table>
+					<thead>
+						<tr>
+							<th>SKU</th>
+							<th>Tên sản phẩm</th>
+							<th>Số lượng</th>
+							<th>Giá cũ</th>
+							<th>Giá mới áp dụng</th>
+							<th>Bảng giá áp dụng</th>
+							<th>Trạng thái</th>
 						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+					</thead>
+					<tbody>
+						{#each result_data.details as item}
+							<tr class="highlight">
+								<td><b>{item.sku}</b></td>
+								<td><b>{item.name}</b></td>
+								<td><b>{item.quantity}</b></td>
+								<td class="old-price">{formatCurrency(item.old_price)}</td>
+								<td class="new-price">{formatCurrency(item.new_price)}</td>
+								<td><span class="badge">{item.rule}</span></td>
+								<td><span class="status-changed">✅ Đã cập nhật</span></td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -128,5 +124,4 @@
 	.new-price { color: #0284c7; font-weight: bold; }
 	.badge { background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
 	.status-changed { color: #166534; font-weight: bold; }
-	.status-same { color: #94a3b8; }
 </style>
