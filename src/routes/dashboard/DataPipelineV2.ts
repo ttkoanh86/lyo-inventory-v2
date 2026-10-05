@@ -596,7 +596,7 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
-// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG CHUẨN PAYLOAD REST API SAPO - CHỐNG LỖI 422
+// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG - CHỈ CỘNG DỒN CHO CÁC NHÓM SẢN PHẨM ĐƯỢC PHÉP + ĐỒNG GIÁ
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -604,10 +604,14 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return { success: false, message: "Vui lòng nhập Mã đơn hàng hoặc ID đơn!" };
 		}
 
+		// 🎯 1. DANH SÁCH TỪ KHÓA NHÓM SẢN PHẨM CHO PHÉP CỘNG DỒN SỐ LƯỢNG
+		// Sau này muốn thêm nhóm nào (VD: "MẶT NẠ", "KEM CHỐNG NẮNG"...), bạn chỉ cần thêm từ khóa vào mảng này
+		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY"];
+
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// 1. Tìm đơn sỉ SON02290
+		// 2. Kéo danh sách đơn từ Sapo
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 			params: { query: clean_query, limit: 25 },
 			timeout: 20000,
@@ -620,6 +624,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 		const orders_list = resp.data.orders;
 
+		// Bắt chính xác đơn sỉ khớp mã code/name (VD: SON02290)
 		const target_summary = orders_list.find((o: any) => {
 			const c_code = (o.code || "").toUpperCase().trim();
 			const c_name = (o.name || "").toUpperCase().trim();
@@ -633,9 +638,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			};
 		}
 
-		const order_id = target_summary.id; // ID 240792992
+		const order_id = target_summary.id;
 
-		// 2. Kéo FULL dữ liệu chi tiết của đơn hàng
+		// 3. Kéo FULL dữ liệu chi tiết đơn hàng
 		const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
 			timeout: 20000,
 			...authHeaders
@@ -653,17 +658,49 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return { success: false, message: `Đơn hàng ${display_order_code} không có sản phẩm nào!` };
 		}
 
+		// 4. BẢNG TÍNH TỔNG SỐ LƯỢNG - CHỈ GOM NHÓM KHI THỎA MÃN 2 ĐIỀU KIỆN:
+		//     - Điều kiện 1: Tên sản phẩm thuộc nhóm cho phép (Son, Phấn, Chì kẻ mày...)
+		//     - Điều kiện 2: Các phiên bản thuộc CÙNG sản phẩm mẹ VÀ CÙNG giá gốc (item.price)
+		const group_qty_map: Record<string, number> = {};
+
+		for (const item of line_items) {
+			const p_id = item.product_id || "NO_PRODUCT_ID";
+			const base_price = Number(item.price) || 0;
+			const qty = Number(item.quantity) || 0;
+			const full_name = (item.product_name || item.name || item.title || item.variant_name || "").toUpperCase();
+
+			// Kiểm tra xem sản phẩm có nằm trong danh sách cho phép cộng dồn không
+			const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(keyword => full_name.includes(keyword));
+
+			if (is_allowed_category) {
+				// Khóa phân loại: Kết hợp Product ID + Đơn giá gốc
+				const group_key = `${p_id}_PRICE_${base_price}`;
+				group_qty_map[group_key] = (group_qty_map[group_key] || 0) + qty;
+			}
+		}
+
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let payload_line_items: any[] = [];
 
-		// 3. Tính toán đơn giá mới cho từng mặt hàng
+		// 5. Duyệt qua từng sản phẩm để xét điều kiện áp giá
 		for (let i = 0; i < line_items.length; i++) {
 			const item = line_items[i];
 			const qty = Number(item.quantity) || 0;
+			const p_id = item.product_id || "NO_PRODUCT_ID";
 			const variant_id = item.variant_id;
 			const current_price = Number(item.price) || 0;
 			const item_name = item.product_name || item.name || item.title || item.variant_name || "Sản phẩm";
+			const full_name_upper = item_name.toUpperCase();
+
+			// Kiểm tra xem sản phẩm này có được phép dùng tổng số lượng cộng dồn không
+			const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(keyword => full_name_upper.includes(keyword));
+			const group_key = `${p_id}_PRICE_${current_price}`;
+
+			// Nếu thuộc nhóm cho phép -> Dùng tổng số lượng cộng dồn; Nếu không -> Dùng số lượng cá nhân
+			const effective_qty = is_allowed_category && group_qty_map[group_key] 
+				? group_qty_map[group_key] 
+				: qty;
 
 			let target_price = current_price;
 			let applied_rule = "Giá Bán buôn (BANSI)";
@@ -694,12 +731,17 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const price_sl20 = extractPrice(["1SP SL20", "SL20", "1SP_SL20"]);
 						const price_bansi = extractPrice(["BANSI", "BÁN BUÔN", "BAN BUON"]);
 
-						if (qty >= 50 && price_vvip && price_vvip > 0) {
+						// 🎯 XÉT ĐIỀU KIỆN DỰA TRÊN SỐ LƯỢNG ĐƯỢC TÍNH (effective_qty)
+						if (effective_qty >= 50 && price_vvip && price_vvip > 0) {
 							target_price = price_vvip;
-							applied_rule = "Giá VVIP (BANBUON)";
-						} else if (qty >= 20 && qty < 50 && price_sl20 && price_sl20 > 0) {
+							applied_rule = is_allowed_category 
+								? `Giá VVIP (Tổng SL dồn nhóm: ${effective_qty})`
+								: "Giá VVIP (BANBUON)";
+						} else if (effective_qty >= 20 && effective_qty < 50 && price_sl20 && price_sl20 > 0) {
 							target_price = price_sl20;
-							applied_rule = "Giá 1SP SL20";
+							applied_rule = is_allowed_category 
+								? `Giá 1SP SL20 (Tổng SL dồn nhóm: ${effective_qty})`
+								: "Giá 1SP SL20";
 						} else if (price_bansi && price_bansi > 0) {
 							target_price = price_bansi;
 							applied_rule = "Giá Bán buôn (BANSI)";
@@ -718,6 +760,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					sku: item.sku || "N/A",
 					name: item_name,
 					quantity: qty,
+					combined_quantity: effective_qty,
 					old_price: current_price,
 					new_price: target_price,
 					rule: applied_rule,
@@ -725,7 +768,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				});
 			}
 
-			// Cấu trúc payload dòng sản phẩm chuẩn xác của Sapo
 			payload_line_items.push({
 				id: item.id,
 				variant_id: item.variant_id,
@@ -734,7 +776,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			});
 		}
 
-		// 4. Gửi lệnh cập nhật đơn hàng lên Sapo
+		// 6. Gửi lệnh cập nhật đơn hàng lên Sapo
 		if (updated_items_count > 0) {
 			const update_payload = {
 				order: {
@@ -752,7 +794,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				return {
 					success: true,
 					order_code: display_order_code,
-					message: `✅ Đã tự động cập nhật giá mới thành công cho ${updated_items_count} sản phẩm!`,
+					message: `✅ Đã tự động cập nhật giá mới thành công cho ${updated_items_count} sản phẩm/phiên bản!`,
 					details: details
 				};
 			} else {
@@ -767,15 +809,10 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			};
 		}
 	} catch (e: any) {
-		console.error("Lỗi chi tiết từ Sapo khi sửa giá:", e.response?.data || e.message);
-		
-		if (e.response && e.response.status === 422) {
-			const sapo_err = JSON.stringify(e.response.data || {});
-			return { 
-				success: false, 
-				message: `Sapo từ chối sửa giá (Lỗi 422): ${sapo_err}` 
-			};
-		}
+		console.error("Lỗi sửa giá tự động:", e);
+		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
+	}
+}
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
