@@ -24,7 +24,7 @@
 		document.head.appendChild(script);
 	});
 
-	// 🌐 XỬ LÝ ĐỌC LINK PDF QUA PROXY
+	// 🌐 XỬ LÝ ĐỌC LINK PDF
 	async function process_pdf_from_url(url: string) {
 		if (!url.trim()) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -38,15 +38,14 @@
 			const response = await fetch(proxyApiUrl);
 
 			if (!response.ok) {
-				const errData = await response.json().catch(() => ({}));
-				throw new Error(errData.error || `Lỗi tải link (${response.status})`);
+				throw new Error(`Lỗi tải file (HTTP ${response.status})`);
 			}
 
 			const buffer = await response.arrayBuffer();
 			await parse_tiktok_sapo_pdf(new Uint8Array(buffer));
 		} catch (e: any) {
 			console.error("Lỗi kéo PDF:", e);
-			alert(`Không thể đọc PDF từ Link!\nLý do: ${e.message}\n\n👉 Mẹo: Bạn có thể Kéo - Thả file PDF trực tiếp vào ô bên dưới nhé!`);
+			alert(`Không thể tải PDF từ link này! Dì có thể Kéo - Thả file PDF trực tiếp vào ô bên dưới nhé.`);
 		} finally {
 			is_loading = false;
 		}
@@ -54,9 +53,7 @@
 
 	// 📄 XỬ LÝ KHI CHỌN HOẶC KÉO THẢ FILE PDF
 	async function handle_file_process(file: File) {
-		if (!file || file.type !== 'application/pdf') {
-			return alert("Vui lòng chọn hoặc kéo thả đúng file định dạng PDF!");
-		}
+		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
@@ -79,7 +76,6 @@
 		}
 	}
 
-	// 🖱️ SỰ KIỆN KÉO THẢ FILE (DRAG & DROP)
 	function handle_drop(e: DragEvent) {
 		e.preventDefault();
 		is_dragging = false;
@@ -97,7 +93,7 @@
 		is_dragging = false;
 	}
 
-	// ⚙️ BÓC TÁCH BẮT CHÍNH XÁC SELLER SKU
+	// ⚙️ BÓC TÁCH SELLER SKU VÀ SỐ LƯỢNG (QTY)
 	async function parse_tiktok_sapo_pdf(pdfData: Uint8Array) {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument({ data: pdfData });
@@ -110,27 +106,35 @@
 		for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
 			const page = await pdf.getPage(pageNum);
 			const textContent = await page.getTextContent();
+			
+			// Lấy danh sách văn bản và loại bỏ khoảng trắng thừa
 			const items = textContent.items.map((it: any) => it.str.trim()).filter((s: string) => s.length > 0);
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
-				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
-					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
+
+				// Lọc chuẩn Seller SKU (Mã vạch 880..., mã SKU kho dạng chữ/số)
+				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{5,30})$/i.test(str) && 
+					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && 
+					!str.includes('Order') && !str.includes('Name') && !str.includes('SKU') && !str.includes('Qty');
 
 				if (is_seller_sku) {
 					let qty = 1;
-					for (let j = i + 1; j <= i + 3 && j < items.length; j++) {
+					// Quét các ô lân cận để tìm số lượng Qty
+					for (let j = i + 1; j <= i + 4 && j < items.length; j++) {
 						if (/^\d+$/.test(items[j])) {
 							qty = parseInt(items[j], 10);
 							break;
 						}
 					}
+
 					item_map[str] = (item_map[str] || 0) + qty;
 					total_products_qty += qty;
 				}
 			}
 		}
 
+		// Sắp xếp các SKU có số lượng nhiều nhất lên đầu
 		picked_items = Object.entries(item_map)
 			.map(([sku, qty]) => ({ seller_sku: sku, qty }))
 			.sort((a, b) => b.qty - a.qty);
