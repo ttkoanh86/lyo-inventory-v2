@@ -4,25 +4,20 @@ export const GET: RequestHandler = async ({ url }) => {
 	const pdfUrl = url.searchParams.get('url');
 
 	if (!pdfUrl) {
-		return new Response(JSON.stringify({ error: 'Thiếu tham số link PDF!' }), { 
-			status: 400,
-			headers: { 'Content-Type': 'application/json' }
+		return new Response(JSON.stringify({ error: 'Thiếu link PDF' }), { 
+			status: 400, 
+			headers: { 'Content-Type': 'application/json' } 
 		});
 	}
 
 	try {
-		// Gọi trực tiếp từ Server NodeJS (Không bị CORS chặn)
+		// NodeJS Server kéo trực tiếp từ S3 Amazon (Không bị CORS)
 		const response = await fetch(pdfUrl, {
-			headers: {
-				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-			}
+			headers: { 'User-Agent': 'Mozilla/5.0' }
 		});
 
 		if (!response.ok) {
-			return new Response(JSON.stringify({ error: `S3 Amazon trả về lỗi HTTP ${response.status}` }), { 
-				status: response.status,
-				headers: { 'Content-Type': 'application/json' }
-			});
+			return new Response(JSON.stringify({ error: `Lỗi kéo S3 (${response.status})` }), { status: response.status });
 		}
 
 		const arrayBuffer = await response.arrayBuffer();
@@ -31,14 +26,10 @@ export const GET: RequestHandler = async ({ url }) => {
 			status: 200,
 			headers: {
 				'Content-Type': 'application/pdf',
-				'Access-Control-Allow-Origin': '*',
-				'Access-Control-Allow-Methods': 'GET, OPTIONS'
+				'Access-Control-Allow-Origin': '*'
 			}
 		});
 	} catch (error: any) {
-		return new Response(JSON.stringify({ error: error.message || 'Lỗi server kết nối S3' }), { 
-			status: 500,
-			headers: { 'Content-Type': 'application/json' }
-		});
+		return new Response(JSON.stringify({ error: error.message }), { status: 500 });
 	}
 };
