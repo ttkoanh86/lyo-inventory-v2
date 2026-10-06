@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	let is_loading = $state(false);
-	let pdf_url_input = $state('');
-	let picked_items: any[] = $state([]);
-	let total_orders = $state(0);
-	let total_products_qty = $state(0);
-	let is_pdf_ready = $state(false);
+	let is_loading = false;
+	let pdf_url_input = '';
+	let picked_items: any[] = [];
+	let total_orders = 0;
+	let total_products_qty = 0;
+	let is_pdf_ready = false;
 
 	onMount(() => {
 		if ((window as any).pdfjsLib) {
@@ -33,7 +33,7 @@
 			if (!response.ok) throw new Error("Không thể tải file PDF!");
 			await parse_tiktok_sapo_pdf(await response.arrayBuffer());
 		} catch (e) {
-			alert("Không thể tải trực tiếp từ Link! Bạn vui lòng TẢI FILE TỪ MÁY TÍNH nhé.");
+			alert("Không thể tải trực tiếp từ Link do chặn CORS! Bạn vui lòng TẢI FILE TỪ MÁY TÍNH nhé.");
 		} finally {
 			is_loading = false;
 		}
@@ -69,6 +69,7 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
+				// Lọc chuẩn Seller SKU (mã vạch/mã SKU kho Sapo)
 				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
 					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
 
@@ -101,12 +102,12 @@
 		<h2>📦 PHIẾU TỔNG HỢP NHẶT HÀNG GOM (BATCH PICKING)</h2>
 		<div class="url-group">
 			<input type="text" bind:value={pdf_url_input} placeholder="Dán Link PDF S3 của Sapo (https://s3-...)" />
-			<button onclick={() => process_pdf_from_url(pdf_url_input)} disabled={is_loading}>
+			<button on:click={() => process_pdf_from_url(pdf_url_input)} disabled={is_loading}>
 				{is_loading ? "ĐANG XỬ LÝ..." : "⚡ TỔNG HỢP TỪ LINK"}
 			</button>
 		</div>
 		<div class="divider">HOẶC</div>
-		<input type="file" accept="application/pdf" onchange={handle_file_upload} id="file-input" hidden />
+		<input type="file" accept="application/pdf" on:change={handle_file_upload} id="file-input" hidden />
 		<label for="file-input" class="btn-file">📄 CHỌN FILE PDF TỪ MÁY TÍNH</label>
 	</div>
 
@@ -117,7 +118,7 @@
 					<h3>📋 DANH SÁCH SẢN PHẨM CẦN NHẶT HÀNG GOM</h3>
 					<p>Tổng số đơn: <b>{total_orders} đơn</b> | Tổng số lượng: <b style="color: #d97706;">{total_products_qty} món</b></p>
 				</div>
-				<button class="no-print btn-print" onclick={() => window.print()}>🖨️ IN PHIẾU GOM HÀNG</button>
+				<button class="no-print btn-print" on:click={() => window.print()}>🖨️ IN PHIẾU GOM HÀNG</button>
 			</div>
 
 			<table>
