@@ -596,7 +596,7 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
-// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG - CHUẨN CẤU TRÚC PAYLOAD SAPO 100% + CỘNG DỒN NHÓM
+// 🟢 HÀM SỬA GIÁ TỰ ĐỘNG - PHÂN TÁCH 2 BƯỚC ĐỘC LẬP CHUẨN PAYLOAD SAPO
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -604,13 +604,13 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return { success: false, message: "Vui lòng nhập Mã đơn hàng hoặc ID đơn!" };
 		}
 
-		// 🎯 1. DANH SÁCH TỪ KHÓA NHÓM SẢN PHẨM CHO PHÉP CỘNG DỒN SỐ LƯỢNG
+		// 🎯 DANH SÁCH TỪ KHÓA NHÓM SẢN PHẨM CHO PHÉP CỘNG DỒN SỐ LƯỢNG
 		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY"];
 
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// 2. Kéo danh sách đơn từ Sapo bằng query=SON02290
+		// 1. Kéo danh sách đơn từ Sapo bằng query gốc
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 			params: { query: clean_query, limit: 25 },
 			timeout: 20000,
@@ -637,9 +637,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			};
 		}
 
-		const order_id = target_summary.id; // 240792992
+		const order_id = target_summary.id;
 
-		// 3. Kéo FULL 100% dữ liệu chi tiết của đơn hàng gốc
+		// 2. Kéo FULL dữ liệu chi tiết của đơn hàng
 		const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
 			timeout: 20000,
 			...authHeaders
@@ -651,18 +651,18 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 		const order = detail_resp.data.order;
 		const display_order_code = order.code || order.name || clean_query;
-		
-		// Lấy mảng line_items gốc đầy đủ thuộc tính từ Sapo
-		const line_items = order.order_line_items || order.line_items || [];
+		const raw_line_items = order.order_line_items || order.line_items || [];
 
-		if (line_items.length === 0) {
+		if (raw_line_items.length === 0) {
 			return { success: false, message: `Đơn hàng ${display_order_code} không có sản phẩm nào!` };
 		}
 
-		// 4. TÍNH TỔNG SỐ LƯỢNG CỘNG DỒN THEO NHÓM (CÙNG PRODUCT_ID VÀ CÙNG GIÁ GỐC)
+		// =========================================================================
+		// 🟢 BƯỚC 1: XỬ LÝ CỘNG DỒN SỐ LƯỢNG THEO PRODUCT_ID VÀ ĐỒNG GIÁ GỐC TRƯỚC
+		// =========================================================================
 		const group_qty_map: Record<string, number> = {};
 
-		for (const item of line_items) {
+		for (const item of raw_line_items) {
 			const p_id = item.product_id || "NO_PRODUCT_ID";
 			const base_price = Number(item.price) || 0;
 			const qty = Number(item.quantity) || 0;
@@ -676,12 +676,14 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
+		// =========================================================================
+		// 🟢 BƯỚC 2: TRA GIÁ VÀ ĐỔI GIÁ CHO TỪNG SẢN PHẨM ĐỘC LẬP
+		// =========================================================================
 		let updated_items_count = 0;
 		let details: any[] = [];
+		let cleaned_payload_line_items: any[] = [];
 
-		// 5. Đối soát giá từng sản phẩm và CẬP NHẬT TRỰC TIẾP VÀO ĐỐI TƯỢNG GỐC CỦA SAPO
-		for (let i = 0; i < line_items.length; i++) {
-			const item = line_items[i];
+		for (const item of raw_line_items) {
 			const qty = Number(item.quantity) || 0;
 			const p_id = item.product_id || "NO_PRODUCT_ID";
 			const variant_id = item.variant_id;
@@ -692,6 +694,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(keyword => full_name_upper.includes(keyword));
 			const group_key = `${p_id}_PRICE_${current_price}`;
 
+			// Xác định số lượng dùng để tra mốc giá (Cộng dồn nếu thuộc nhóm cho phép, giữ nguyên nếu không)
 			const effective_qty = is_allowed_category && group_qty_map[group_key] 
 				? group_qty_map[group_key] 
 				: qty;
@@ -725,6 +728,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const price_sl20 = extractPrice(["1SP SL20", "SL20", "1SP_SL20"]);
 						const price_bansi = extractPrice(["BANSI", "BÁN BUÔN", "BAN BUON"]);
 
+						// Tra mốc giá theo effective_qty
 						if (effective_qty >= 50 && price_vvip && price_vvip > 0) {
 							target_price = price_vvip;
 							applied_rule = is_allowed_category 
@@ -759,18 +763,24 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					rule: applied_rule,
 					changed: true
 				});
-
-				// 🟢 GÁN TRỰC TIẾP GIÁ MỚI VÀO PHẦN TỬ NGUYÊN BẢN CỦA SAPO (GIỮ ĐẦY ĐỦ TẤT CẢ THUỘC TÍNH GỐC)
-				line_items[i].price = target_price;
 			}
+
+			// 🔴 CHỈ LẤY CÁC TRƯỜNG CHUẨN CỦA SAPO ĐỂ TRÁNH LỖI 422
+			cleaned_payload_line_items.push({
+				id: item.id,
+				product_id: item.product_id,
+				variant_id: item.variant_id,
+				price: target_price,
+				quantity: item.quantity
+			});
 		}
 
-		// 6. GỬI NGUYÊN VẸN ĐỐI TƯỢNG ORDER VÀ MẢNG LINE_ITEMS ĐẦY ĐỦ LÊN SAPO
+		// 3. Gửi lệnh cập nhật lên Sapo bằng Payload sạch
 		if (updated_items_count > 0) {
 			const update_payload = {
 				order: {
 					id: order.id,
-					order_line_items: line_items
+					order_line_items: cleaned_payload_line_items
 				}
 			};
 
