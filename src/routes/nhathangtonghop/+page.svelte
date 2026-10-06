@@ -23,7 +23,7 @@
 		document.head.appendChild(script);
 	});
 
-	// 🟢 GỌI QUA API PROXY BẮT BỘC ĐỂ TRÁNH CORS
+	// 🌐 KÉO FILE QUA PROXY & CHUYỂN DẠNG UINT8ARRAY ĐỂ ĐỌC CHUẨN PDF
 	async function process_pdf_from_url(url: string) {
 		if (!url.trim()) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -32,7 +32,6 @@
 		picked_items = [];
 
 		try {
-			// Gọi Proxy server trung gian
 			const proxyApiUrl = `/api/proxy-pdf?url=${encodeURIComponent(url.trim())}`;
 			const response = await fetch(proxyApiUrl);
 
@@ -41,8 +40,10 @@
 				throw new Error(errData.error || `Lỗi tải file (${response.status})`);
 			}
 
-			const arrayBuffer = await response.arrayBuffer();
-			await parse_tiktok_sapo_pdf(arrayBuffer);
+			const buffer = await response.arrayBuffer();
+			// 🎯 ÉP KIỂU SANG UINT8ARRAY ĐỂ TRIỆT TIỆU LỖI Invalid PDF structure
+			const uint8Data = new Uint8Array(buffer);
+			await parse_tiktok_sapo_pdf(uint8Data);
 		} catch (e: any) {
 			console.error("Lỗi kéo PDF:", e);
 			alert(`Không thể đọc PDF từ Link!\nChi tiết: ${e.message}`);
@@ -55,10 +56,13 @@
 		const input = e.target as HTMLInputElement;
 		if (!input.files || !input.files[0]) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
+		
 		is_loading = true;
 		picked_items = [];
 		try {
-			await parse_tiktok_sapo_pdf(await input.files[0].arrayBuffer());
+			const buffer = await input.files[0].arrayBuffer();
+			const uint8Data = new Uint8Array(buffer);
+			await parse_tiktok_sapo_pdf(uint8Data);
 		} catch (err) {
 			alert("Lỗi bóc tách file PDF!");
 		} finally {
@@ -66,9 +70,9 @@
 		}
 	}
 
-	async function parse_tiktok_sapo_pdf(arrayBuffer: ArrayBuffer) {
+	async function parse_tiktok_sapo_pdf(pdfData: Uint8Array) {
 		const pdfjs = (window as any).pdfjsLib;
-		const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+		const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
 		total_orders = pdf.numPages;
 
 		const item_map: Record<string, number> = {};
@@ -81,6 +85,7 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
+				// Lọc chuẩn Seller SKU (mã vạch hoặc SKU kho Sapo)
 				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
 					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
 
