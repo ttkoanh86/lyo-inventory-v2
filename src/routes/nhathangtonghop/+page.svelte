@@ -7,6 +7,7 @@
 	let total_orders = 0;
 	let total_products_qty = 0;
 	let is_pdf_ready = false;
+	let is_dragging = false;
 
 	onMount(() => {
 		if ((window as any).pdfjsLib) {
@@ -23,58 +24,46 @@
 		document.head.appendChild(script);
 	});
 
+	// 🌐 XỬ LÝ ĐỌC LINK PDF QUA PROXY
 	async function process_pdf_from_url(url: string) {
 		if (!url.trim()) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
 		
 		is_loading = true;
 		picked_items = [];
-
 		const cleanUrl = url.trim();
 
 		try {
-			// Thử Luồng 1: Qua API Proxy Backend Render
-			let proxyApiUrl = `/api/proxy-pdf?url=${encodeURIComponent(cleanUrl)}`;
-			let response = await fetch(proxyApiUrl);
-
-			// Nếu Luồng 1 lỗi, chuyển sang Luồng 2: Dự phòng CorsProxy trực tiếp
-			if (!response.ok) {
-				console.warn("Luồng Server Proxy lỗi, chuyển sang luồng dự phòng CORS Proxy...");
-				const fallbackUrl = `https://corsproxy.io/?${encodeURIComponent(cleanUrl)}`;
-				response = await fetch(fallbackUrl);
-			}
+			const proxyApiUrl = `/api/proxy-pdf?url=${encodeURIComponent(cleanUrl)}`;
+			const response = await fetch(proxyApiUrl);
 
 			if (!response.ok) {
-				const errText = await response.text();
-				throw new Error(`Không thể lấy dữ liệu PDF (Lỗi HTTP ${response.status})`);
+				const errData = await response.json().catch(() => ({}));
+				throw new Error(errData.error || `Lỗi tải link (${response.status})`);
 			}
 
 			const buffer = await response.arrayBuffer();
-			
-			// Kiểm tra định dạng %PDF
-			const header = new TextDecoder().decode(buffer.slice(0, 4));
-			if (!header.startsWith('%PDF')) {
-				throw new Error("Link S3 đã hết hạn hoặc không phải là file PDF hợp lệ!");
-			}
-
 			await parse_tiktok_sapo_pdf(new Uint8Array(buffer));
 		} catch (e: any) {
 			console.error("Lỗi kéo PDF:", e);
-			alert(`Không thể đọc PDF từ Link!\nChi tiết: ${e.message}`);
+			alert(`Không thể đọc PDF từ Link!\nLý do: ${e.message}\n\n👉 Mẹo: Bạn có thể Kéo - Thả file PDF trực tiếp vào ô bên dưới nhé!`);
 		} finally {
 			is_loading = false;
 		}
 	}
 
-	async function handle_file_upload(e: Event) {
-		const input = e.target as HTMLInputElement;
-		if (!input.files || !input.files[0]) return;
+	// 📄 XỬ LÝ KHI CHỌN HOẶC KÉO THẢ FILE PDF
+	async function handle_file_process(file: File) {
+		if (!file || file.type !== 'application/pdf') {
+			return alert("Vui lòng chọn hoặc kéo thả đúng file định dạng PDF!");
+		}
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
-		
+
 		is_loading = true;
 		picked_items = [];
+
 		try {
-			const buffer = await input.files[0].arrayBuffer();
+			const buffer = await file.arrayBuffer();
 			await parse_tiktok_sapo_pdf(new Uint8Array(buffer));
 		} catch (err) {
 			alert("Lỗi bóc tách file PDF!");
@@ -83,6 +72,32 @@
 		}
 	}
 
+	function handle_file_upload(e: Event) {
+		const input = e.target as HTMLInputElement;
+		if (input.files && input.files[0]) {
+			handle_file_process(input.files[0]);
+		}
+	}
+
+	// 🖱️ SỰ KIỆN KÉO THẢ FILE (DRAG & DROP)
+	function handle_drop(e: DragEvent) {
+		e.preventDefault();
+		is_dragging = false;
+		if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+			handle_file_process(e.dataTransfer.files[0]);
+		}
+	}
+
+	function handle_drag_over(e: DragEvent) {
+		e.preventDefault();
+		is_dragging = true;
+	}
+
+	function handle_drag_leave() {
+		is_dragging = false;
+	}
+
+	// ⚙️ BÓC TÁCH BẮT CHÍNH XÁC SELLER SKU
 	async function parse_tiktok_sapo_pdf(pdfData: Uint8Array) {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument({ data: pdfData });
@@ -99,7 +114,6 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
-				// Bắt đúng Seller SKU (Mã SKU kho Sapo/TikTok)
 				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
 					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
 
@@ -128,17 +142,27 @@
 </svelte:head>
 
 <div class="container">
-	<div class="no-print input-box">
+	<div 
+		class="no-print input-box {is_dragging ? 'dragging' : ''}"
+		on:drop={handle_drop}
+		on:dragover={handle_drag_over}
+		on:dragleave={handle_drag_leave}
+	>
 		<h2>📦 PHIẾU TỔNG HỢP NHẶT HÀNG GOM (BATCH PICKING)</h2>
+		
 		<div class="url-group">
-			<input type="text" bind:value={pdf_url_input} placeholder="Dán Link PDF S3 của Sapo (https://s3-...)" />
+			<input type="text" bind:value={pdf_url_input} placeholder="Dán Link PDF S3 vừa xuất từ Sapo (https://s3-...)" />
 			<button on:click={() => process_pdf_from_url(pdf_url_input)} disabled={is_loading}>
 				{is_loading ? "ĐANG XỬ LÝ..." : "⚡ TỔNG HỢP TỪ LINK"}
 			</button>
 		</div>
-		<div class="divider">HOẶC</div>
+
+		<div class="divider">HOẶC KÉO - THẢ FILE PDF VÀO ĐÂY</div>
+
 		<input type="file" accept="application/pdf" on:change={handle_file_upload} id="file-input" hidden />
-		<label for="file-input" class="btn-file">📄 CHỌN FILE PDF TỪ MÁY TÍNH</label>
+		<label for="file-input" class="btn-file">
+			{is_loading ? "⏳ ĐANG BÓC TÁCH..." : "📄 CHỌN TỪ MÁY TÍNH / KÉO THẢ FILE PDF"}
+		</label>
 	</div>
 
 	{#if picked_items.length > 0}
@@ -177,13 +201,14 @@
 
 <style>
 	.container { max-width: 850px; margin: 30px auto; font-family: Arial, sans-serif; }
-	.input-box { background: #f8fafc; border: 2px dashed #cbd5e1; padding: 25px; border-radius: 8px; text-align: center; }
+	.input-box { background: #f8fafc; border: 2px dashed #cbd5e1; padding: 25px; border-radius: 8px; text-align: center; transition: 0.2s; }
+	.input-box.dragging { background: #e0f2fe; border-color: #0284c7; }
 	.input-box h2 { color: #0284c7; margin-top: 0; font-size: 18px; }
 	.url-group { display: flex; gap: 10px; margin-top: 15px; }
 	.url-group input { flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; }
 	.url-group button { padding: 10px 20px; background: #0284c7; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
-	.divider { margin: 15px 0; color: #94a3b8; font-weight: bold; font-size: 12px; }
-	.btn-file { display: inline-block; padding: 10px 20px; background: #475569; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
+	.divider { margin: 15px 0; color: #64748b; font-weight: bold; font-size: 13px; }
+	.btn-file { display: inline-block; padding: 12px 24px; background: #475569; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 25px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
 	.btn-print { padding: 10px 20px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
 	table { width: 100%; border-collapse: collapse; }
