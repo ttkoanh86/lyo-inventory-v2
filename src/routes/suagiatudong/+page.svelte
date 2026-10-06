@@ -42,7 +42,7 @@
 <div class="container">
 	<div class="header">
 		<h2>⚡ TỰ ĐỘNG SỬA GIÁ ĐƠN SỈ SAPO</h2>
-		<p>Nhập Mã đơn hàng sỉ để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng[cite: 8, 9].</p>
+		<p>Nhập Mã đơn hàng sỉ (ĐÃ SET GIÁ BÁN BUÔN) để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng[Sản phẩm được cộng dồn SL: Son, phấn, chì kẻ mày, mặt nạ].</p>
 	</div>
 
 	<div class="search-box">
