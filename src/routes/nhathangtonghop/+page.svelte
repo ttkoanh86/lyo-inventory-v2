@@ -30,19 +30,31 @@
 		is_loading = true;
 		picked_items = [];
 
-		try {
-			const proxyApiUrl = `/api/proxy-pdf?url=${encodeURIComponent(url.trim())}`;
-			const response = await fetch(proxyApiUrl);
+		const cleanUrl = url.trim();
 
+		try {
+			// Thử Luồng 1: Qua API Proxy Backend Render
+			let proxyApiUrl = `/api/proxy-pdf?url=${encodeURIComponent(cleanUrl)}`;
+			let response = await fetch(proxyApiUrl);
+
+			// Nếu Luồng 1 lỗi, chuyển sang Luồng 2: Dự phòng CorsProxy trực tiếp
 			if (!response.ok) {
-				const errData = await response.json().catch(() => ({ error: 'Lỗi không xác định' }));
-				throw new Error(errData.error || `Lỗi tải file (${response.status})`);
+				console.warn("Luồng Server Proxy lỗi, chuyển sang luồng dự phòng CORS Proxy...");
+				const fallbackUrl = `https://corsproxy.io/?${encodeURIComponent(cleanUrl)}`;
+				response = await fetch(fallbackUrl);
 			}
 
-			// Đọc trực tiếp ArrayBuffer nguyên bản từ API Proxy
+			if (!response.ok) {
+				const errText = await response.text();
+				throw new Error(`Không thể lấy dữ liệu PDF (Lỗi HTTP ${response.status})`);
+			}
+
 			const buffer = await response.arrayBuffer();
-			if (!buffer || buffer.byteLength === 0) {
-				throw new Error("Dữ liệu PDF tải về bị rỗng!");
+			
+			// Kiểm tra định dạng %PDF
+			const header = new TextDecoder().decode(buffer.slice(0, 4));
+			if (!header.startsWith('%PDF')) {
+				throw new Error("Link S3 đã hết hạn hoặc không phải là file PDF hợp lệ!");
 			}
 
 			await parse_tiktok_sapo_pdf(new Uint8Array(buffer));
@@ -73,7 +85,6 @@
 
 	async function parse_tiktok_sapo_pdf(pdfData: Uint8Array) {
 		const pdfjs = (window as any).pdfjsLib;
-		// Khai báo rõ ràng tham số data truyền vào pdfjs
 		const loadingTask = pdfjs.getDocument({ data: pdfData });
 		const pdf = await loadingTask.promise;
 		total_orders = pdf.numPages;
@@ -88,7 +99,7 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
-				// Lọc đúng Seller SKU (mã SKU kho Sapo/TikTok)
+				// Bắt đúng Seller SKU (Mã SKU kho Sapo/TikTok)
 				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
 					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
 
