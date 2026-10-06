@@ -812,3 +812,90 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
+// 🟢 HÀM GOM HÀNG NHẶT TỔNG HỢP TỪ MÃ ĐƠN SÀN (ORDER ID) QUA SAPO PROXY
+export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
+	try {
+		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
+			return { success: false, message: "Danh sách Mã đơn hàng rỗng!" };
+		}
+
+		const token = obtain_access_token();
+		const authHeaders = { headers: { Authorization: token } };
+
+		const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
+		let total_qty = 0;
+		let found_orders_count = 0;
+
+		// Vòng lặp tra cứu Sapo qua proxyUrl hệt như adjust_order_prices_auto
+		for (const orderId of order_ids) {
+			try {
+				const clean_query = String(orderId).trim().toUpperCase();
+				if (!clean_query) continue;
+
+				// 1. Kéo đơn từ Sapo bằng query Mã đơn sàn / Reference Code
+				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+					params: { query: clean_query, limit: 10 },
+					timeout: 15000,
+					...authHeaders
+				});
+
+				if (resp.status !== 200 || !resp.data?.orders || resp.data.orders.length === 0) {
+					continue;
+				}
+
+				// Lấy đúng đơn hàng khớp đầu tiên
+				const order_summary = resp.data.orders[0];
+				const order_id = order_summary.id;
+
+				// 2. Kéo chi tiết sản phẩm trong đơn
+				const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
+					timeout: 15000,
+					...authHeaders
+				});
+
+				if (detail_resp.status !== 200 || !detail_resp.data?.order) continue;
+
+				const order = detail_resp.data.order;
+				const raw_line_items = order.order_line_items || order.line_items || [];
+
+				if (raw_line_items.length > 0) {
+					found_orders_count++;
+				}
+
+				// 3. Gom sản phẩm & CỘNG DỒN SỐ LƯỢNG nếu lặp lại
+				for (const item of raw_line_items) {
+					const sku = item.sku || item.barcode || "KHONG_MA_SKU";
+					const name = item.product_name || item.name || item.title || item.variant_name || "Sản phẩm chưa đặt tên";
+					const qty = Number(item.quantity) || 1;
+
+					if (!item_map[sku]) {
+						item_map[sku] = {
+							sku: sku,
+							name: name,
+							qty: 0
+						};
+					}
+
+					item_map[sku].qty += qty;
+					total_qty += qty;
+				}
+			} catch (err: any) {
+				console.warn(`[Gom Hàng Sapo] Lỗi kéo đơn ${orderId}:`, err.message);
+			}
+		}
+
+		// Sắp xếp các sản phẩm có số lượng gom nhiều nhất lên đầu
+		const sorted_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
+
+		return {
+			success: true,
+			found_orders: found_orders_count,
+			items: sorted_items,
+			total_qty: total_qty
+		};
+
+	} catch (e: any) {
+		console.error("Lỗi Gom Hàng Sapo:", e);
+		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
+	}
+}
