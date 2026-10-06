@@ -23,7 +23,6 @@
 		document.head.appendChild(script);
 	});
 
-	// 🌐 KÉO FILE QUA PROXY & CHUYỂN DẠNG UINT8ARRAY ĐỂ ĐỌC CHUẨN PDF
 	async function process_pdf_from_url(url: string) {
 		if (!url.trim()) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -40,10 +39,13 @@
 				throw new Error(errData.error || `Lỗi tải file (${response.status})`);
 			}
 
+			// Đọc trực tiếp ArrayBuffer nguyên bản từ API Proxy
 			const buffer = await response.arrayBuffer();
-			// 🎯 ÉP KIỂU SANG UINT8ARRAY ĐỂ TRIỆT TIỆU LỖI Invalid PDF structure
-			const uint8Data = new Uint8Array(buffer);
-			await parse_tiktok_sapo_pdf(uint8Data);
+			if (!buffer || buffer.byteLength === 0) {
+				throw new Error("Dữ liệu PDF tải về bị rỗng!");
+			}
+
+			await parse_tiktok_sapo_pdf(new Uint8Array(buffer));
 		} catch (e: any) {
 			console.error("Lỗi kéo PDF:", e);
 			alert(`Không thể đọc PDF từ Link!\nChi tiết: ${e.message}`);
@@ -61,8 +63,7 @@
 		picked_items = [];
 		try {
 			const buffer = await input.files[0].arrayBuffer();
-			const uint8Data = new Uint8Array(buffer);
-			await parse_tiktok_sapo_pdf(uint8Data);
+			await parse_tiktok_sapo_pdf(new Uint8Array(buffer));
 		} catch (err) {
 			alert("Lỗi bóc tách file PDF!");
 		} finally {
@@ -72,7 +73,9 @@
 
 	async function parse_tiktok_sapo_pdf(pdfData: Uint8Array) {
 		const pdfjs = (window as any).pdfjsLib;
-		const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
+		// Khai báo rõ ràng tham số data truyền vào pdfjs
+		const loadingTask = pdfjs.getDocument({ data: pdfData });
+		const pdf = await loadingTask.promise;
 		total_orders = pdf.numPages;
 
 		const item_map: Record<string, number> = {};
@@ -85,7 +88,7 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
-				// Lọc chuẩn Seller SKU (mã vạch hoặc SKU kho Sapo)
+				// Lọc đúng Seller SKU (mã SKU kho Sapo/TikTok)
 				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
 					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
 
