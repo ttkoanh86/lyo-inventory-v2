@@ -9,7 +9,7 @@
 	let is_pdf_ready = $state(false);
 
 	onMount(() => {
-		// Tải pdfjs từ CDN trực tiếp trên trình duyệt để tránh lỗi build Render
+		// Tải pdf.js từ CDN trực tiếp trên trình duyệt để tránh lỗi build Rollup/Vite
 		if ((window as any).pdfjsLib) {
 			is_pdf_ready = true;
 			return;
@@ -152,4 +152,9 @@
 
 	{#if picked_items.length > 0}
 		<div class="result-box">
-			<div class="result
+			<div class="result-header">
+				<div>
+					<h3>📋 DANH SÁCH SẢN PHẨM CẦN NHẶT HÀNG GOM</h3>
+					<p>Tổng số đơn hàng: <b>{total_orders} đơn</b> | Tổng số lượng cần lấy: <b style="color: #d97706; font-size: 16px;">{total_products_qty} món</b></p>
+				</div>
+				<button
