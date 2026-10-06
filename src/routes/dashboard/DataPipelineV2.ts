@@ -605,7 +605,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// 🎯 DANH SÁCH TỪ KHÓA NHÓM SẢN PHẨM CHO PHÉP CỘNG DỒN SỐ LƯỢNG
-		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY"];
+		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY", "MẶT NẠ", "MAT NA"];
 
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
