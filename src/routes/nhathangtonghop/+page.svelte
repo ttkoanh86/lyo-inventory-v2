@@ -23,17 +23,29 @@
 		document.head.appendChild(script);
 	});
 
+	// 🟢 GỌI QUA API PROXY BẮT BỘC ĐỂ TRÁNH CORS
 	async function process_pdf_from_url(url: string) {
 		if (!url.trim()) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
+		
 		is_loading = true;
 		picked_items = [];
+
 		try {
-			const response = await fetch(url);
-			if (!response.ok) throw new Error("Không thể tải file PDF!");
-			await parse_tiktok_sapo_pdf(await response.arrayBuffer());
-		} catch (e) {
-			alert("Không thể tải trực tiếp từ Link do chặn CORS! Bạn vui lòng TẢI FILE TỪ MÁY TÍNH nhé.");
+			// Gọi Proxy server trung gian
+			const proxyApiUrl = `/api/proxy-pdf?url=${encodeURIComponent(url.trim())}`;
+			const response = await fetch(proxyApiUrl);
+
+			if (!response.ok) {
+				const errData = await response.json().catch(() => ({ error: 'Lỗi không xác định' }));
+				throw new Error(errData.error || `Lỗi tải file (${response.status})`);
+			}
+
+			const arrayBuffer = await response.arrayBuffer();
+			await parse_tiktok_sapo_pdf(arrayBuffer);
+		} catch (e: any) {
+			console.error("Lỗi kéo PDF:", e);
+			alert(`Không thể đọc PDF từ Link!\nChi tiết: ${e.message}`);
 		} finally {
 			is_loading = false;
 		}
@@ -69,7 +81,6 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
-				// Lọc chuẩn Seller SKU (mã vạch/mã SKU kho Sapo)
 				const is_seller_sku = /^(880\d{10}(\.[A-Z0-9]+)?|[A-Z0-9\-_]{6,25})$/i.test(str) && 
 					!str.includes('Product') && !str.includes('Seller') && !str.includes('TikTok') && !str.includes('Order');
 
