@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	// 🟢 Import hàm gom hàng từ DataPipelineV2
 	import { aggregate_sapo_orders_from_pdf } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
-	let is_retrying = false; // Trạng thái đang kéo bù
+	let is_retrying = false;
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -28,7 +29,7 @@
 		document.head.appendChild(script);
 	});
 
-	// ĐỌC MÃ ĐƠN TỪ PDF VÀ GỬI SANG DATAPIPELINE
+	// ĐỌC MÃ ĐƠN TỪ PDF VÀ GỬI SANG DATAPIPELINE V2
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -98,26 +99,22 @@
 		is_loading = false;
 	}
 
-	// 🎯 CHỈ KÉO BÙ CÁC ĐƠN BỊ LỖI (KHÔNG CHẠY LẠI TỪ ĐẦU)
+	// CHỈ KÉO BÙ CÁC ĐƠN BỊ LỖI
 	async function retry_failed_orders() {
 		if (failed_order_ids.length === 0) return;
 
 		is_retrying = true;
 		const retry_targets = [...failed_order_ids];
 		
-		// Gọi DataPipeline chỉ với danh sách đơn lỗi
 		const res = await aggregate_sapo_orders_from_pdf(retry_targets);
 
 		if (res.success && res.items.length > 0) {
-			// Merge kết quả mới kéo bù vào danh sách cũ
 			const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
 			
-			// Đưa danh sách cũ vào map
 			picked_items.forEach(item => {
 				item_map[item.sku] = { ...item };
 			});
 
-			// Cộng dồn các món từ đơn kéo bù thành công
 			res.items.forEach(new_item => {
 				if (item_map[new_item.sku]) {
 					item_map[new_item.sku].qty += new_item.qty;
@@ -126,11 +123,10 @@
 				}
 			});
 
-			// Cập nhật lại giao diện
 			picked_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
 			total_products_qty += res.total_qty || 0;
 			successful_orders_count += res.found_orders_count || 0;
-			failed_order_ids = res.failed_orders || []; // Cập nhật danh sách lỗi còn lại (nếu vẫn lỗi)
+			failed_order_ids = res.failed_orders || [];
 		} else if (res.success && res.found_orders_count === 0) {
 			alert("Vẫn chưa kéo được các đơn này do mạng/Sapo bận. Vui lòng thử lại sau giây lát!");
 		}
@@ -170,7 +166,7 @@
 		</label>
 	</div>
 
-	<!-- CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING LẦN ĐẦU -->
+	<!-- CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING -->
 	{#if is_loading && extracted_order_ids.length > 0 && picked_items.length === 0}
 		<div class="info-bar">
 			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo!
@@ -181,23 +177,22 @@
 		<div class="result-box">
 			<div class="result-header">
 				<div>
-					<h3>📋 DANH SÁCH SẢN PHẨM CẦN GOM NHẶT HÀNG (TỪ SAPO)</h3>
-					<p>
+					<h3 class="print-title">📋 DANH SÁCH SẢN PHẨM CẦN GOM NHẶT HÀNG (TỪ SAPO)</h3>
+					<p class="print-summary">
 						Tổng số đơn: 
 						<b style="color: {successful_orders_count === total_orders ? '#16a34a' : '#dc2626'}; font-size: 15px;">
 							{successful_orders_count}/{total_orders} đơn
 						</b>
 						{#if failed_order_ids.length > 0}
-							<span class="error-tag">
+							<span class="error-tag no-print">
 								⚠️ hụt {failed_order_ids.length} đơn do lỗi mạng
 							</span>
 						{:else}
-							<span class="success-tag">✅ Đã gộp đủ 100%</span>
+							<span class="success-tag no-print">✅ Đã gộp đủ 100%</span>
 						{/if}
 						| Tổng số lượng sản phẩm cần nhặt: <b style="color: #d97706; font-size: 16px;">{total_products_qty} món</b>
 					</p>
 
-					<!-- 🔴 KHUNG CẢNH BÁO VÀ NÚT CHỈ KÉO BÙ ĐƠN LỖI -->
 					{#if failed_order_ids.length > 0}
 						<div class="failed-box no-print">
 							🚨 <b>CÁC MÃ ĐƠN CHƯA KÉO ĐƯỢC DO TIMEOUT ({failed_order_ids.length} đơn):</b> 
@@ -211,26 +206,26 @@
 				<button class="no-print btn-print" on:click={() => window.print()}>🖨 IN PHIẾU GOM HÀNG</button>
 			</div>
 
-			<table>
+			<table class="picking-table">
 				<thead>
 					<tr>
-						<th style="width: 40px; text-align: center;">STT</th>
-						<th style="width: 125px;">MÃ SKU</th>
-						<th>TÊN SẢN PHẨM</th>
-						<th style="width: 120px; text-align: center;">VỊ TRÍ KHO</th>
-						<th style="width: 110px; text-align: center;">TỔNG SỐ LƯỢNG</th>
-						<th style="width: 90px; text-align: center;">ĐÃ LẤY ( ✓ )</th>
+						<th class="col-stt">STT</th>
+						<th class="col-sku">MÃ SKU</th>
+						<th class="col-name">TÊN SẢN PHẨM</th>
+						<th class="col-loc">VỊ TRÍ KHO</th>
+						<th class="col-qty">TỔNG SỐ LƯỢNG</th>
+						<th class="col-check">ĐÃ LẤY ( ✓ )</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each picked_items as item, index}
 						<tr>
-							<td style="text-align: center; font-weight: bold;">{index + 1}</td>
-							<td><div class="sku-code">{item.sku}</div></td>
-							<td><b class="product-name">{item.name}</b></td>
-							<td style="text-align: center;"><span class="location-badge">{item.location || '---'}</span></td>
-							<td style="text-align: center;"><span class="qty-badge">{item.qty}</span></td>
-							<td style="text-align: center;"></td>	
+							<td class="col-stt-val">{index + 1}</td>
+							<td class="col-sku-val"><div class="sku-code">{item.sku}</div></td>
+							<td class="col-name-val"><b class="product-name">{item.name}</b></td>
+							<td class="col-loc-val"><span class="location-badge">{item.location || '---'}</span></td>
+							<td class="col-qty-val"><span class="qty-badge">{item.qty}</span></td>
+							<td class="col-check-val"></td>	
 						</tr>
 					{/each}
 				</tbody>
@@ -240,36 +235,5 @@
 </div>
 
 <style>
-	.container { max-width: 960px; margin: 30px auto; font-family: Arial, sans-serif; }
-	.drop-zone { background: #f8fafc; border: 3px dashed #cbd5e1; padding: 30px; border-radius: 12px; text-align: center; }
-	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
-	.drop-zone h2 { color: #0284c7; margin-top: 0; }
-	.btn-file { display: inline-block; padding: 12px 28px; background: #0284c7; color: white; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 15px; }
-	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
-	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
-	.btn-print { padding: 10px 22px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
-	
-	.success-tag { display: inline-block; margin: 0 6px; padding: 2px 8px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: bold; border-radius: 4px; }
-	.error-tag { display: inline-block; margin: 0 6px; padding: 2px 8px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: bold; border-radius: 4px; }
-	
-	.failed-box { margin-top: 10px; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b; font-size: 13px; }
-	.failed-list { color: #dc2626; font-weight: bold; font-family: monospace; font-size: 13px; margin-left: 6px; }
-	.btn-retry { margin-left: 12px; padding: 4px 12px; background: #dc2626; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; }
-	.btn-retry:disabled { background: #9ca3af; cursor: not-allowed; }
-
-	table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }
-	th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: middle; }
-	th { background: #f1f5f9; font-size: 13px; font-weight: bold; text-transform: uppercase; }
-	
-	.sku-code { font-size: 13px; font-weight: bold; color: #0284c7; word-break: break-word; }
-	.product-name { font-size: 14px; line-height: 1.4; color: #1e293b; }
-	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
-	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
-
-	@media print { 
-		.no-print { display: none !important; } 
-		.container { max-width: 100%; margin: 0; } 
-		.qty-badge { background: none; color: #000; padding: 0; font-size: 15px; }
-		.location-badge { background: none; color: #000; padding: 0; }
-	}
-</style>
+	.container { max-width: 980px; margin: 30px auto; font-family: Arial, sans-serif; }
+	.drop-zone { background: #f8fafc
