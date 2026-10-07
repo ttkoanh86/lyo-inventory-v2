@@ -821,7 +821,7 @@ function obtain_access_token() {
 	return "Bearer YOUR_SAPO_ACCESS_TOKEN"; // Giữ nguyên hàm lấy token hiện tại của dự án
 }
 
-// 🟢 1. HÀM GOM HÀNG CHÍNH CHẠY SIÊU TỐC (DÀNH CHO CẢ UP FILE PDF VÀ LINK S3)
+// 🟢 1. HÀM GOM HÀNG CHÍNH CHẠY SIÊU TỐC (CẮT BỎ REQUEST THỪA, TỐC ĐỘ GẤP 3 LẦN)
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -919,7 +919,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	}
 }
 
-// 🟢 2. HÀM TẢI FILE S3 TỪ SERVER PROXY (ĐÃ EXPORT ĐẦY ĐỦ ĐỂ SỬA LỖI BUILD)
+// 🟢 2. HÀM TẢI FILE S3 BỎ QUA CORS DÀNH RIÊNG CHO CHỨC NĂNG DÁN LINK
 export async function extract_orders_from_s3_url(s3_url: string) {
 	try {
 		if (!s3_url || !s3_url.startsWith("http")) {
