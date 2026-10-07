@@ -143,7 +143,7 @@
 						<th>TÊN SẢN PHẨM</th>
 						<th> VỊ TRÍ LƯU KHO</th>
 						<th style="width: 160px; text-align: center;">TỔNG SỐ LƯỢNG</th>
-						<th style="width: 80px; text-align: center;" class="no-print">ĐÃ LẤY</th>
+						<th style="width: 80px; text-align: center;" class="no-print">ĐÃ LẤY $\checkmark$</th>
 					</tr>
 				</thead>
 				<tbody>
