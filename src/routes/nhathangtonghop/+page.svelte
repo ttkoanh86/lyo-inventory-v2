@@ -121,7 +121,7 @@
 
 	{#if extracted_order_ids.length > 0}
 		<div class="info-bar">
-			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — DataPipeline V2 đã gom xong từ Sapo!
+			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đã gom xong sản phẩm cần lấy từ Sapo!
 		</div>
 	{/if}
 
@@ -138,12 +138,12 @@
 			<table>
 				<thead>
 					<tr>
-						<th style="width: 50px; text-align: center;">STT</th>
-						<th style="width: 200px;">MÃ SKU</th>
+						<th style="width: 45px; text-align: center;">STT</th>
+						<th style="width: 170px;">MÃ SKU</th>
 						<th>TÊN SẢN PHẨM</th>
-						<th> VỊ TRÍ LƯU KHO</th>
-						<th style="width: 160px; text-align: center;">TỔNG SỐ LƯỢNG</th>
-						<th style="width: 80px; text-align: center;" class="no-print">ĐÃ LẤY $\checkmark$</th>
+						<th style="width: 140px; text-align: center;">VỊ TRÍ LƯU KHO</th>
+						<th style="width: 140px; text-align: center;">TỔNG SỐ LƯỢNG</th>
+						<th style="width: 90px; text-align: center;">ĐÃ LẤY ☑</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -152,8 +152,14 @@
 							<td style="text-align: center; font-weight: bold;">{index + 1}</td>
 							<td><div class="sku-code">{item.sku}</div></td>
 							<td><b>{item.name}</b></td>
+							<!-- 🟢 BỔ SUNG CỘT VỊ TRÍ LƯU KHO ĐÚNG VỊ TRÍ -->
+							<td style="text-align: center;"><span class="location-badge">{item.location || '---'}</span></td>
 							<td style="text-align: center;"><span class="qty-badge">{item.qty}</span></td>
-							<td style="text-align: center;" class="no-print"><input type="checkbox" style="width: 20px; height: 20px; cursor: pointer;" /></td>
+							<!-- 🟢 Ô CHECKBOX GIỮ NGUYÊN KHI IN TAY CHUẨN TICK GIẤY -->
+							<td style="text-align: center;">
+								<span class="checkbox-print-box"></span>
+								<input type="checkbox" class="screen-checkbox" />
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -171,10 +177,22 @@
 	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
 	.btn-print { padding: 10px 22px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
-	table { width: 100%; border-collapse: collapse; }
-	th, td { border: 1px solid #cbd5e1; padding: 12px; text-align: left; }
-	th { background: #f1f5f9; }
+	table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+	th, td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: left; }
+	th { background: #f1f5f9; font-size: 14px; }
 	.sku-code { font-size: 15px; font-weight: bold; color: #0284c7; }
-	.qty-badge { display: inline-block; padding: 4px 16px; background: #fef3c7; color: #b45309; font-size: 18px; font-weight: bold; border-radius: 12px; }
-	@media print { .no-print { display: none !important; } .container { max-width: 100%; margin: 0; } .qty-badge { background: none; color: #000; padding: 0; } }
+	.qty-badge { display: inline-block; padding: 4px 16px; background: #fef3c7; color: #b45309; font-size: 17px; font-weight: bold; border-radius: 12px; }
+	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; }
+	
+	.screen-checkbox { width: 20px; height: 20px; cursor: pointer; }
+	.checkbox-print-box { display: none; }
+
+	@media print { 
+		.no-print { display: none !important; } 
+		.container { max-width: 100%; margin: 0; } 
+		.qty-badge { background: none; color: #000; padding: 0; font-size: 16px; }
+		.location-badge { background: none; color: #000; padding: 0; }
+		.screen-checkbox { display: none; }
+		.checkbox-print-box { display: inline-block; width: 18px; height: 18px; border: 2px solid #000; border-radius: 3px; }
+	}
 </style>
