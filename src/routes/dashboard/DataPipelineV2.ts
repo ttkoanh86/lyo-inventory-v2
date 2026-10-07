@@ -812,14 +812,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
-import axios from 'axios';
-
-// Cấu hình Proxy và Token Sapo của hệ thống
-const proxyUrl = "https://lyodubaodathang.onrender.com/sapo-proxy"; // Hoặc URL Proxy Sapo của dì
-
-function obtain_access_token() {
-	return "Bearer YOUR_SAPO_ACCESS_TOKEN"; // Giữ nguyên hàm lấy token hiện tại của dự án
-}
 
 // 🟢 1. HÀM GOM HÀNG CHÍNH CHẠY SIÊU TỐC (CẮT BỎ REQUEST THỪA, TỐC ĐỘ GẤP 3 LẦN)
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
