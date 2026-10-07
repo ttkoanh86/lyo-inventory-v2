@@ -5,6 +5,7 @@
 
 	let is_loading = false;
 	let is_retrying = false;
+	let input_url = ""; // Đường link S3 Amazon dán vào
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -29,7 +30,71 @@
 		document.head.appendChild(script);
 	});
 
-	// ĐỌC MÃ ĐƠN TỪ PDF VÀ GỬI SANG DATAPIPELINE V2
+	// 1. XỬ LÝ BÓC MÃ ĐƠN TỪ BUFFER FILE PDF
+	async function parse_pdf_buffer_and_fetch(buffer: ArrayBuffer) {
+		const pdfjs = (window as any).pdfjsLib;
+		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+		const pdf = await loadingTask.promise;
+
+		const order_set = new Set<string>();
+
+		for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+			const page = await pdf.getPage(pageNum);
+			const textContent = await page.getTextContent();
+			const items = textContent.items.map((it: any) => it.str.trim());
+
+			for (let i = 0; i < items.length; i++) {
+				const str = items[i];
+
+				// Order ID TikTok Shop (18 số)
+				const tiktok = str.match(/\b5\d{17}\b/);
+				if (tiktok) order_set.add(tiktok[0]);
+
+				// Order ID Shopee
+				const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
+				if (shopee && !shopee[0].startsWith('SPX')) order_set.add(shopee[0]);
+			}
+		}
+
+		extracted_order_ids = Array.from(order_set);
+		total_orders = extracted_order_ids.length;
+
+		if (total_orders === 0) {
+			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong tài liệu/link vừa chọn!");
+			is_loading = false;
+			return;
+		}
+
+		await fetch_sapo_orders(extracted_order_ids);
+	}
+
+	// 2. XỬ LÝ DÁN LINK S3 AMAZON / URL PDF
+	async function handle_process_from_url() {
+		const clean_url = input_url.trim();
+		if (!clean_url) return alert("Vui lòng dán đường link phiếu in (S3 Amazon / Shopee / TikTok)!");
+		if (!is_pdf_ready) return alert("Thư viện đang khởi tạo, vui lòng thử lại sau vài giây!");
+
+		is_loading = true;
+		extracted_order_ids = [];
+		picked_items = [];
+		failed_order_ids = [];
+
+		try {
+			// Tải ngầm file PDF từ Link S3
+			const response = await fetch(clean_url);
+			if (!response.ok) throw new Error("Không thể tải file từ đường dẫn S3 này!");
+
+			const buffer = await response.arrayBuffer();
+			await parse_pdf_buffer_and_fetch(buffer);
+		} catch (err: any) {
+			console.error(err);
+			alert("Không thể đọc link PDF S3 do chặn CORS hoặc link hết hạn. Nếu gặp lỗi này, bạn hãy kéo-thả file PDF như bình thường nhé!");
+		} finally {
+			is_loading = false;
+		}
+	}
+
+	// 3. XỬ LÝ CHỌN / KÉO THẢ FILE PDF NGUYÊN BẢN
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -41,52 +106,15 @@
 
 		try {
 			const buffer = await file.arrayBuffer();
-			const pdfjs = (window as any).pdfjsLib;
-			const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
-			const pdf = await loadingTask.promise;
-
-			const order_set = new Set<string>();
-
-			for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-				const page = await pdf.getPage(pageNum);
-				const textContent = await page.getTextContent();
-				const items = textContent.items.map((it: any) => it.str.trim());
-
-				for (let i = 0; i < items.length; i++) {
-					const str = items[i];
-
-					// 1. Order ID TikTok Shop (18 số)
-					const tiktok = str.match(/\b5\d{17}\b/);
-					if (tiktok) order_set.add(tiktok[0]);
-
-					// 2. Order ID Shopee (Ví dụ: 261006V1SVJBYY)
-					const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
-					if (shopee && !shopee[0].startsWith('SPX')) order_set.add(shopee[0]);
-				}
-			}
-
-			extracted_order_ids = Array.from(order_set);
-
-			// 🎯 FIX CHUẨN: Tính tổng số đơn bằng chính số lượng Mã Đơn Hàng (Order ID) bóc tách được!
-			total_orders = extracted_order_ids.length;
-
-			if (total_orders === 0) {
-				alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong file PDF!");
-				return;
-			}
-
-			// GỌI KÉO TẤT CẢ LẦN ĐẦU
-			await fetch_sapo_orders(extracted_order_ids);
-
+			await parse_pdf_buffer_and_fetch(buffer);
 		} catch (err) {
 			console.error(err);
 			alert("Lỗi khi đọc file PDF!");
-		} finally {
 			is_loading = false;
 		}
 	}
 
-	// KÉO LẦN ĐẦU CHO TẤT CẢ ĐƠN
+	// KÉO TẤT CẢ LẦN ĐẦU
 	async function fetch_sapo_orders(orderIds: string[]) {
 		is_loading = true;
 		const res = await aggregate_sapo_orders_from_pdf(orderIds);
@@ -153,19 +181,39 @@
 </svelte:head>
 
 <div class="container">
-	<div 
-		class="no-print drop-zone {is_dragging ? 'dragging' : ''}"
-		on:drop={handle_drop}
-		on:dragover={(e) => { e.preventDefault(); is_dragging = true; }}
-		on:dragleave={() => is_dragging = false}
-	>
+	<!-- KHU VỰC NHẬP DỮ LIỆU: DÁN LINK S3 HOẶC KÉO THẢ PDF -->
+	<div class="no-print input-wrapper">
 		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG GOM</h2>
-		<p>Kéo - Thả file PDF phiếu in Shopee / TikTok Shop vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
+		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - Thả file PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
-		<input type="file" accept="application/pdf" on:change={handle_file_upload} id="file-input" hidden />
-		<label for="file-input" class="btn-file">
-			{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : "📂 CHỌN FILE PDF / KÉO THẢ VÀO ĐÂY"}
-		</label>
+		<!-- 🔗 KHUNG DÁN LINK S3 -->
+		<div class="url-input-box">
+			<input 
+				type="text" 
+				bind:value={input_url} 
+				placeholder="🔗 Dán link phiếu in S3 Amazon (Shopee / TikTok Shop) vào đây..." 
+				class="url-input"
+				on:keydown={(e) => e.key === 'Enter' && handle_process_from_url()}
+			/>
+			<button class="btn-url" on:click={handle_process_from_url} disabled={is_loading}>
+				{is_loading ? "⏳ ĐANG XỬ LÝ..." : "⚡ GOM HÀNG TỪ LINK"}
+			</button>
+		</div>
+
+		<div class="divider"><span>HOẶC KÉO THẢ FILE PDF</span></div>
+
+		<!-- 📂 KHUNG KÉO THẢ PDF -->
+		<div 
+			class="drop-zone {is_dragging ? 'dragging' : ''}"
+			on:drop={handle_drop}
+			on:dragover={(e) => { e.preventDefault(); is_dragging = true; }}
+			on:dragleave={() => is_dragging = false}
+		>
+			<input type="file" accept="application/pdf" on:change={handle_file_upload} id="file-input" hidden />
+			<label for="file-input" class="btn-file">
+				{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : "📂 CHỌN FILE PDF / KÉO THẢ VÀO ĐÂY"}
+			</label>
+		</div>
 	</div>
 
 	<!-- CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING -->
@@ -238,10 +286,23 @@
 
 <style>
 	.container { max-width: 980px; margin: 30px auto; font-family: Arial, sans-serif; }
-	.drop-zone { background: #f8fafc; border: 3px dashed #cbd5e1; padding: 30px; border-radius: 12px; text-align: center; }
+	.input-wrapper { background: #f8fafc; border: 1px solid #e2e8f0; padding: 25px; border-radius: 12px; text-align: center; }
+	.input-wrapper h2 { color: #0284c7; margin-top: 0; margin-bottom: 6px; }
+	.sub-title { color: #64748b; font-size: 14px; margin-bottom: 20px; }
+
+	.url-input-box { display: flex; gap: 10px; max-width: 800px; margin: 0 auto; }
+	.url-input { flex: 1; padding: 12px 16px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+	.url-input:focus { border-color: #0284c7; }
+	.btn-url { padding: 12px 24px; background: #0284c7; color: white; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+
+	.divider { margin: 20px 0; position: relative; text-align: center; }
+	.divider::before { content: ""; position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: #cbd5e1; z-index: 1; }
+	.divider span { position: relative; z-index: 2; background: #f8fafc; padding: 0 15px; color: #94a3b8; font-size: 12px; font-weight: bold; }
+
+	.drop-zone { border: 2px dashed #cbd5e1; padding: 20px; border-radius: 8px; background: #ffffff; }
 	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
-	.drop-zone h2 { color: #0284c7; margin-top: 0; }
-	.btn-file { display: inline-block; padding: 12px 28px; background: #0284c7; color: white; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 15px; }
+	.btn-file { display: inline-block; padding: 10px 24px; background: #64748b; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
+
 	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
 	.btn-print { padding: 10px 22px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
@@ -274,23 +335,4 @@
 		.no-print { display: none !important; } 
 		.container { max-width: 100% !important; margin: 0 !important; width: 100% !important; } 
 		
-		.print-title { font-size: 16px !important; margin-bottom: 4px !important; }
-		.print-summary { font-size: 13px !important; margin-top: 0 !important; }
-
-		.picking-table { width: 100% !important; table-layout: fixed !important; margin-top: 5px !important; }
-		th, td { padding: 4px 6px !important; font-size: 12px !important; border: 1px solid #000 !important; }
-		th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
-
-		.col-stt, .col-stt-val { width: 6% !important; }
-		.col-sku, .col-sku-val { width: 18% !important; }
-		.col-name, .col-name-val { width: 52% !important; }
-		.col-loc, .col-loc-val { width: 8% !important; }
-		.col-qty, .col-qty-val { width: 8% !important; }
-		.col-check, .col-check-val { width: 8% !important; }
-
-		.sku-code { font-size: 11px !important; color: #000 !important; word-break: break-all !important; }
-		.product-name { font-size: 12px !important; line-height: 1.25 !important; color: #000 !important; font-weight: bold !important; }
-		.qty-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 13px !important; font-weight: bold !important; }
-		.location-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 11px !important; }
-	}
-</style>
+		.print-title { font-size: 16px !important; margin-bottom: 4px !
