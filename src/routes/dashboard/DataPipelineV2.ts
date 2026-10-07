@@ -911,16 +911,20 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	}
 }
 
-// 🟢 2. HÀM TẢI FILE S3 BỎ QUA CORS DÀNH RIÊNG CHO CHỨC NĂNG DÁN LINK
+// 🟢 HÀM CHÉM CORS: ÉP TẢI FILE S3 QUA PROXY SERVER NODE.JS
 export async function extract_orders_from_s3_url(s3_url: string) {
 	try {
 		if (!s3_url || !s3_url.startsWith("http")) {
 			return { success: false, message: "Đường link S3 không hợp lệ!" };
 		}
 
-		const resp = await axios.get(s3_url, {
+		// 🎯 Gọi qua Proxy Render để Server tải ngầm từ S3 (vượt rào CORS 100%)
+		// Nếu proxy của dì hỗ trợ truyền URL qua params hoặc header:
+		const proxy_download_url = `${proxyUrl}/fetch-pdf?url=${encodeURIComponent(s3_url)}`;
+
+		const resp = await axios.get(proxy_download_url, {
 			responseType: 'arraybuffer',
-			timeout: 25000
+			timeout: 30000
 		});
 
 		if (resp.status !== 200 || !resp.data) {
@@ -932,7 +936,29 @@ export async function extract_orders_from_s3_url(s3_url: string) {
 			buffer: resp.data
 		};
 	} catch (e: any) {
-		console.error("Lỗi tải S3 từ Server:", e.message);
-		return { success: false, message: "Không thể kết nối tải file từ Link S3. Vui lòng kiểm tra lại link hoặc upload file PDF!" };
+		console.error("Lỗi tải S3 qua Proxy Server:", e.message);
+
+		// 🎯 THỬ THÊM CÁCH 2: Dùng dịch vụ CORS Proxy công cộng dự phòng nếu Sapo Proxy chưa mở route
+		try {
+			const fallback_cors_proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(s3_url)}`;
+			const resp2 = await axios.get(fallback_cors_proxy, {
+				responseType: 'arraybuffer',
+				timeout: 30000
+			});
+
+			if (resp2.status === 200 && resp2.data) {
+				return {
+					success: true,
+					buffer: resp2.data
+				};
+			}
+		} catch (err2) {
+			console.error("Fallback CORS Proxy cũng lỗi:", err2);
+		}
+
+		return { 
+			success: false, 
+			message: "Link S3 này bị Amazon chặn CORS truy cập ngoài. Dì hãy kéo-thả file PDF về máy upload lên nhé!" 
+		};
 	}
 }
