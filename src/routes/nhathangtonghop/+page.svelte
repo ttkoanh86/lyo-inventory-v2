@@ -162,7 +162,7 @@
 								<span class="checkbox-print-box"></span>
 								<input type="checkbox" class="screen-checkbox" />
 							</td>	
-						<tr>
+						</tr>
 					{/each}
 				</tbody>
 			</table>
