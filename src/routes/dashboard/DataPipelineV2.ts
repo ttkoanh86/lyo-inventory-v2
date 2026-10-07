@@ -813,7 +813,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 	}
 }
 
-// 🟢 1. HÀM GOM HÀNG CHÍNH CHẠY SIÊU TỐC (CẮT BỎ REQUEST THỪA, TỐC ĐỘ GẤP 3 LẦN)
+// 🟢 HÀM GOM HÀNG TỐI ƯU SIÊU TỐC - CẮT BỎ REQUEST THỪA (TỐC ĐỘ GẤP 3 LẦN)
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -828,12 +828,13 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		const successful_orders = new Set<string>();
 		const failed_orders: string[] = [];
 
-		// Tra cứu 1 đơn hàng (chỉ gọi 1 request tối ưu tốc độ)
+		// 🎯 Tra cứu 1 đơn hàng SIÊU NHANH (Chỉ gọi 1 request duy nhất)
 		async function fetchSingleOrder(orderId: string) {
 			const clean_query = String(orderId).trim().toUpperCase();
 			if (!clean_query) return;
 
 			try {
+				// 1. Chỉ gọi 1 request lấy đơn từ Sapo Proxy
 				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 					params: { query: clean_query, limit: 5 },
 					timeout: 20000,
@@ -845,6 +846,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return;
 				}
 
+				// Tìm chính xác đơn hàng khớp mã
 				const order = resp.data.orders.find((o: any) => {
 					const c_code = (o.code || "").toUpperCase().trim();
 					const c_name = (o.name || "").toUpperCase().trim();
@@ -852,6 +854,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return c_code.includes(clean_query) || c_name.includes(clean_query) || c_ref.includes(clean_query) || String(o.id) === clean_query;
 				}) || resp.data.orders[0];
 
+				// Lấy trực tiếp sản phẩm từ danh sách đơn gốc (Không cần gọi API chi tiết nữa)
 				const raw_line_items = order.order_line_items || order.line_items || [];
 
 				if (raw_line_items.length > 0) {
@@ -861,6 +864,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return;
 				}
 
+				// Gom sản phẩm chuẩn xác theo đúng Mã SKU và Tên phiên bản
 				for (const item of raw_line_items) {
 					const sku = (
 						item.variant_sku || 
@@ -889,6 +893,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 			}
 		}
 
+		// 🎯 TĂNG LÊN 8 ĐƠN/LẦN ĐỂ CHẠY SONG SONG NHANH VÈO VÈO
 		const BATCH_SIZE = 8;
 		for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
 			const batch = order_ids.slice(i, i + BATCH_SIZE);
@@ -908,57 +913,5 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	} catch (e: any) {
 		console.error("Lỗi Gom Hàng Sapo:", e);
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
-	}
-}
-
-// 🟢 HÀM CHÉM CORS: ÉP TẢI FILE S3 QUA PROXY SERVER NODE.JS
-export async function extract_orders_from_s3_url(s3_url: string) {
-	try {
-		if (!s3_url || !s3_url.startsWith("http")) {
-			return { success: false, message: "Đường link S3 không hợp lệ!" };
-		}
-
-		// 🎯 Gọi qua Proxy Render để Server tải ngầm từ S3 (vượt rào CORS 100%)
-		// Nếu proxy của dì hỗ trợ truyền URL qua params hoặc header:
-		const proxy_download_url = `${proxyUrl}/fetch-pdf?url=${encodeURIComponent(s3_url)}`;
-
-		const resp = await axios.get(proxy_download_url, {
-			responseType: 'arraybuffer',
-			timeout: 30000
-		});
-
-		if (resp.status !== 200 || !resp.data) {
-			return { success: false, message: "Không thể tải file PDF từ đường dẫn S3 này!" };
-		}
-
-		return {
-			success: true,
-			buffer: resp.data
-		};
-	} catch (e: any) {
-		console.error("Lỗi tải S3 qua Proxy Server:", e.message);
-
-		// 🎯 THỬ THÊM CÁCH 2: Dùng dịch vụ CORS Proxy công cộng dự phòng nếu Sapo Proxy chưa mở route
-		try {
-			const fallback_cors_proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(s3_url)}`;
-			const resp2 = await axios.get(fallback_cors_proxy, {
-				responseType: 'arraybuffer',
-				timeout: 30000
-			});
-
-			if (resp2.status === 200 && resp2.data) {
-				return {
-					success: true,
-					buffer: resp2.data
-				};
-			}
-		} catch (err2) {
-			console.error("Fallback CORS Proxy cũng lỗi:", err2);
-		}
-
-		return { 
-			success: false, 
-			message: "Link S3 này bị Amazon chặn CORS truy cập ngoài. Dì hãy kéo-thả file PDF về máy upload lên nhé!" 
-		};
 	}
 }
