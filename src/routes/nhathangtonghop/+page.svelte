@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	// 🟢 Import hàm gom hàng từ DataPipelineV2
-	import { aggregate_sapo_orders_from_pdf } from '../dashboard/DataPipelineV2';
+	// 🟢 Import thêm hàm extract_orders_from_s3_url từ DataPipelineV2
+	import { aggregate_sapo_orders_from_pdf, extract_orders_from_s3_url } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
 	let is_retrying = false;
-	let input_url = ""; // Đường link S3 Amazon dán vào
+	let input_url = "";
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -30,7 +30,7 @@
 		document.head.appendChild(script);
 	});
 
-	// 1. XỬ LÝ BÓC MÃ ĐƠN TỪ BUFFER FILE PDF
+	// BÓC MÃ ĐƠN TỪ BUFFER
 	async function parse_pdf_buffer_and_fetch(buffer: ArrayBuffer) {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
@@ -46,11 +46,11 @@
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
 
-				// Order ID TikTok Shop (18 số)
+				// 1. Order ID TikTok Shop (18 số)
 				const tiktok = str.match(/\b5\d{17}\b/);
 				if (tiktok) order_set.add(tiktok[0]);
 
-				// Order ID Shopee
+				// 2. Order ID Shopee (Ví dụ: 261006V1SVJBYY)
 				const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
 				if (shopee && !shopee[0].startsWith('SPX')) order_set.add(shopee[0]);
 			}
@@ -60,7 +60,7 @@
 		total_orders = extracted_order_ids.length;
 
 		if (total_orders === 0) {
-			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong tài liệu/link vừa chọn!");
+			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong tài liệu/link vừa dán!");
 			is_loading = false;
 			return;
 		}
@@ -68,10 +68,10 @@
 		await fetch_sapo_orders(extracted_order_ids);
 	}
 
-	// 2. XỬ LÝ DÁN LINK S3 AMAZON / URL PDF
+	// 🎯 XỬ LÝ DÁN LINK S3 THÔNG QUA PROXY BACKEND (CHỐNG CORS)
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
-		if (!clean_url) return alert("Vui lòng dán đường link phiếu in (S3 Amazon / Shopee / TikTok)!");
+		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
 		if (!is_pdf_ready) return alert("Thư viện đang khởi tạo, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
@@ -80,21 +80,23 @@
 		failed_order_ids = [];
 
 		try {
-			// Tải ngầm file PDF từ Link S3
-			const response = await fetch(clean_url);
-			if (!response.ok) throw new Error("Không thể tải file từ đường dẫn S3 này!");
+			// Gọi Proxy Backend tải file ngầm từ Amazon S3
+			const res = await extract_orders_from_s3_url(clean_url);
 
-			const buffer = await response.arrayBuffer();
-			await parse_pdf_buffer_and_fetch(buffer);
+			if (res.success && res.buffer) {
+				await parse_pdf_buffer_and_fetch(res.buffer);
+			} else {
+				alert(res.message || "Không thể tải link file từ S3 Amazon!");
+				is_loading = false;
+			}
 		} catch (err: any) {
 			console.error(err);
-			alert("Không thể đọc link PDF S3 do chặn CORS hoặc link hết hạn. Nếu gặp lỗi này, bạn hãy kéo-thả file PDF như bình thường nhé!");
-		} finally {
+			alert("Lỗi khi xử lý link S3 Amazon!");
 			is_loading = false;
 		}
 	}
 
-	// 3. XỬ LÝ CHỌN / KÉO THẢ FILE PDF NGUYÊN BẢN
+	// XỬ LÝ KÉO THẢ FILE PDF
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -114,7 +116,6 @@
 		}
 	}
 
-	// KÉO TẤT CẢ LẦN ĐẦU
 	async function fetch_sapo_orders(orderIds: string[]) {
 		is_loading = true;
 		const res = await aggregate_sapo_orders_from_pdf(orderIds);
@@ -129,7 +130,6 @@
 		is_loading = false;
 	}
 
-	// CHỈ KÉO BÙ CÁC ĐƠN BỊ LỖI
 	async function retry_failed_orders() {
 		if (failed_order_ids.length === 0) return;
 
@@ -181,12 +181,10 @@
 </svelte:head>
 
 <div class="container">
-	<!-- KHU VỰC NHẬP DỮ LIỆU: DÁN LINK S3 HOẶC KÉO THẢ PDF -->
 	<div class="no-print input-wrapper">
 		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG GOM</h2>
 		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - Thả file PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
-		<!-- 🔗 KHUNG DÁN LINK S3 -->
 		<div class="url-input-box">
 			<input 
 				type="text" 
@@ -196,13 +194,12 @@
 				on:keydown={(e) => e.key === 'Enter' && handle_process_from_url()}
 			/>
 			<button class="btn-url" on:click={handle_process_from_url} disabled={is_loading}>
-				{is_loading ? "⏳ ĐANG XỬ LÝ..." : "⚡ GOM HÀNG TỪ LINK"}
+				{is_loading ? "⏳ ĐANG TẢI & GOM..." : "⚡ GOM HÀNG TỪ LINK"}
 			</button>
 		</div>
 
 		<div class="divider"><span>HOẶC KÉO THẢ FILE PDF</span></div>
 
-		<!-- 📂 KHUNG KÉO THẢ PDF -->
 		<div 
 			class="drop-zone {is_dragging ? 'dragging' : ''}"
 			on:drop={handle_drop}
@@ -216,7 +213,6 @@
 		</div>
 	</div>
 
-	<!-- CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING -->
 	{#if is_loading && extracted_order_ids.length > 0 && picked_items.length === 0}
 		<div class="info-bar">
 			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo!
