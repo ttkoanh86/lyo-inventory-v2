@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	// 🟢 Import cả 2 hàm độc lập từ DataPipelineV2
+	// 🟢 Import cả 2 hàm đã được export từ DataPipelineV2
 	import { aggregate_sapo_orders_from_pdf, extract_orders_from_s3_url } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
@@ -30,7 +30,7 @@
 		document.head.appendChild(script);
 	});
 
-	// HÀM CHUNG BÓC MÃ ĐƠN TỪ TẬP LỆNH PDF
+	// HÀM BÓC MÃ ĐƠN TỪ BUFFER FILE PDF
 	async function parse_pdf_arraybuffer(buffer: ArrayBuffer) {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
@@ -46,11 +46,11 @@
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
 
-				// Order ID TikTok Shop (18 số)
+				// TikTok Shop (18 số)
 				const tiktok = str.match(/\b5\d{17}\b/);
 				if (tiktok) order_set.add(tiktok[0]);
 
-				// Order ID Shopee
+				// Shopee
 				const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
 				if (shopee && !shopee[0].toUpperCase().startsWith('SPX')) order_set.add(shopee[0]);
 			}
@@ -59,7 +59,7 @@
 		return Array.from(order_set);
 	}
 
-	// 🟢 1. LUỒNG XỬ LÝ UPLOAD / KÉO THẢ FILE PDF (GIỮ NGUYÊN BẢN CHUẨN XÁC)
+	// 🟢 1. LUỒNG UPLOAD / KÉO THẢ FILE PDF (GIỮ NGUYÊN SIÊU NHANH)
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -88,7 +88,7 @@
 		}
 	}
 
-	// 🟢 2. LUỒNG XỬ LÝ DÁN LINK S3 (CHẠY QUA PROXY ĐỘC LẬP CHỐNG CORS)
+	// 🟢 2. LUỒNG DÁN LINK S3 (CHẠY QUA PROXY NÊN KHÔNG BỊ CHẶN CORS)
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
@@ -100,7 +100,6 @@
 		failed_order_ids = [];
 
 		try {
-			// Tải ngầm file qua Server Render để tránh bị chặn CORS
 			const res = await extract_orders_from_s3_url(clean_url);
 
 			if (res.success && res.buffer) {
