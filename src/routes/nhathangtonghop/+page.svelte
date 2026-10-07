@@ -121,7 +121,7 @@
 
 	{#if extracted_order_ids.length > 0}
 		<div class="info-bar">
-			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đã gom xong sản phẩm cần lấy từ Sapo!
+			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo!
 		</div>
 	{/if}
 
@@ -144,9 +144,9 @@
 						<!-- 🟢 GIÃN RỘNG CỘT TÊN SẢN PHẨM -->
 						<th>TÊN SẢN PHẨM</th>
 						<th style="width: 120px; text-align: center;">VỊ TRÍ KHO</th>
-						<th style="width: 110px; text-align: center;">TỔNG SL</th>
-						<!-- 🟢 ĐỔI TIÊU ĐỀ THÀNH ĐÃ LẤY (  ) -->
-						<th style="width: 90px; text-align: center;">ĐÃ LẤY ( &nbsp; )</th>
+						<th style="width: 110px; text-align: center;">TỔNG SỐ LƯỢNG</th>
+						<!-- 🟢 DẤU TICK ĐƯỢC ĐẶT Ở TRONG CẶP NGOẶC () TRÊN TÊN CỘT TIÊU ĐỀ -->
+						<th style="width: 90px; text-align: center;">ĐÃ LẤY ( ✓ )</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -157,11 +157,11 @@
 							<td><b class="product-name">{item.name}</b></td>
 							<td style="text-align: center;"><span class="location-badge">{item.location || '---'}</span></td>
 							<td style="text-align: center;"><span class="qty-badge">{item.qty}</span></td>
-							<!-- 🟢 DẠNG CHECKBOX TRONG CẶP NGOẶC () KHI IN TAY VÀ TÍCH TRÊN MÀN HÌNH -->
+							<!-- 🟢 BỎ ( ) Ở CÁC HÀNG DƯỚI, CHỈ GIỮ LẠI CHECKBOX -->
 							<td style="text-align: center;">
-								<span class="paren-check">( <input type="checkbox" class="screen-checkbox" /> )</span>
-							</td>
-						</tr>
+								<span class="checkbox-print-box"></span>
+								<input type="checkbox" class="screen-checkbox" />
+							</td>					
 					{/each}
 				</tbody>
 			</table>
