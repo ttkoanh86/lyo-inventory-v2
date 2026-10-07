@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	// 🟢 Import thêm hàm extract_orders_from_s3_url từ DataPipelineV2
-	import { aggregate_sapo_orders_from_pdf, extract_orders_from_s3_url } from '../dashboard/DataPipelineV2';
+	import { aggregate_sapo_orders_from_pdf } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
 	let is_retrying = false;
@@ -30,10 +29,10 @@
 		document.head.appendChild(script);
 	});
 
-	// BÓC MÃ ĐƠN TỪ BUFFER
-	async function parse_pdf_buffer_and_fetch(buffer: ArrayBuffer) {
+	// HÀM CHUNG XỬ LÝ BÓC MÃ ĐƠN TỪ TÀI LIỆU PDF (DẠNG URL HOẶC ARRAYBUFFER)
+	async function parse_pdf_document_and_fetch(docSource: any) {
 		const pdfjs = (window as any).pdfjsLib;
-		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+		const loadingTask = pdfjs.getDocument(docSource);
 		const pdf = await loadingTask.promise;
 
 		const order_set = new Set<string>();
@@ -46,11 +45,11 @@
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
 
-				// 1. Order ID TikTok Shop (18 số)
+				// TikTok Shop Order ID (18 số)
 				const tiktok = str.match(/\b5\d{17}\b/);
 				if (tiktok) order_set.add(tiktok[0]);
 
-				// 2. Order ID Shopee (Ví dụ: 261006V1SVJBYY)
+				// Shopee Order ID
 				const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
 				if (shopee && !shopee[0].startsWith('SPX')) order_set.add(shopee[0]);
 			}
@@ -60,7 +59,7 @@
 		total_orders = extracted_order_ids.length;
 
 		if (total_orders === 0) {
-			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong tài liệu/link vừa dán!");
+			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong link/file PDF vừa chọn!");
 			is_loading = false;
 			return;
 		}
@@ -68,11 +67,11 @@
 		await fetch_sapo_orders(extracted_order_ids);
 	}
 
-	// 🎯 XỬ LÝ DÁN LINK S3 THÔNG QUA PROXY BACKEND (CHỐNG CORS)
+	// 1. XỬ LÝ DÁN LINK S3
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
-		if (!is_pdf_ready) return alert("Thư viện đang khởi tạo, vui lòng thử lại sau vài giây!");
+		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang khởi tạo, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
 		extracted_order_ids = [];
@@ -80,23 +79,16 @@
 		failed_order_ids = [];
 
 		try {
-			// Gọi Proxy Backend tải file ngầm từ Amazon S3
-			const res = await extract_orders_from_s3_url(clean_url);
-
-			if (res.success && res.buffer) {
-				await parse_pdf_buffer_and_fetch(res.buffer);
-			} else {
-				alert(res.message || "Không thể tải link file từ S3 Amazon!");
-				is_loading = false;
-			}
+			// Truyền trực tiếp URL vào PDF.js
+			await parse_pdf_document_and_fetch(clean_url);
 		} catch (err: any) {
 			console.error(err);
-			alert("Lỗi khi xử lý link S3 Amazon!");
+			alert("Link S3 này bị chặn truy cập trực tiếp từ trình duyệt. Dì hãy Kéo - Thả file PDF về máy upload lên nhé!");
 			is_loading = false;
 		}
 	}
 
-	// XỬ LÝ KÉO THẢ FILE PDF
+	// 2. XỬ LÝ KÉO THẢ FILE PDF
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -108,7 +100,7 @@
 
 		try {
 			const buffer = await file.arrayBuffer();
-			await parse_pdf_buffer_and_fetch(buffer);
+			await parse_pdf_document_and_fetch({ data: new Uint8Array(buffer) });
 		} catch (err) {
 			console.error(err);
 			alert("Lỗi khi đọc file PDF!");
@@ -194,7 +186,7 @@
 				on:keydown={(e) => e.key === 'Enter' && handle_process_from_url()}
 			/>
 			<button class="btn-url" on:click={handle_process_from_url} disabled={is_loading}>
-				{is_loading ? "⏳ ĐANG TẢI & GOM..." : "⚡ GOM HÀNG TỪ LINK"}
+				{is_loading ? "⏳ ĐANG XỬ LÝ..." : "⚡ GOM HÀNG TỪ LINK"}
 			</button>
 		</div>
 
