@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	// 🟢 Import hàm gom hàng từ DataPipelineV2
 	import { aggregate_sapo_orders_from_pdf } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
+	let is_retrying = false; // Trạng thái đang kéo bù
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
+	let successful_orders_count = 0;
+	let failed_order_ids: string[] = [];
 	let total_products_qty = 0;
 	let is_pdf_ready = false;
 	let is_dragging = false;
@@ -26,7 +28,7 @@
 		document.head.appendChild(script);
 	});
 
-	// ĐỌC MÃ ĐƠN TỪ PDF VÀ ĐẨY VÀO DATAPIPELINE V2
+	// ĐỌC MÃ ĐƠN TỪ PDF VÀ GỬI SANG DATAPIPELINE
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -34,6 +36,7 @@
 		is_loading = true;
 		extracted_order_ids = [];
 		picked_items = [];
+		failed_order_ids = [];
 
 		try {
 			const buffer = await file.arrayBuffer();
@@ -52,11 +55,11 @@
 				for (let i = 0; i < items.length; i++) {
 					const str = items[i];
 
-					// 1. Bắt Order ID TikTok Shop (18 số)
+					// 1. Order ID TikTok Shop (18 số)
 					const tiktok = str.match(/\b5\d{17}\b/);
 					if (tiktok) order_set.add(tiktok[0]);
 
-					// 2. Bắt Order ID Shopee (Ví dụ: 261006V1SVJBYY)
+					// 2. Order ID Shopee (Ví dụ: 261006V1SVJBYY)
 					const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
 					if (shopee && !shopee[0].startsWith('SPX')) order_set.add(shopee[0]);
 				}
@@ -69,15 +72,8 @@
 				return;
 			}
 
-			// 🌐 GỌI TRỰC TIẾP HÀM DATAPIPELINE V2
-			const res = await aggregate_sapo_orders_from_pdf(extracted_order_ids);
-
-			if (res.success) {
-				picked_items = res.items || [];
-				total_products_qty = res.total_qty || 0;
-			} else {
-				alert(res.message || "Lỗi khi gom hàng từ Sapo!");
-			}
+			// GỌI KÉO TẤT CẢ LẦN ĐẦU
+			await fetch_sapo_orders(extracted_order_ids);
 
 		} catch (err) {
 			console.error(err);
@@ -85,6 +81,61 @@
 		} finally {
 			is_loading = false;
 		}
+	}
+
+	// KÉO LẦN ĐẦU CHO TẤT CẢ ĐƠN
+	async function fetch_sapo_orders(orderIds: string[]) {
+		is_loading = true;
+		const res = await aggregate_sapo_orders_from_pdf(orderIds);
+		if (res.success) {
+			picked_items = res.items || [];
+			total_products_qty = res.total_qty || 0;
+			successful_orders_count = res.found_orders_count || 0;
+			failed_order_ids = res.failed_orders || [];
+		} else {
+			alert(res.message || "Lỗi khi gom hàng từ Sapo!");
+		}
+		is_loading = false;
+	}
+
+	// 🎯 CHỈ KÉO BÙ CÁC ĐƠN BỊ LỖI (KHÔNG CHẠY LẠI TỪ ĐẦU)
+	async function retry_failed_orders() {
+		if (failed_order_ids.length === 0) return;
+
+		is_retrying = true;
+		const retry_targets = [...failed_order_ids];
+		
+		// Gọi DataPipeline chỉ với danh sách đơn lỗi
+		const res = await aggregate_sapo_orders_from_pdf(retry_targets);
+
+		if (res.success && res.items.length > 0) {
+			// Merge kết quả mới kéo bù vào danh sách cũ
+			const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
+			
+			// Đưa danh sách cũ vào map
+			picked_items.forEach(item => {
+				item_map[item.sku] = { ...item };
+			});
+
+			// Cộng dồn các món từ đơn kéo bù thành công
+			res.items.forEach(new_item => {
+				if (item_map[new_item.sku]) {
+					item_map[new_item.sku].qty += new_item.qty;
+				} else {
+					item_map[new_item.sku] = { ...new_item };
+				}
+			});
+
+			// Cập nhật lại giao diện
+			picked_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
+			total_products_qty += res.total_qty || 0;
+			successful_orders_count += res.found_orders_count || 0;
+			failed_order_ids = res.failed_orders || []; // Cập nhật danh sách lỗi còn lại (nếu vẫn lỗi)
+		} else if (res.success && res.found_orders_count === 0) {
+			alert("Vẫn chưa kéo được các đơn này do mạng/Sapo bận. Vui lòng thử lại sau giây lát!");
+		}
+
+		is_retrying = false;
 	}
 
 	function handle_file_upload(e: Event) {
@@ -119,7 +170,7 @@
 		</label>
 	</div>
 
-	<!-- CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING -->
+	<!-- CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING LẦN ĐẦU -->
 	{#if is_loading && extracted_order_ids.length > 0 && picked_items.length === 0}
 		<div class="info-bar">
 			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo!
@@ -131,7 +182,31 @@
 			<div class="result-header">
 				<div>
 					<h3>📋 DANH SÁCH SẢN PHẨM CẦN GOM NHẶT HÀNG (TỪ SAPO)</h3>
-					<p>Tổng số đơn: <b>{total_orders} đơn</b> | Tổng số lượng sản phẩm cần nhặt: <b style="color: #d97706; font-size: 16px;">{total_products_qty} món</b></p>
+					<p>
+						Tổng số đơn: 
+						<b style="color: {successful_orders_count === total_orders ? '#16a34a' : '#dc2626'}; font-size: 15px;">
+							{successful_orders_count}/{total_orders} đơn
+						</b>
+						{#if failed_order_ids.length > 0}
+							<span class="error-tag">
+								⚠️ hụt {failed_order_ids.length} đơn do lỗi mạng
+							</span>
+						{:else}
+							<span class="success-tag">✅ Đã gộp đủ 100%</span>
+						{/if}
+						| Tổng số lượng sản phẩm cần nhặt: <b style="color: #d97706; font-size: 16px;">{total_products_qty} món</b>
+					</p>
+
+					<!-- 🔴 KHUNG CẢNH BÁO VÀ NÚT CHỈ KÉO BÙ ĐƠN LỖI -->
+					{#if failed_order_ids.length > 0}
+						<div class="failed-box no-print">
+							🚨 <b>CÁC MÃ ĐƠN CHƯA KÉO ĐƯỢC DO TIMEOUT ({failed_order_ids.length} đơn):</b> 
+							<span class="failed-list">{failed_order_ids.join(', ')}</span>
+							<button class="btn-retry" on:click={retry_failed_orders} disabled={is_retrying}>
+								{is_retrying ? '⏳ ĐANG KÉO BÙ...' : '🔄 CHỈ KÉO BÙ CÁC ĐƠN LỖI NÀY'}
+							</button>
+						</div>
+					{/if}
 				</div>
 				<button class="no-print btn-print" on:click={() => window.print()}>🖨 IN PHIẾU GOM HÀNG</button>
 			</div>
@@ -155,10 +230,7 @@
 							<td><b class="product-name">{item.name}</b></td>
 							<td style="text-align: center;"><span class="location-badge">{item.location || '---'}</span></td>
 							<td style="text-align: center;"><span class="qty-badge">{item.qty}</span></td>
-							<!-- 🟢 TRÊN WEB CÓ CHECKBOX, KHI IN RA ĐỂ Ô TRẮNG TIẾT KIỆM MỰC -->
-							<td style="text-align: center;">
-								<input type="checkbox" class="screen-checkbox no-print" />
-							</td>	
+							<td style="text-align: center;"></td>	
 						</tr>
 					{/each}
 				</tbody>
@@ -177,6 +249,14 @@
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
 	.btn-print { padding: 10px 22px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
 	
+	.success-tag { display: inline-block; margin: 0 6px; padding: 2px 8px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: bold; border-radius: 4px; }
+	.error-tag { display: inline-block; margin: 0 6px; padding: 2px 8px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: bold; border-radius: 4px; }
+	
+	.failed-box { margin-top: 10px; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b; font-size: 13px; }
+	.failed-list { color: #dc2626; font-weight: bold; font-family: monospace; font-size: 13px; margin-left: 6px; }
+	.btn-retry { margin-left: 12px; padding: 4px 12px; background: #dc2626; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; }
+	.btn-retry:disabled { background: #9ca3af; cursor: not-allowed; }
+
 	table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }
 	th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: middle; }
 	th { background: #f1f5f9; font-size: 13px; font-weight: bold; text-transform: uppercase; }
@@ -185,8 +265,6 @@
 	.product-name { font-size: 14px; line-height: 1.4; color: #1e293b; }
 	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
 	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
-	
-	.screen-checkbox { width: 18px; height: 18px; cursor: pointer; vertical-align: middle; }
 
 	@media print { 
 		.no-print { display: none !important; } 
