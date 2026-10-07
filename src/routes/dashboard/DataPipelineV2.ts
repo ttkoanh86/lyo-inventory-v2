@@ -812,7 +812,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
-// 🟢 HÀM GOM HÀNG NHẶT TỔNG HỢP TỪ MÃ ĐƠN SÀN (ORDER ID) QUA SAPO PROXY
+// 🟢 HÀM GOM HÀNG BÓC TÁCH CHUẨN XÁC THEO PHIÊN BẢN (VARIANT) TRONG ĐƠN SAPO
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -826,13 +826,12 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		let total_qty = 0;
 		let found_orders_count = 0;
 
-		// Vòng lặp tra cứu Sapo qua proxyUrl hệt như adjust_order_prices_auto
 		for (const orderId of order_ids) {
 			try {
 				const clean_query = String(orderId).trim().toUpperCase();
 				if (!clean_query) continue;
 
-				// 1. Kéo đơn từ Sapo bằng query Mã đơn sàn / Reference Code
+				// 1. Kéo đơn hàng từ Sapo qua Proxy
 				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 					params: { query: clean_query, limit: 10 },
 					timeout: 15000,
@@ -843,11 +842,10 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					continue;
 				}
 
-				// Lấy đúng đơn hàng khớp đầu tiên
 				const order_summary = resp.data.orders[0];
 				const order_id = order_summary.id;
 
-				// 2. Kéo chi tiết sản phẩm trong đơn
+				// 2. Kéo FULL chi tiết đơn hàng
 				const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
 					timeout: 15000,
 					...authHeaders
@@ -862,20 +860,36 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					found_orders_count++;
 				}
 
-				// 3. Gom sản phẩm & CỘNG DỒN SỐ LƯỢNG nếu lặp lại
+				// 3. BÓC TÁCH CHUẨN XÁC THEO PHIÊN BẢN (VARIANT) ĐẶT HÀNG
 				for (const item of raw_line_items) {
-					const sku = item.sku || item.barcode || "KHONG_MA_SKU";
-					const name = item.product_name || item.name || item.title || item.variant_name || "Sản phẩm chưa đặt tên";
+					// 🎯 Ưu tiên lấy SKU/Barcode của đúng PHIÊN BẢN (Variant SKU)
+					const sku = (
+						item.variant_sku || 
+						item.sku || 
+						item.barcode || 
+						item.variant_barcode || 
+						"KHONG_MA_SKU"
+					).trim().toUpperCase();
+
+					// 🎯 Ưu tiên lấy Tên đầy đủ kèm Phân loại phiên bản (Màu sắc/Dung tích)
+					let full_name = item.variant_name || item.product_name || item.name || item.title || "Sản phẩm";
+					
+					// Nếu tên chưa có tên phiên bản (ví dụ màu sắc), ghép thêm variant_title/options
+					if (item.variant_title && !full_name.includes(item.variant_title)) {
+						full_name = `${full_name} - ${item.variant_title}`;
+					}
+
 					const qty = Number(item.quantity) || 1;
 
 					if (!item_map[sku]) {
 						item_map[sku] = {
 							sku: sku,
-							name: name,
+							name: full_name,
 							qty: 0
 						};
 					}
 
+					// CỘNG DỒN SỐ LƯỢNG KHI CÙNG PHIÊN BẢN
 					item_map[sku].qty += qty;
 					total_qty += qty;
 				}
@@ -884,7 +898,6 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 			}
 		}
 
-		// Sắp xếp các sản phẩm có số lượng gom nhiều nhất lên đầu
 		const sorted_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
 
 		return {
