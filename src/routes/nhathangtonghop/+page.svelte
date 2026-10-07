@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	// 🟢 Import cả 2 hàm đã được export từ DataPipelineV2
-	import { aggregate_sapo_orders_from_pdf, extract_orders_from_s3_url } from '../dashboard/DataPipelineV2';
+	import { aggregate_sapo_orders_from_pdf } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
 	let is_retrying = false;
@@ -30,10 +29,10 @@
 		document.head.appendChild(script);
 	});
 
-	// HÀM BÓC MÃ ĐƠN TỪ BUFFER FILE PDF
-	async function parse_pdf_arraybuffer(buffer: ArrayBuffer) {
+	// BÓC MÃ ĐƠN TỪ TÀI LIỆU PDF
+	async function parse_pdf_and_fetch(pdfSource: any) {
 		const pdfjs = (window as any).pdfjsLib;
-		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+		const loadingTask = pdfjs.getDocument(pdfSource);
 		const pdf = await loadingTask.promise;
 
 		const order_set = new Set<string>();
@@ -56,10 +55,19 @@
 			}
 		}
 
-		return Array.from(order_set);
+		extracted_order_ids = Array.from(order_set);
+		total_orders = extracted_order_ids.length;
+
+		if (total_orders === 0) {
+			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong PDF / đường link này!");
+			is_loading = false;
+			return;
+		}
+
+		await fetch_sapo_orders(extracted_order_ids);
 	}
 
-	// 🟢 1. LUỒNG UPLOAD / KÉO THẢ FILE PDF (GIỮ NGUYÊN SIÊU NHANH)
+	// 1. CHỨC NĂNG UPLOAD / KÉO THẢ FILE PDF (CHẠY TRỰC TIẾP SIÊU NHANH)
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -71,16 +79,7 @@
 
 		try {
 			const buffer = await file.arrayBuffer();
-			extracted_order_ids = await parse_pdf_arraybuffer(buffer);
-			total_orders = extracted_order_ids.length;
-
-			if (total_orders === 0) {
-				alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong file PDF!");
-				is_loading = false;
-				return;
-			}
-
-			await fetch_sapo_orders(extracted_order_ids);
+			await parse_pdf_and_fetch({ data: new Uint8Array(buffer) });
 		} catch (err) {
 			console.error(err);
 			alert("Lỗi khi đọc file PDF!");
@@ -88,11 +87,11 @@
 		}
 	}
 
-	// 🟢 2. LUỒNG DÁN LINK S3 (CHẠY QUA PROXY NÊN KHÔNG BỊ CHẶN CORS)
+	// 2. CHỨC NĂNG DÁN LINK S3 / TỪ KHÓA
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
-		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang khởi tạo, vui lòng thử lại sau giây lát!");
+		if (!is_pdf_ready) return alert("Thư viện đang khởi tạo, vui lòng thử lại sau giây lát!");
 
 		is_loading = true;
 		extracted_order_ids = [];
@@ -100,26 +99,10 @@
 		failed_order_ids = [];
 
 		try {
-			const res = await extract_orders_from_s3_url(clean_url);
-
-			if (res.success && res.buffer) {
-				extracted_order_ids = await parse_pdf_arraybuffer(res.buffer);
-				total_orders = extracted_order_ids.length;
-
-				if (total_orders === 0) {
-					alert("Không tìm thấy Mã đơn hàng (Order ID) nào từ Link S3 này!");
-					is_loading = false;
-					return;
-				}
-
-				await fetch_sapo_orders(extracted_order_ids);
-			} else {
-				alert(res.message || "Không thể tải file từ đường dẫn S3!");
-				is_loading = false;
-			}
+			await parse_pdf_and_fetch(clean_url);
 		} catch (err: any) {
 			console.error(err);
-			alert("Không thể bóc tách từ Link S3 này do link hết hạn hoặc lỗi mạng!");
+			alert("Link S3 này bị Amazon chặn truy cập trực tiếp từ trình duyệt (lỗi CORS). Dì hãy Kéo - Thả file PDF về máy upload lên nhé!");
 			is_loading = false;
 		}
 	}
@@ -202,7 +185,7 @@
 				on:keydown={(e) => e.key === 'Enter' && handle_process_from_url()}
 			/>
 			<button class="btn-url" on:click={handle_process_from_url} disabled={is_loading}>
-				{is_loading ? "⏳ ĐANG TẢI LINK..." : "⚡ GOM HÀNG TỪ LINK"}
+				{is_loading ? "⏳ ĐANG XỬ LÝ..." : "⚡ GOM HÀNG TỪ LINK"}
 			</button>
 		</div>
 
