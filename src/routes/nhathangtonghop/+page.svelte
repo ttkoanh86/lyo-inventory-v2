@@ -44,7 +44,6 @@
 			const pdfjs = (window as any).pdfjsLib;
 			const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
 			const pdf = await loadingTask.promise;
-			total_orders = pdf.numPages;
 
 			const order_set = new Set<string>();
 
@@ -68,7 +67,10 @@
 
 			extracted_order_ids = Array.from(order_set);
 
-			if (extracted_order_ids.length === 0) {
+			// 🎯 FIX CHUẨN: Tính tổng số đơn bằng chính số lượng Mã Đơn Hàng (Order ID) bóc tách được!
+			total_orders = extracted_order_ids.length;
+
+			if (total_orders === 0) {
 				alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong file PDF!");
 				return;
 			}
@@ -252,14 +254,13 @@
 	.btn-retry { margin-left: 12px; padding: 4px 12px; background: #dc2626; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; }
 	.btn-retry:disabled { background: #9ca3af; cursor: not-allowed; }
 
-	/* STYLE TRÊN MÀN HÌNH WEB */
 	.picking-table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
 	th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: middle; }
 	th { background: #f1f5f9; font-size: 13px; font-weight: bold; text-transform: uppercase; }
 	
 	.col-stt, .col-stt-val { width: 45px; text-align: center; font-weight: bold; }
 	.col-sku, .col-sku-val { width: 150px; }
-	.col-name, .col-name-val { width: auto; } /* Tự giãn tối đa */
+	.col-name, .col-name-val { width: auto; }
 	.col-loc, .col-loc-val { width: 110px; text-align: center; }
 	.col-qty, .col-qty-val { width: 120px; text-align: center; }
 	.col-check, .col-check-val { width: 90px; text-align: center; }
@@ -269,7 +270,6 @@
 	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
 	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
 
-	/* 🖨 TỐI ƯU CẤU HÌNH TỶ LỆ KHI BẤM IN PHIẾU GIẤY (A4/A5) */
 	@media print { 
 		.no-print { display: none !important; } 
 		.container { max-width: 100% !important; margin: 0 !important; width: 100% !important; } 
@@ -281,10 +281,9 @@
 		th, td { padding: 4px 6px !important; font-size: 12px !important; border: 1px solid #000 !important; }
 		th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
 
-		/* ĐỊNH DẠNG TỶ LỆ CỘT CHUẨN XÁC KHI IN */
 		.col-stt, .col-stt-val { width: 6% !important; }
 		.col-sku, .col-sku-val { width: 18% !important; }
-		.col-name, .col-name-val { width: 52% !important; } /* Dành tới 52% chiều rộng cho Tên sản phẩm */
+		.col-name, .col-name-val { width: 52% !important; }
 		.col-loc, .col-loc-val { width: 8% !important; }
 		.col-qty, .col-qty-val { width: 8% !important; }
 		.col-check, .col-check-val { width: 8% !important; }
