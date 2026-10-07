@@ -812,30 +812,106 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
-// 🟢 HÀM TẢI VÀ BÓC MÃ ĐƠN TỪ LINK S3 AMAZON THÔNG QUA PROXY BACKEND (CHỐNG CORS 100%)
-export async function extract_orders_from_s3_url(s3_url: string) {
+// 🟢 HÀM GOM HÀNG TỐI ƯU TỐC ĐỘ (TRÁNH TIMEOUT & CHỐNG HỤT ĐƠN)
+export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
-		if (!s3_url || !s3_url.startsWith("http")) {
-			return { success: false, message: "Đường link S3 không hợp lệ!" };
+		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
+			return { success: false, message: "Danh sách Mã đơn hàng rỗng!" };
 		}
 
-		// Gọi Proxy Node.js tải file PDF ngầm từ Amazon S3 (không bị dính CORS)
-		const resp = await axios.get(s3_url, {
-			responseType: 'arraybuffer',
-			timeout: 30000
-		});
+		const token = obtain_access_token();
+		const authHeaders = { headers: { Authorization: token } };
 
-		if (resp.status !== 200 || !resp.data) {
-			return { success: false, message: "Không thể tải nội dung từ đường dẫn S3!" };
+		const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
+		let total_qty = 0;
+		const successful_orders = new Set<string>();
+		const failed_orders: string[] = [];
+
+		async function fetchSingleOrder(orderId: string) {
+			const clean_query = String(orderId).trim().toUpperCase();
+			if (!clean_query) return;
+
+			try {
+				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+					params: { query: clean_query, limit: 10 },
+					timeout: 30000,
+					...authHeaders
+				});
+
+				if (resp.status !== 200 || !resp.data?.orders || resp.data.orders.length === 0) {
+					failed_orders.push(clean_query);
+					return;
+				}
+
+				const order_summary = resp.data.orders[0];
+				const order_id = order_summary.id;
+
+				const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
+					timeout: 30000,
+					...authHeaders
+				});
+
+				if (detail_resp.status !== 200 || !detail_resp.data?.order) {
+					failed_orders.push(clean_query);
+					return;
+				}
+
+				const order = detail_resp.data.order;
+				const raw_line_items = order.order_line_items || order.line_items || [];
+
+				if (raw_line_items.length > 0) {
+					successful_orders.add(clean_query);
+				} else {
+					failed_orders.push(clean_query);
+					return;
+				}
+
+				for (const item of raw_line_items) {
+					const sku = (
+						item.variant_sku || 
+						item.sku || 
+						item.barcode || 
+						"KHONG_MA_SKU"
+					).trim().toUpperCase();
+
+					let full_name = item.variant_name || item.product_name || item.name || "Sản phẩm";
+					if (item.variant_title && !full_name.includes(item.variant_title)) {
+						full_name = `${full_name} - ${item.variant_title}`;
+					}
+
+					const qty = Number(item.quantity) || 1;
+
+					if (!item_map[sku]) {
+						item_map[sku] = { sku: sku, name: full_name, qty: 0 };
+					}
+
+					item_map[sku].qty += qty;
+					total_qty += qty;
+				}
+			} catch (err: any) {
+				console.warn(`[Gom Hàng Sapo] Lỗi/Timeout đơn ${clean_query}:`, err.message);
+				failed_orders.push(clean_query);
+			}
 		}
 
-		// Trả về ArrayBuffer nội dung PDF cho Frontend parse
+		const BATCH_SIZE = 5;
+		for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
+			const batch = order_ids.slice(i, i + BATCH_SIZE);
+			await Promise.all(batch.map(id => fetchSingleOrder(id)));
+		}
+
+		const sorted_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
+
 		return {
 			success: true,
-			buffer: resp.data
+			found_orders_count: successful_orders.size,
+			failed_orders: failed_orders,
+			items: sorted_items,
+			total_qty: total_qty
 		};
+
 	} catch (e: any) {
-		console.error("Lỗi tải S3 qua Proxy:", e);
-		return { success: false, message: "Lỗi kết nối tải file S3 từ Amazon: " + e.message };
+		console.error("Lỗi Gom Hàng Sapo:", e);
+		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
