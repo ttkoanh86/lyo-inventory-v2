@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { aggregate_sapo_orders_from_pdf } from '../dashboard/DataPipelineV2';
+	// 🟢 Import cả 2 hàm độc lập từ DataPipelineV2
+	import { aggregate_sapo_orders_from_pdf, extract_orders_from_s3_url } from '../dashboard/DataPipelineV2';
 
 	let is_loading = false;
 	let is_retrying = false;
@@ -29,10 +30,10 @@
 		document.head.appendChild(script);
 	});
 
-	// HÀM CHUNG XỬ LÝ BÓC MÃ ĐƠN TỪ TÀI LIỆU PDF (DẠNG URL HOẶC ARRAYBUFFER)
-	async function parse_pdf_document_and_fetch(docSource: any) {
+	// HÀM CHUNG BÓC MÃ ĐƠN TỪ TẬP LỆNH PDF
+	async function parse_pdf_arraybuffer(buffer: ArrayBuffer) {
 		const pdfjs = (window as any).pdfjsLib;
-		const loadingTask = pdfjs.getDocument(docSource);
+		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
 		const pdf = await loadingTask.promise;
 
 		const order_set = new Set<string>();
@@ -45,50 +46,20 @@
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
 
-				// TikTok Shop Order ID (18 số)
+				// Order ID TikTok Shop (18 số)
 				const tiktok = str.match(/\b5\d{17}\b/);
 				if (tiktok) order_set.add(tiktok[0]);
 
-				// Shopee Order ID
+				// Order ID Shopee
 				const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
-				if (shopee && !shopee[0].startsWith('SPX')) order_set.add(shopee[0]);
+				if (shopee && !shopee[0].toUpperCase().startsWith('SPX')) order_set.add(shopee[0]);
 			}
 		}
 
-		extracted_order_ids = Array.from(order_set);
-		total_orders = extracted_order_ids.length;
-
-		if (total_orders === 0) {
-			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong link/file PDF vừa chọn!");
-			is_loading = false;
-			return;
-		}
-
-		await fetch_sapo_orders(extracted_order_ids);
+		return Array.from(order_set);
 	}
 
-	// 1. XỬ LÝ DÁN LINK S3
-	async function handle_process_from_url() {
-		const clean_url = input_url.trim();
-		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
-		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang khởi tạo, vui lòng thử lại sau vài giây!");
-
-		is_loading = true;
-		extracted_order_ids = [];
-		picked_items = [];
-		failed_order_ids = [];
-
-		try {
-			// Truyền trực tiếp URL vào PDF.js
-			await parse_pdf_document_and_fetch(clean_url);
-		} catch (err: any) {
-			console.error(err);
-			alert("Link S3 này bị chặn truy cập trực tiếp từ trình duyệt. Dì hãy Kéo - Thả file PDF về máy upload lên nhé!");
-			is_loading = false;
-		}
-	}
-
-	// 2. XỬ LÝ KÉO THẢ FILE PDF
+	// 🟢 1. LUỒNG XỬ LÝ UPLOAD / KÉO THẢ FILE PDF (GIỮ NGUYÊN BẢN CHUẨN XÁC)
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -100,10 +71,56 @@
 
 		try {
 			const buffer = await file.arrayBuffer();
-			await parse_pdf_document_and_fetch({ data: new Uint8Array(buffer) });
+			extracted_order_ids = await parse_pdf_arraybuffer(buffer);
+			total_orders = extracted_order_ids.length;
+
+			if (total_orders === 0) {
+				alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong file PDF!");
+				is_loading = false;
+				return;
+			}
+
+			await fetch_sapo_orders(extracted_order_ids);
 		} catch (err) {
 			console.error(err);
 			alert("Lỗi khi đọc file PDF!");
+			is_loading = false;
+		}
+	}
+
+	// 🟢 2. LUỒNG XỬ LÝ DÁN LINK S3 (CHẠY QUA PROXY ĐỘC LẬP CHỐNG CORS)
+	async function handle_process_from_url() {
+		const clean_url = input_url.trim();
+		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
+		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang khởi tạo, vui lòng thử lại sau giây lát!");
+
+		is_loading = true;
+		extracted_order_ids = [];
+		picked_items = [];
+		failed_order_ids = [];
+
+		try {
+			// Tải ngầm file qua Server Render để tránh bị chặn CORS
+			const res = await extract_orders_from_s3_url(clean_url);
+
+			if (res.success && res.buffer) {
+				extracted_order_ids = await parse_pdf_arraybuffer(res.buffer);
+				total_orders = extracted_order_ids.length;
+
+				if (total_orders === 0) {
+					alert("Không tìm thấy Mã đơn hàng (Order ID) nào từ Link S3 này!");
+					is_loading = false;
+					return;
+				}
+
+				await fetch_sapo_orders(extracted_order_ids);
+			} else {
+				alert(res.message || "Không thể tải file từ đường dẫn S3!");
+				is_loading = false;
+			}
+		} catch (err: any) {
+			console.error(err);
+			alert("Không thể bóc tách từ Link S3 này do link hết hạn hoặc lỗi mạng!");
 			is_loading = false;
 		}
 	}
@@ -186,7 +203,7 @@
 				on:keydown={(e) => e.key === 'Enter' && handle_process_from_url()}
 			/>
 			<button class="btn-url" on:click={handle_process_from_url} disabled={is_loading}>
-				{is_loading ? "⏳ ĐANG XỬ LÝ..." : "⚡ GOM HÀNG TỪ LINK"}
+				{is_loading ? "⏳ ĐANG TẢI LINK..." : "⚡ GOM HÀNG TỪ LINK"}
 			</button>
 		</div>
 
@@ -207,7 +224,7 @@
 
 	{#if is_loading && extracted_order_ids.length > 0 && picked_items.length === 0}
 		<div class="info-bar">
-			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo!
+			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo...
 		</div>
 	{/if}
 
