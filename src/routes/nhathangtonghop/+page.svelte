@@ -119,7 +119,8 @@
 		</label>
 	</div>
 
-	{#if extracted_order_ids.length > 0}
+	<!-- 🟢 CHỈ HIỂN THỊ THANH THÔNG BÁO KHI ĐANG LOADING VÀ CHƯA CÓ KẾT QUẢ SẢN PHẨM -->
+	{#if is_loading && extracted_order_ids.length > 0 && picked_items.length === 0}
 		<div class="info-bar">
 			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo!
 		</div>
@@ -139,13 +140,10 @@
 				<thead>
 					<tr>
 						<th style="width: 40px; text-align: center;">STT</th>
-						<!-- 🟢 BÓ HẸP CỘT MÃ SKU -->
 						<th style="width: 125px;">MÃ SKU</th>
-						<!-- 🟢 GIÃN RỘNG CỘT TÊN SẢN PHẨM -->
 						<th>TÊN SẢN PHẨM</th>
 						<th style="width: 120px; text-align: center;">VỊ TRÍ KHO</th>
 						<th style="width: 110px; text-align: center;">TỔNG SỐ LƯỢNG</th>
-						<!-- 🟢 DẤU TICK ĐƯỢC ĐẶT Ở TRONG CẶP NGOẶC () TRÊN TÊN CỘT TIÊU ĐỀ -->
 						<th style="width: 90px; text-align: center;">ĐÃ LẤY ( ✓ )</th>
 					</tr>
 				</thead>
@@ -157,7 +155,6 @@
 							<td><b class="product-name">{item.name}</b></td>
 							<td style="text-align: center;"><span class="location-badge">{item.location || '---'}</span></td>
 							<td style="text-align: center;"><span class="qty-badge">{item.qty}</span></td>
-							<!-- 🟢 BỎ ( ) Ở CÁC HÀNG DƯỚI, CHỈ GIỮ LẠI CHECKBOX -->
 							<td style="text-align: center;">
 								<span class="checkbox-print-box"></span>
 								<input type="checkbox" class="screen-checkbox" />
@@ -189,15 +186,15 @@
 	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
 	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
 	
-	.paren-check { font-size: 16px; font-weight: bold; color: #334155; display: inline-flex; align-items: center; gap: 2px; }
-	.screen-checkbox { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; }
+	.screen-checkbox { width: 18px; height: 18px; cursor: pointer; vertical-align: middle; }
+	.checkbox-print-box { display: none; }
 
 	@media print { 
 		.no-print { display: none !important; } 
 		.container { max-width: 100%; margin: 0; } 
 		.qty-badge { background: none; color: #000; padding: 0; font-size: 15px; }
 		.location-badge { background: none; color: #000; padding: 0; }
-		.screen-checkbox { visibility: hidden; width: 12px; }
-		.paren-check { font-size: 16px; }
+		.screen-checkbox { display: none; }
+		.checkbox-print-box { display: inline-block; width: 15px; height: 15px; border: 1px solid #000; border-radius: 2px; }
 	}
 </style>
