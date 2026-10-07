@@ -138,12 +138,15 @@
 			<table>
 				<thead>
 					<tr>
-						<th style="width: 45px; text-align: center;">STT</th>
-						<th style="width: 170px;">MÃ SKU</th>
+						<th style="width: 40px; text-align: center;">STT</th>
+						<!-- 🟢 BÓ HẸP CỘT MÃ SKU -->
+						<th style="width: 125px;">MÃ SKU</th>
+						<!-- 🟢 GIÃN RỘNG CỘT TÊN SẢN PHẨM -->
 						<th>TÊN SẢN PHẨM</th>
-						<th style="width: 140px; text-align: center;">VỊ TRÍ LƯU KHO</th>
-						<th style="width: 140px; text-align: center;">TỔNG SỐ LƯỢNG</th>
-						<th style="width: 90px; text-align: center;">ĐÃ LẤY ☑</th>
+						<th style="width: 120px; text-align: center;">VỊ TRÍ KHO</th>
+						<th style="width: 110px; text-align: center;">TỔNG SL</th>
+						<!-- 🟢 ĐỔI TIÊU ĐỀ THÀNH ĐÃ LẤY (  ) -->
+						<th style="width: 90px; text-align: center;">ĐÃ LẤY ( &nbsp; )</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -151,14 +154,12 @@
 						<tr>
 							<td style="text-align: center; font-weight: bold;">{index + 1}</td>
 							<td><div class="sku-code">{item.sku}</div></td>
-							<td><b>{item.name}</b></td>
-							<!-- 🟢 BỔ SUNG CỘT VỊ TRÍ LƯU KHO ĐÚNG VỊ TRÍ -->
+							<td><b class="product-name">{item.name}</b></td>
 							<td style="text-align: center;"><span class="location-badge">{item.location || '---'}</span></td>
 							<td style="text-align: center;"><span class="qty-badge">{item.qty}</span></td>
-							<!-- 🟢 Ô CHECKBOX GIỮ NGUYÊN KHI IN TAY CHUẨN TICK GIẤY -->
+							<!-- 🟢 DẠNG CHECKBOX TRONG CẶP NGOẶC () KHI IN TAY VÀ TÍCH TRÊN MÀN HÌNH -->
 							<td style="text-align: center;">
-								<span class="checkbox-print-box"></span>
-								<input type="checkbox" class="screen-checkbox" />
+								<span class="paren-check">( <input type="checkbox" class="screen-checkbox" /> )</span>
 							</td>
 						</tr>
 					{/each}
@@ -169,7 +170,7 @@
 </div>
 
 <style>
-	.container { max-width: 900px; margin: 30px auto; font-family: Arial, sans-serif; }
+	.container { max-width: 960px; margin: 30px auto; font-family: Arial, sans-serif; }
 	.drop-zone { background: #f8fafc; border: 3px dashed #cbd5e1; padding: 30px; border-radius: 12px; text-align: center; }
 	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
 	.drop-zone h2 { color: #0284c7; margin-top: 0; }
@@ -177,22 +178,25 @@
 	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
 	.btn-print { padding: 10px 22px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
-	table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-	th, td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: left; }
-	th { background: #f1f5f9; font-size: 14px; }
-	.sku-code { font-size: 15px; font-weight: bold; color: #0284c7; }
-	.qty-badge { display: inline-block; padding: 4px 16px; background: #fef3c7; color: #b45309; font-size: 17px; font-weight: bold; border-radius: 12px; }
-	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; }
 	
-	.screen-checkbox { width: 20px; height: 20px; cursor: pointer; }
-	.checkbox-print-box { display: none; }
+	table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }
+	th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: middle; }
+	th { background: #f1f5f9; font-size: 13px; font-weight: bold; text-transform: uppercase; }
+	
+	.sku-code { font-size: 13px; font-weight: bold; color: #0284c7; word-break: break-word; }
+	.product-name { font-size: 14px; line-height: 1.4; color: #1e293b; }
+	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
+	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+	
+	.paren-check { font-size: 16px; font-weight: bold; color: #334155; display: inline-flex; align-items: center; gap: 2px; }
+	.screen-checkbox { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; }
 
 	@media print { 
 		.no-print { display: none !important; } 
 		.container { max-width: 100%; margin: 0; } 
-		.qty-badge { background: none; color: #000; padding: 0; font-size: 16px; }
+		.qty-badge { background: none; color: #000; padding: 0; font-size: 15px; }
 		.location-badge { background: none; color: #000; padding: 0; }
-		.screen-checkbox { display: none; }
-		.checkbox-print-box { display: inline-block; width: 18px; height: 18px; border: 2px solid #000; border-radius: 3px; }
+		.screen-checkbox { visibility: hidden; width: 12px; }
+		.paren-check { font-size: 16px; }
 	}
 </style>
