@@ -812,7 +812,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể tự động sửa giá. Vui lòng kiểm tra lại kết nối Sapo!" };
 	}
 }
-// 🟢 HÀM GOM HÀNG BÓC TÁCH CHUẨN XÁC THEO PHIÊN BẢN (VARIANT) TRONG ĐƠN SAPO
+// 🟢 HÀM GOM HÀNG TỐI ƯU TỐC ĐỘ + TRẢ VỀ MÃ ĐƠN LỖI/TIMEOUT
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -824,57 +824,61 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 
 		const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
 		let total_qty = 0;
-		let found_orders_count = 0;
+		const successful_orders = new Set<string>();
+		const failed_orders: string[] = [];
 
-		for (const orderId of order_ids) {
+		// 🎯 Tra cứu 1 đơn hàng an toàn với timeout 30s
+		async function fetchSingleOrder(orderId: string) {
+			const clean_query = String(orderId).trim().toUpperCase();
+			if (!clean_query) return;
+
 			try {
-				const clean_query = String(orderId).trim().toUpperCase();
-				if (!clean_query) continue;
-
-				// 1. Kéo đơn hàng từ Sapo qua Proxy
+				// 1. Kéo đơn từ Sapo Proxy
 				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 					params: { query: clean_query, limit: 10 },
-					timeout: 15000,
+					timeout: 30000,
 					...authHeaders
 				});
 
 				if (resp.status !== 200 || !resp.data?.orders || resp.data.orders.length === 0) {
-					continue;
+					failed_orders.push(clean_query);
+					return;
 				}
 
 				const order_summary = resp.data.orders[0];
 				const order_id = order_summary.id;
 
-				// 2. Kéo FULL chi tiết đơn hàng
+				// 2. Kéo chi tiết sản phẩm đơn hàng
 				const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
-					timeout: 15000,
+					timeout: 30000,
 					...authHeaders
 				});
 
-				if (detail_resp.status !== 200 || !detail_resp.data?.order) continue;
+				if (detail_resp.status !== 200 || !detail_resp.data?.order) {
+					failed_orders.push(clean_query);
+					return;
+				}
 
 				const order = detail_resp.data.order;
 				const raw_line_items = order.order_line_items || order.line_items || [];
 
 				if (raw_line_items.length > 0) {
-					found_orders_count++;
+					successful_orders.add(clean_query);
+				} else {
+					failed_orders.push(clean_query);
+					return;
 				}
 
-				// 3. BÓC TÁCH CHUẨN XÁC THEO PHIÊN BẢN (VARIANT) ĐẶT HÀNG
+				// 3. Gom sản phẩm theo Phiên bản (Variant)
 				for (const item of raw_line_items) {
-					// 🎯 Ưu tiên lấy SKU/Barcode của đúng PHIÊN BẢN (Variant SKU)
 					const sku = (
 						item.variant_sku || 
 						item.sku || 
 						item.barcode || 
-						item.variant_barcode || 
 						"KHONG_MA_SKU"
 					).trim().toUpperCase();
 
-					// 🎯 Ưu tiên lấy Tên đầy đủ kèm Phân loại phiên bản (Màu sắc/Dung tích)
-					let full_name = item.variant_name || item.product_name || item.name || item.title || "Sản phẩm";
-					
-					// Nếu tên chưa có tên phiên bản (ví dụ màu sắc), ghép thêm variant_title/options
+					let full_name = item.variant_name || item.product_name || item.name || "Sản phẩm";
 					if (item.variant_title && !full_name.includes(item.variant_title)) {
 						full_name = `${full_name} - ${item.variant_title}`;
 					}
@@ -882,27 +886,31 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					const qty = Number(item.quantity) || 1;
 
 					if (!item_map[sku]) {
-						item_map[sku] = {
-							sku: sku,
-							name: full_name,
-							qty: 0
-						};
+						item_map[sku] = { sku: sku, name: full_name, qty: 0 };
 					}
 
-					// CỘNG DỒN SỐ LƯỢNG KHI CÙNG PHIÊN BẢN
 					item_map[sku].qty += qty;
 					total_qty += qty;
 				}
 			} catch (err: any) {
-				console.warn(`[Gom Hàng Sapo] Lỗi kéo đơn ${orderId}:`, err.message);
+				console.warn(`[Gom Hàng Sapo] Lỗi/Timeout đơn ${clean_query}:`, err.message);
+				failed_orders.push(clean_query);
 			}
+		}
+
+		// 🎯 CHIA NHÓM SONG SONG 5 ĐƠN/LẦN
+		const BATCH_SIZE = 5;
+		for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
+			const batch = order_ids.slice(i, i + BATCH_SIZE);
+			await Promise.all(batch.map(id => fetchSingleOrder(id)));
 		}
 
 		const sorted_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
 
 		return {
 			success: true,
-			found_orders: found_orders_count,
+			found_orders_count: successful_orders.size,
+			failed_orders: failed_orders,
 			items: sorted_items,
 			total_qty: total_qty
 		};
