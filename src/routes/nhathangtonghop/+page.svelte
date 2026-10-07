@@ -335,4 +335,23 @@
 		.no-print { display: none !important; } 
 		.container { max-width: 100% !important; margin: 0 !important; width: 100% !important; } 
 		
-		.print-title { font-size: 16px !important; margin-bottom: 4px !
+		.print-title { font-size: 16px !important; margin-bottom: 4px !important; }
+		.print-summary { font-size: 13px !important; margin-top: 0 !important; }
+
+		.picking-table { width: 100% !important; table-layout: fixed !important; margin-top: 5px !important; }
+		th, td { padding: 4px 6px !important; font-size: 12px !important; border: 1px solid #000 !important; }
+		th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
+
+		.col-stt, .col-stt-val { width: 6% !important; }
+		.col-sku, .col-sku-val { width: 18% !important; }
+		.col-name, .col-name-val { width: 52% !important; }
+		.col-loc, .col-loc-val { width: 8% !important; }
+		.col-qty, .col-qty-val { width: 8% !important; }
+		.col-check, .col-check-val { width: 8% !important; }
+
+		.sku-code { font-size: 11px !important; color: #000 !important; word-break: break-all !important; }
+		.product-name { font-size: 12px !important; line-height: 1.25 !important; color: #000 !important; font-weight: bold !important; }
+		.qty-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 13px !important; font-weight: bold !important; }
+		.location-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 11px !important; }
+	}
+</style>
