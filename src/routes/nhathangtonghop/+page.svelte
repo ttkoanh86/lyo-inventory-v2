@@ -236,4 +236,62 @@
 
 <style>
 	.container { max-width: 980px; margin: 30px auto; font-family: Arial, sans-serif; }
-	.drop-zone { background: #f8fafc
+	.drop-zone { background: #f8fafc; border: 3px dashed #cbd5e1; padding: 30px; border-radius: 12px; text-align: center; }
+	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
+	.drop-zone h2 { color: #0284c7; margin-top: 0; }
+	.btn-file { display: inline-block; padding: 12px 28px; background: #0284c7; color: white; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 15px; }
+	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
+	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
+	.btn-print { padding: 10px 22px; background: #16a34a; color: white; border: none; font-weight: bold; border-radius: 6px; cursor: pointer; }
+	
+	.success-tag { display: inline-block; margin: 0 6px; padding: 2px 8px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: bold; border-radius: 4px; }
+	.error-tag { display: inline-block; margin: 0 6px; padding: 2px 8px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: bold; border-radius: 4px; }
+	
+	.failed-box { margin-top: 10px; padding: 10px 14px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b; font-size: 13px; }
+	.failed-list { color: #dc2626; font-weight: bold; font-family: monospace; font-size: 13px; margin-left: 6px; }
+	.btn-retry { margin-left: 12px; padding: 4px 12px; background: #dc2626; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; }
+	.btn-retry:disabled { background: #9ca3af; cursor: not-allowed; }
+
+	/* STYLE TRÊN MÀN HÌNH WEB */
+	.picking-table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+	th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: middle; }
+	th { background: #f1f5f9; font-size: 13px; font-weight: bold; text-transform: uppercase; }
+	
+	.col-stt, .col-stt-val { width: 45px; text-align: center; font-weight: bold; }
+	.col-sku, .col-sku-val { width: 150px; }
+	.col-name, .col-name-val { width: auto; } /* Tự giãn tối đa */
+	.col-loc, .col-loc-val { width: 110px; text-align: center; }
+	.col-qty, .col-qty-val { width: 120px; text-align: center; }
+	.col-check, .col-check-val { width: 90px; text-align: center; }
+
+	.sku-code { font-size: 13px; font-weight: bold; color: #0284c7; word-break: break-all; }
+	.product-name { font-size: 14px; line-height: 1.4; color: #1e293b; }
+	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
+	.location-badge { font-weight: bold; color: #475569; background: #f1f5f9; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+
+	/* 🖨 TỐI ƯU CẤU HÌNH TỶ LỆ KHI BẤM IN PHIẾU GIẤY (A4/A5) */
+	@media print { 
+		.no-print { display: none !important; } 
+		.container { max-width: 100% !important; margin: 0 !important; width: 100% !important; } 
+		
+		.print-title { font-size: 16px !important; margin-bottom: 4px !important; }
+		.print-summary { font-size: 13px !important; margin-top: 0 !important; }
+
+		.picking-table { width: 100% !important; table-layout: fixed !important; margin-top: 5px !important; }
+		th, td { padding: 4px 6px !important; font-size: 12px !important; border: 1px solid #000 !important; }
+		th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
+
+		/* ĐỊNH DẠNG TỶ LỆ CỘT CHUẨN XÁC KHI IN */
+		.col-stt, .col-stt-val { width: 6% !important; }
+		.col-sku, .col-sku-val { width: 18% !important; }
+		.col-name, .col-name-val { width: 52% !important; } /* Dành tới 52% chiều rộng cho Tên sản phẩm */
+		.col-loc, .col-loc-val { width: 8% !important; }
+		.col-qty, .col-qty-val { width: 8% !important; }
+		.col-check, .col-check-val { width: 8% !important; }
+
+		.sku-code { font-size: 11px !important; color: #000 !important; word-break: break-all !important; }
+		.product-name { font-size: 12px !important; line-height: 1.25 !important; color: #000 !important; font-weight: bold !important; }
+		.qty-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 13px !important; font-weight: bold !important; }
+		.location-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 11px !important; }
+	}
+</style>
