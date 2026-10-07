@@ -110,12 +110,12 @@
 		on:dragover={(e) => { e.preventDefault(); is_dragging = true; }}
 		on:dragleave={() => is_dragging = false}
 	>
-		<h2>📦 PHIẾU TỔNG HỢP NHẶT HÀNG GOM (DATAPIPELINE V2)</h2>
-		<p>Kéo - Thả file PDF phiếu in Shopee / TikTok Shop vào đây để DataPipeline tự động gom hàng chuẩn 100% từ Sapo</p>
+		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG GOM</h2>
+		<p>Kéo - Thả file PDF phiếu in Shopee / TikTok Shop vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
 		<input type="file" accept="application/pdf" on:change={handle_file_upload} id="file-input" hidden />
 		<label for="file-input" class="btn-file">
-			{is_loading ? "⏳ DATAPIPELINE V2 ĐANG TRA CỨU SAPO..." : "📂 CHỌN FILE PDF / KÉO THẢ VÀO ĐÂY"}
+			{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : "📂 CHỌN FILE PDF / KÉO THẢ VÀO ĐÂY"}
 		</label>
 	</div>
 
@@ -129,8 +129,8 @@
 		<div class="result-box">
 			<div class="result-header">
 				<div>
-					<h3>📋 DANH SÁCH SẢN PHẨM CẦN NHẶT HÀNG GOM (TỪ SAPO)</h3>
-					<p>Tổng số đơn: <b>{total_orders} đơn</b> | Tổng số lượng cần nhặt: <b style="color: #d97706; font-size: 16px;">{total_products_qty} món</b></p>
+					<h3>📋 DANH SÁCH SẢN PHẨM CẦN GOM NHẶT HÀNG (TỪ SAPO)</h3>
+					<p>Tổng số đơn: <b>{total_orders} đơn</b> | Tổng số lượng sản phẩm cần nhặt: <b style="color: #d97706; font-size: 16px;">{total_products_qty} món</b></p>
 				</div>
 				<button class="no-print btn-print" on:click={() => window.print()}>🖨 IN PHIẾU GOM HÀNG</button>
 			</div>
@@ -139,10 +139,11 @@
 				<thead>
 					<tr>
 						<th style="width: 50px; text-align: center;">STT</th>
-						<th style="width: 200px;">MÃ SELLER SKU (MÃ KHO)</th>
-						<th>TÊN SẢN PHẨM TRÊN SAPO</th>
-						<th style="width: 160px; text-align: center;">TỔNG SỐ LƯỢNG GOM</th>
-						<th style="width: 80px; text-align: center;" class="no-print">CHECK</th>
+						<th style="width: 200px;">MÃ SKU</th>
+						<th>TÊN SẢN PHẨM</th>
+						<th> VỊ TRÍ LƯU KHO</th>
+						<th style="width: 160px; text-align: center;">TỔNG SỐ LƯỢNG</th>
+						<th style="width: 80px; text-align: center;" class="no-print">ĐÃ LẤY</th>
 					</tr>
 				</thead>
 				<tbody>
