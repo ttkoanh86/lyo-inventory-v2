@@ -29,7 +29,7 @@
 		document.head.appendChild(script);
 	});
 
-	// BÓC MÃ ĐƠN TỪ TÀI LIỆU PDF
+	// HÀM CHUNG BÓC MÃ ĐƠN TỪ TẬP LỆNH PDF
 	async function parse_pdf_and_fetch(pdfSource: any) {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument(pdfSource);
@@ -67,7 +67,7 @@
 		await fetch_sapo_orders(extracted_order_ids);
 	}
 
-	// 1. CHỨC NĂNG UPLOAD / KÉO THẢ FILE PDF (CHẠY TRỰC TIẾP SIÊU NHANH)
+	// 1. CHỨC NĂNG UPLOAD / KÉO THẢ FILE PDF (NGUYÊN BẢN CHUẨN XÁC & SIÊU NHANH)
 	async function handle_file_process(file: File) {
 		if (!file) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -87,7 +87,7 @@
 		}
 	}
 
-	// 2. CHỨC NĂNG DÁN LINK S3 / TỪ KHÓA
+	// 2. CHỨC NĂNG DÁN LINK S3 (ĐÃ SỬA: ÉP CHẠY QUA API ROUTE NỘI BỘ BỎ QUA CORS)
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
@@ -99,10 +99,24 @@
 		failed_order_ids = [];
 
 		try {
-			await parse_pdf_and_fetch(clean_url);
+			// Gọi API nội bộ trên Render để Server Node.js đại diện tải ngầm từ S3
+			const apiUrl = `/api/fetch-s3-pdf?url=${encodeURIComponent(clean_url)}`;
+			const res = await fetch(apiUrl);
+
+			if (!res.ok) {
+				const errData = await res.json().catch(() => ({}));
+				throw new Error(errData.error || `Không thể tải file từ S3 (HTTP ${res.status})`);
+			}
+
+			// Chuyển kết quả nhận được thành ArrayBuffer
+			const buffer = await res.arrayBuffer();
+
+			// Đọc mã đơn từ ArrayBuffer (không truyền URL trực tiếp nữa)
+			await parse_pdf_and_fetch({ data: new Uint8Array(buffer) });
+
 		} catch (err: any) {
 			console.error(err);
-			alert("Link S3 này bị Amazon chặn truy cập trực tiếp từ trình duyệt (lỗi CORS). Dì hãy Kéo - Thả file PDF về máy upload lên nhé!");
+			alert(err.message || "Không thể xử lý Link S3 này!");
 			is_loading = false;
 		}
 	}
