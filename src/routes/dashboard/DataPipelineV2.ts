@@ -813,7 +813,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 	}
 }
 
-// 🟢 HÀM GOM HÀNG TỐI ƯU TỐC ĐỘ + TRẢ VỀ MÃ ĐƠN LỖI/TIMEOUT
+// 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - BỎ REQUEST DƯ THỪA
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -828,16 +828,16 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		const successful_orders = new Set<string>();
 		const failed_orders: string[] = [];
 
-		// 🎯 Tra cứu 1 đơn hàng an toàn với timeout 30s
+		// ⚡ Tra cứu 1 đơn hàng (Chỉ gọi 1 request duy nhất)
 		async function fetchSingleOrder(orderId: string) {
 			const clean_query = String(orderId).trim().toUpperCase();
 			if (!clean_query) return;
 
 			try {
-				// 1. Kéo đơn từ Sapo Proxy
+				// 1. Kéo đơn từ Sapo Proxy (Timeout 25s)
 				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-					params: { query: clean_query, limit: 10 },
-					timeout: 30000,
+					params: { query: clean_query, limit: 5 },
+					timeout: 25000,
 					...authHeaders
 				});
 
@@ -846,21 +846,15 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return;
 				}
 
-				const order_summary = resp.data.orders[0];
-				const order_id = order_summary.id;
+				// Tìm chính xác đơn hàng khớp mã
+				const order = resp.data.orders.find((o: any) => {
+					const c_code = (o.code || "").toUpperCase().trim();
+					const c_name = (o.name || "").toUpperCase().trim();
+					const c_ref = (o.reference_number || o.source_name || "").toUpperCase().trim();
+					return c_code.includes(clean_query) || c_name.includes(clean_query) || c_ref.includes(clean_query) || String(o.id) === clean_query;
+				}) || resp.data.orders[0];
 
-				// 2. Kéo chi tiết sản phẩm đơn hàng
-				const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${order_id}.json`, {
-					timeout: 30000,
-					...authHeaders
-				});
-
-				if (detail_resp.status !== 200 || !detail_resp.data?.order) {
-					failed_orders.push(clean_query);
-					return;
-				}
-
-				const order = detail_resp.data.order;
+				// Lấy trực tiếp chi tiết sản phẩm ngay trong object order (Không gọi thêm API thứ 2)
 				const raw_line_items = order.order_line_items || order.line_items || [];
 
 				if (raw_line_items.length > 0) {
@@ -870,7 +864,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return;
 				}
 
-				// 3. Gom sản phẩm theo Phiên bản (Variant)
+				// Gom sản phẩm
 				for (const item of raw_line_items) {
 					const sku = (
 						item.variant_sku || 
@@ -894,13 +888,13 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					total_qty += qty;
 				}
 			} catch (err: any) {
-				console.warn(`[Gom Hàng Sapo] Lỗi/Timeout đơn ${clean_query}:`, err.message);
+				console.warn(`[Gom Hàng Sapo] Timeout/Lỗi đơn ${clean_query}:`, err.message);
 				failed_orders.push(clean_query);
 			}
 		}
 
-		// 🎯 CHIA NHÓM SONG SONG 5 ĐƠN/LẦN
-		const BATCH_SIZE = 5;
+		// ⚡ TĂNG BATCH_SIZE LÊN 8 ĐƠN/LẦN ĐỂ CHẠY SONG SONG
+		const BATCH_SIZE = 8;
 		for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
 			const batch = order_ids.slice(i, i + BATCH_SIZE);
 			await Promise.all(batch.map(id => fetchSingleOrder(id)));
@@ -921,4 +915,3 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-
