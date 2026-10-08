@@ -245,8 +245,8 @@
 
 <div class="container">
 	<div class="no-print input-wrapper">
-		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG GOM</h2>
-		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - Thả NHIỀU FILE PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
+		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG</h2>
+		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - thả NHIỀU FILE PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
 		<div class="url-input-box">
 			<input 
@@ -271,7 +271,7 @@
 		>
 			<input type="file" accept="application/pdf" multiple on:change={handle_file_upload} id="file-input" hidden />
 			<label for="file-input" class="btn-file">
-				📂 CỘNG THÊM FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY
+				📂 CHỌN CÁC FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY
 			</label>
 
 			<!-- 📋 HIỂN THỊ DANH SÁCH FILE CHỜ BẤM BẮT ĐẦU -->
