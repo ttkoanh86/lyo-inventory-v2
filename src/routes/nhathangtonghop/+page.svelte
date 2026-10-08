@@ -5,6 +5,7 @@
 	let is_loading = false;
 	let is_retrying = false;
 	let input_url = "";
+	let selected_files: File[] = []; // Danh sách lưu các file PDF đã chọn
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -29,7 +30,7 @@
 		document.head.appendChild(script);
 	});
 
-	// HÀM CHUNG ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF (TRẢ VỀ MẢNG MÃ ĐƠN)
+	// HÀM ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF
 	async function extract_orders_from_buffer(buffer: ArrayBuffer): Promise<string[]> {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
@@ -58,9 +59,40 @@
 		return Array.from(order_set);
 	}
 
-	// 🟢 1. CHỨC NĂNG UPLOAD / KÉO THẢ NHIỀU FILE PDF CÙNG LÚC
-	async function handle_multiple_files_process(files: FileList | File[]) {
+	// XỬ LÝ KHI CHỌN HOẶC KÉO THẢ FILE (CHỈ LƯU VÀO DANH SÁCH, CHƯA CHẠY NGAY)
+	function handle_file_select(files: FileList | File[]) {
 		if (!files || files.length === 0) return;
+		
+		const pdf_files: File[] = [];
+		for (let i = 0; i < files.length; i++) {
+			const f = files[i];
+			if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
+				pdf_files.push(f);
+			}
+		}
+
+		if (pdf_files.length === 0) {
+			alert("Vui lòng chọn các file định dạng PDF!");
+			return;
+		}
+
+		// Cộng dồn danh sách file đã chọn
+		selected_files = [...selected_files, ...pdf_files];
+	}
+
+	// XÓA 1 FILE KHỎI DANH SÁCH CHỜ
+	function remove_file(index: number) {
+		selected_files = selected_files.filter((_, i) => i !== index);
+	}
+
+	// XÓA TẤT CẢ FILE CHỜ
+	function clear_all_files() {
+		selected_files = [];
+	}
+
+	// 🟢 1. BẤM NÚT BẮT ĐẦU XỬ LÝ TOÀN BỘ CÁC FILE PDF ĐÃ CHỌN
+	async function start_process_selected_files() {
+		if (selected_files.length === 0) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
@@ -71,26 +103,21 @@
 		try {
 			const combined_order_set = new Set<string>();
 
-			// Lặp qua từng file PDF được tải lên
-			for (let i = 0; i < files.length; i++) {
-				const file = files[i];
-				if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
-					const buffer = await file.arrayBuffer();
-					const ordersInFile = await extract_orders_from_buffer(buffer);
-					ordersInFile.forEach(id => combined_order_set.add(id));
-				}
+			for (const file of selected_files) {
+				const buffer = await file.arrayBuffer();
+				const ordersInFile = await extract_orders_from_buffer(buffer);
+				ordersInFile.forEach(id => combined_order_set.add(id));
 			}
 
 			extracted_order_ids = Array.from(combined_order_set);
 			total_orders = extracted_order_ids.length;
 
 			if (total_orders === 0) {
-				alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong các file PDF đã chọn!");
+				alert("Không tìm thấy Mã đơn hàng nào trong các file PDF đã chọn!");
 				is_loading = false;
 				return;
 			}
 
-			// Tra cứu toàn bộ danh sách mã đơn từ Sapo
 			await fetch_sapo_orders(extracted_order_ids);
 
 		} catch (err) {
@@ -100,7 +127,7 @@
 		}
 	}
 
-	// ⚡ 2. CHỨC NĂNG DÁN LINK S3 (GIỮ NGUYÊN QUA API PROXY)
+	// ⚡ 2. CHỨC NĂNG DÁN LINK S3
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
@@ -192,7 +219,8 @@
 	function handle_file_upload(e: Event) {
 		const input = e.target as HTMLInputElement;
 		if (input.files && input.files.length > 0) {
-			handle_multiple_files_process(input.files);
+			handle_file_select(input.files);
+			input.value = ""; // Clear để có thể chọn lại file cùng tên nếu muốn
 		}
 	}
 
@@ -200,7 +228,7 @@
 		e.preventDefault();
 		is_dragging = false;
 		if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-			handle_multiple_files_process(e.dataTransfer.files);
+			handle_file_select(e.dataTransfer.files);
 		}
 	}
 </script>
@@ -235,11 +263,33 @@
 			on:dragover={(e) => { e.preventDefault(); is_dragging = true; }}
 			on:dragleave={() => is_dragging = false}
 		>
-			<!-- 🎯 Đã thêm thuộc tính multiple để chọn nhiều file cùng lúc -->
 			<input type="file" accept="application/pdf" multiple on:change={handle_file_upload} id="file-input" hidden />
 			<label for="file-input" class="btn-file">
-				{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : "📂 CHỌN NHIỀU FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY"}
+				📂 CỘNG THÊM FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY
 			</label>
+
+			<!-- 📋 HIỂN THỊ DANH SÁCH FILE PDF ĐÃ CHỌN -->
+			{#if selected_files.length > 0}
+				<div class="file-list-box">
+					<div class="file-list-header">
+						<span>📄 Đã chọn <b>{selected_files.length} file PDF</b>:</span>
+						<button class="btn-clear-all" on:click={clear_all_files}>🗑️ Xóa tất cả</button>
+					</div>
+					<div class="file-items">
+						{#each selected_files as file, idx}
+							<div class="file-chip">
+								<span class="file-name">📄 {file.name}</span>
+								<button class="btn-remove-file" on:click={() => remove_file(idx)}>✕</button>
+							</div>
+						{/each}
+					</div>
+
+					<!-- 🎯 NÚT BẮT ĐẦU XỬ LÝ -->
+					<button class="btn-start-process" on:click={start_process_selected_files} disabled={is_loading}>
+						{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : `⚡ BẮT ĐẦU GOM HÀNG (${selected_files.length} FILE PDF)`}
+					</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 
@@ -328,6 +378,21 @@
 	.drop-zone { border: 2px dashed #cbd5e1; padding: 20px; border-radius: 8px; background: #ffffff; }
 	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
 	.btn-file { display: inline-block; padding: 10px 24px; background: #0284c7; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
+
+	/* DANH SÁCH FILE CHỜ GOM HÀNG */
+	.file-list-box { margin-top: 20px; padding: 15px; background: #f1f5f9; border-radius: 8px; text-align: left; border: 1px solid #cbd5e1; }
+	.file-list-header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #334155; margin-bottom: 10px; }
+	.btn-clear-all { background: none; border: none; color: #dc2626; cursor: pointer; font-size: 12px; font-weight: bold; }
+	
+	.file-items { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; max-height: 150px; overflow-y: auto; }
+	.file-chip { display: flex; align-items: center; gap: 6px; background: #ffffff; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 16px; font-size: 13px; color: #0f172a; }
+	.file-name { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.btn-remove-file { background: none; border: none; color: #94a3b8; cursor: pointer; font-weight: bold; font-size: 14px; padding: 0 2px; }
+	.btn-remove-file:hover { color: #dc2626; }
+
+	.btn-start-process { width: 100%; padding: 12px; background: #16a34a; color: white; border: none; font-weight: bold; font-size: 15px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+	.btn-start-process:hover { background: #15803d; }
+	.btn-start-process:disabled { background: #9ca3af; cursor: not-allowed; }
 
 	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
