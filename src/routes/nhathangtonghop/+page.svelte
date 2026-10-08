@@ -5,7 +5,7 @@
 	let is_loading = false;
 	let is_retrying = false;
 	let input_url = "";
-	let selected_files: File[] = []; // Danh sách lưu các file PDF đã chọn
+	let selected_files: File[] = []; // Lưu danh sách các file PDF dì chọn
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -59,7 +59,7 @@
 		return Array.from(order_set);
 	}
 
-	// XỬ LÝ KHI CHỌN HOẶC KÉO THẢ FILE (CHỈ LƯU VÀO DANH SÁCH, CHƯA CHẠY NGAY)
+	// CHỈ LƯU FILE VÀO DANH SÁCH CHỜ, KHÔNG TỰ ĐỘNG CHẠY TRA CỨU SAPO
 	function handle_file_select(files: FileList | File[]) {
 		if (!files || files.length === 0) return;
 		
@@ -76,23 +76,21 @@
 			return;
 		}
 
-		// Cộng dồn danh sách file đã chọn
+		// Cộng dồn danh sách file
 		selected_files = [...selected_files, ...pdf_files];
 	}
 
-	// XÓA 1 FILE KHỎI DANH SÁCH CHỜ
 	function remove_file(index: number) {
 		selected_files = selected_files.filter((_, i) => i !== index);
 	}
 
-	// XÓA TẤT CẢ FILE CHỜ
 	function clear_all_files() {
 		selected_files = [];
 	}
 
-	// 🟢 1. BẤM NÚT BẮT ĐẦU XỬ LÝ TOÀN BỘ CÁC FILE PDF ĐÃ CHỌN
+	// 🟢 NÚT BẤM BẮT ĐẦU CHẠY GOM HÀNG CÁC FILE ĐÃ CHỌN
 	async function start_process_selected_files() {
-		if (selected_files.length === 0) return;
+		if (selected_files.length === 0) return alert("Dì chưa chọn file PDF nào cả!");
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
@@ -127,7 +125,7 @@
 		}
 	}
 
-	// ⚡ 2. CHỨC NĂNG DÁN LINK S3
+	// ⚡ LUỒNG DÁN LINK S3
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
@@ -220,7 +218,7 @@
 		const input = e.target as HTMLInputElement;
 		if (input.files && input.files.length > 0) {
 			handle_file_select(input.files);
-			input.value = ""; // Clear để có thể chọn lại file cùng tên nếu muốn
+			input.value = ""; 
 		}
 	}
 
@@ -268,7 +266,7 @@
 				📂 CỘNG THÊM FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY
 			</label>
 
-			<!-- 📋 HIỂN THỊ DANH SÁCH FILE PDF ĐÃ CHỌN -->
+			<!-- 📋 HIỂN THỊ DANH SÁCH FILE CHỜ BẤM BẮT ĐẦU -->
 			{#if selected_files.length > 0}
 				<div class="file-list-box">
 					<div class="file-list-header">
@@ -284,7 +282,7 @@
 						{/each}
 					</div>
 
-					<!-- 🎯 NÚT BẮT ĐẦU XỬ LÝ -->
+					<!-- NÚT BẤM KÍCH HOẠT TRA CỨU SAPO -->
 					<button class="btn-start-process" on:click={start_process_selected_files} disabled={is_loading}>
 						{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : `⚡ BẮT ĐẦU GOM HÀNG (${selected_files.length} FILE PDF)`}
 					</button>
@@ -379,7 +377,6 @@
 	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
 	.btn-file { display: inline-block; padding: 10px 24px; background: #0284c7; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
 
-	/* DANH SÁCH FILE CHỜ GOM HÀNG */
 	.file-list-box { margin-top: 20px; padding: 15px; background: #f1f5f9; border-radius: 8px; text-align: left; border: 1px solid #cbd5e1; }
 	.file-list-header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #334155; margin-bottom: 10px; }
 	.btn-clear-all { background: none; border: none; color: #dc2626; cursor: pointer; font-size: 12px; font-weight: bold; }
