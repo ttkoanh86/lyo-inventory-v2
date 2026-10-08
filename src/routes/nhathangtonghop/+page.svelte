@@ -88,7 +88,7 @@
 		selected_files = [];
 	}
 
-	// 🟢 NÚT BẤM BẮT ĐẦU CHẠY GOM HÀNG CÁC FILE ĐÃ CHỌN
+	// 🟢 NÚT BẤM BẮT ĐẦU CHẠY GOM HÀNG - ĐỌC SONG SONG TẤT CẢ FILE PDF (SIÊU NHANH)
 	async function start_process_selected_files() {
 		if (selected_files.length === 0) return alert("Dì chưa chọn file PDF nào cả!");
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -101,9 +101,17 @@
 		try {
 			const combined_order_set = new Set<string>();
 
-			for (const file of selected_files) {
-				const buffer = await file.arrayBuffer();
-				const ordersInFile = await extract_orders_from_buffer(buffer);
+			// ⚡ ĐỌC SONG SONG TẤT CẢ FILE PDF CÙNG LÚC NGUYÊN KHỐI
+			const all_buffers = await Promise.all(
+				selected_files.map(file => file.arrayBuffer())
+			);
+
+			const all_orders_results = await Promise.all(
+				all_buffers.map(buffer => extract_orders_from_buffer(buffer))
+			);
+
+			// Gộp tất cả mã đơn từ các file (Tự động lọc trùng)
+			for (const ordersInFile of all_orders_results) {
 				ordersInFile.forEach(id => combined_order_set.add(id));
 			}
 
@@ -116,15 +124,15 @@
 				return;
 			}
 
+			// Gọi tra cứu Sapo
 			await fetch_sapo_orders(extracted_order_ids);
 
 		} catch (err) {
-			console.error(err);
+			console.error("Lỗi đọc PDF:", err);
 			alert("Lỗi khi đọc các file PDF!");
 			is_loading = false;
 		}
 	}
-
 	// ⚡ LUỒNG DÁN LINK S3
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
