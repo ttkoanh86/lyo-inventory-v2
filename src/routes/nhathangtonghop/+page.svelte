@@ -29,7 +29,27 @@
 		};
 		document.head.appendChild(script);
 	});
+	// ... Các biến cũ giữ nguyên ...
+	let debug_result: any = null; // Biến lưu kết quả debug link S3
+	let is_debugging = false;
 
+	// 🔍 HÀM SOI NỘI DUNG THỰC TẾ CỦA LINK S3 (IN TRỰC TIẾP RA MÀN HÌNH)
+	async function debug_s3_link() {
+		const clean_url = input_url.trim();
+		if (!clean_url) return alert("Vui lòng dán link S3 Amazon vào ô nhập!");
+
+		is_debugging = true;
+		debug_result = null;
+
+		try {
+			const res = await fetch(`/api/fetch-s3-pdf?url=${encodeURIComponent(clean_url)}`);
+			debug_result = await res.json();
+		} catch (err: any) {
+			debug_result = { success: false, error: "Lỗi gọi API Debug: " + err.message };
+		} finally {
+			is_debugging = false;
+		}
+	}
 	// HÀM ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF
 	async function extract_orders_from_buffer(buffer: ArrayBuffer): Promise<string[]> {
 		const pdfjs = (window as any).pdfjsLib;
