@@ -15,6 +15,10 @@
 	let is_pdf_ready = false;
 	let is_dragging = false;
 
+	// Biến dành riêng cho tính năng SOI DỮ LIỆU S3
+	let debug_result: any = null;
+	let is_debugging = false;
+
 	onMount(() => {
 		if ((window as any).pdfjsLib) {
 			is_pdf_ready = true;
@@ -29,27 +33,7 @@
 		};
 		document.head.appendChild(script);
 	});
-	// ... Các biến cũ giữ nguyên ...
-	let debug_result: any = null; // Biến lưu kết quả debug link S3
-	let is_debugging = false;
 
-	// 🔍 HÀM SOI NỘI DUNG THỰC TẾ CỦA LINK S3 (IN TRỰC TIẾP RA MÀN HÌNH)
-	async function debug_s3_link() {
-		const clean_url = input_url.trim();
-		if (!clean_url) return alert("Vui lòng dán link S3 Amazon vào ô nhập!");
-
-		is_debugging = true;
-		debug_result = null;
-
-		try {
-			const res = await fetch(`/api/fetch-s3-pdf?url=${encodeURIComponent(clean_url)}`);
-			debug_result = await res.json();
-		} catch (err: any) {
-			debug_result = { success: false, error: "Lỗi gọi API Debug: " + err.message };
-		} finally {
-			is_debugging = false;
-		}
-	}
 	// HÀM ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF
 	async function extract_orders_from_buffer(buffer: ArrayBuffer): Promise<string[]> {
 		const pdfjs = (window as any).pdfjsLib;
@@ -79,7 +63,6 @@
 		return Array.from(order_set);
 	}
 
-	// CHỈ LƯU FILE VÀO DANH SÁCH CHỜ, KHÔNG TỰ ĐỘNG CHẠY TRA CỨU SAPO
 	function handle_file_select(files: FileList | File[]) {
 		if (!files || files.length === 0) return;
 		
@@ -96,7 +79,6 @@
 			return;
 		}
 
-		// Cộng dồn danh sách file
 		selected_files = [...selected_files, ...pdf_files];
 	}
 
@@ -121,7 +103,6 @@
 		try {
 			const combined_order_set = new Set<string>();
 
-			// ⚡ ĐỌC SONG SONG TẤT CẢ FILE PDF CÙNG LÚC NGUYÊN KHỐI
 			const all_buffers = await Promise.all(
 				selected_files.map(file => file.arrayBuffer())
 			);
@@ -130,7 +111,6 @@
 				all_buffers.map(buffer => extract_orders_from_buffer(buffer))
 			);
 
-			// Gộp tất cả mã đơn từ các file (Tự động lọc trùng)
 			for (const ordersInFile of all_orders_results) {
 				ordersInFile.forEach(id => combined_order_set.add(id));
 			}
@@ -144,7 +124,6 @@
 				return;
 			}
 
-			// Gọi tra cứu Sapo
 			await fetch_sapo_orders(extracted_order_ids);
 
 		} catch (err) {
@@ -153,6 +132,7 @@
 			is_loading = false;
 		}
 	}
+
 	// ⚡ LUỒNG DÁN LINK S3
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
@@ -191,6 +171,24 @@
 			console.error(err);
 			alert(err.message || "Không thể xử lý Link S3 này!");
 			is_loading = false;
+		}
+	}
+
+	// 🔍 HÀM SOI CHI TIẾT NỘI DUNG S3 (IN TRỰC TIẾP LÊN MÀN HÌNH)
+	async function debug_s3_link() {
+		const clean_url = input_url.trim();
+		if (!clean_url) return alert("Vui lòng dán link S3 Amazon vào ô nhập!");
+
+		is_debugging = true;
+		debug_result = null;
+
+		try {
+			const res = await fetch(`/api/fetch-s3-pdf?url=${encodeURIComponent(clean_url)}`);
+			debug_result = await res.json();
+		} catch (err: any) {
+			debug_result = { success: false, error: "Lỗi gọi API Debug: " + err.message };
+		} finally {
+			is_debugging = false;
 		}
 	}
 
@@ -268,6 +266,7 @@
 		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG</h2>
 		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - thả NHIỀU FILE PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
+		<!-- 🎯 ĐOẠN KHUNG DÁN LINK S3 & NÚT SOI DỮ LIỆU ĐÃ ĐƯỢC CHÈN Ở ĐÂY -->
 		<div class="url-input-box">
 			<input 
 				type="text" 
@@ -279,7 +278,40 @@
 			<button class="btn-url" on:click={handle_process_from_url} disabled={is_loading}>
 				{is_loading ? "⏳ ĐANG XỬ LÝ..." : "⚡ GOM HÀNG TỪ LINK"}
 			</button>
+			<button 
+				style="background: #8b5cf6; color: white; font-weight: bold; padding: 12px 18px; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;"
+				on:click={debug_s3_link} 
+				disabled={is_debugging}
+			>
+				{is_debugging ? "⏳ ĐANG SOI..." : "🔍 SOI NỘI DUNG S3"}
+			</button>
 		</div>
+
+		<!-- 📊 KHUNG IN KẾT QUẢ SOI LINK S3 TRỰC TIẾP TRÊN MÀN HÌNH -->
+		{#if debug_result}
+			<div style="margin: 15px auto 0 auto; max-width: 800px; padding: 15px; background: #0f172a; color: #38bdf8; border-radius: 8px; text-align: left; font-family: monospace; font-size: 13px; max-height: 400px; overflow-y: auto;">
+				<h4 style="margin: 0 0 10px 0; color: #4ade80;">🔍 KẾT QUẢ PHÂN TÍCH LINK S3 TỪ SERVER:</h4>
+				
+				<p style="margin: 4px 0;"><b>Mã Trạng Thái HTTP:</b> {debug_result.status} ({debug_result.statusText})</p>
+				<p style="margin: 4px 0;"><b>Kích Thước Tải Về:</b> {debug_result.contentLengthBytes} bytes</p>
+				<p style="margin: 4px 0;"><b>Có Phải Chuẩn PDF (%PDF-):</b> 
+					<span style="color: {debug_result.isStandardPdf ? '#4ade80' : '#f87171'}; font-weight: bold;">
+						{debug_result.isStandardPdf ? "ĐÚNG (%PDF-)" : "❌ KHÔNG PHẢI PDF CHUẨN"}
+					</span>
+				</p>
+				<p style="margin: 4px 0;"><b>Chuỗi Header Magic:</b> <code style="color: #facc15;">{JSON.stringify(debug_result.headerMagic)}</code></p>
+
+				<hr style="border-color: #334155; margin: 10px 0;" />
+				<b>📋 HTTP Response Headers từ Amazon:</b>
+				<pre style="background: #1e293b; padding: 8px; color: #cbd5e1; border-radius: 4px;">{JSON.stringify(debug_result.headers, null, 2)}</pre>
+
+				<b>🔢 100 Bytes Đầu Tiên (Dạng Hex):</b>
+				<pre style="background: #1e293b; padding: 8px; color: #facc15; border-radius: 4px; word-break: break-all;">{debug_result.first100Hex}</pre>
+
+				<b>📝 800 Ký Tự Đầu Tiên (Dạng Chữ/Text):</b>
+				<pre style="background: #1e293b; padding: 8px; color: #f87171; border-radius: 4px; white-space: pre-wrap; word-break: break-all;">{debug_result.previewText}</pre>
+			</div>
+		{/if}
 
 		<div class="divider"><span>HOẶC KÉO THẢ NHIỀU FILE PDF</span></div>
 
