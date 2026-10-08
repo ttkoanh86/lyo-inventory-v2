@@ -29,10 +29,10 @@
 		document.head.appendChild(script);
 	});
 
-	// HÀM CHUNG BÓC MÃ ĐƠN TỪ TẬP LỆNH PDF
-	async function parse_pdf_and_fetch(pdfSource: any) {
+	// HÀM CHUNG ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF (TRẢ VỀ MẢNG MÃ ĐƠN)
+	async function extract_orders_from_buffer(buffer: ArrayBuffer): Promise<string[]> {
 		const pdfjs = (window as any).pdfjsLib;
-		const loadingTask = pdfjs.getDocument(pdfSource);
+		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
 		const pdf = await loadingTask.promise;
 
 		const order_set = new Set<string>();
@@ -55,21 +55,12 @@
 			}
 		}
 
-		extracted_order_ids = Array.from(order_set);
-		total_orders = extracted_order_ids.length;
-
-		if (total_orders === 0) {
-			alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong PDF / đường link này!");
-			is_loading = false;
-			return;
-		}
-
-		await fetch_sapo_orders(extracted_order_ids);
+		return Array.from(order_set);
 	}
 
-	// 1. CHỨC NĂNG UPLOAD / KÉO THẢ FILE PDF (NGUYÊN BẢN CHUẨN XÁC & SIÊU NHANH)
-	async function handle_file_process(file: File) {
-		if (!file) return;
+	// 🟢 1. CHỨC NĂNG UPLOAD / KÉO THẢ NHIỀU FILE PDF CÙNG LÚC
+	async function handle_multiple_files_process(files: FileList | File[]) {
+		if (!files || files.length === 0) return;
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
@@ -78,16 +69,38 @@
 		failed_order_ids = [];
 
 		try {
-			const buffer = await file.arrayBuffer();
-			await parse_pdf_and_fetch({ data: new Uint8Array(buffer) });
+			const combined_order_set = new Set<string>();
+
+			// Lặp qua từng file PDF được tải lên
+			for (let i = 0; i < files.length; i++) {
+				const file = files[i];
+				if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+					const buffer = await file.arrayBuffer();
+					const ordersInFile = await extract_orders_from_buffer(buffer);
+					ordersInFile.forEach(id => combined_order_set.add(id));
+				}
+			}
+
+			extracted_order_ids = Array.from(combined_order_set);
+			total_orders = extracted_order_ids.length;
+
+			if (total_orders === 0) {
+				alert("Không tìm thấy Mã đơn hàng (Order ID) nào trong các file PDF đã chọn!");
+				is_loading = false;
+				return;
+			}
+
+			// Tra cứu toàn bộ danh sách mã đơn từ Sapo
+			await fetch_sapo_orders(extracted_order_ids);
+
 		} catch (err) {
 			console.error(err);
-			alert("Lỗi khi đọc file PDF!");
+			alert("Lỗi khi đọc các file PDF!");
 			is_loading = false;
 		}
 	}
 
-	// 2. CHỨC NĂNG DÁN LINK S3 (ĐÃ SỬA: ÉP CHẠY QUA API ROUTE NỘI BỘ BỎ QUA CORS)
+	// ⚡ 2. CHỨC NĂNG DÁN LINK S3 (GIỮ NGUYÊN QUA API PROXY)
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
@@ -99,7 +112,6 @@
 		failed_order_ids = [];
 
 		try {
-			// Gọi API nội bộ trên Render để Server Node.js đại diện tải ngầm từ S3
 			const apiUrl = `/api/fetch-s3-pdf?url=${encodeURIComponent(clean_url)}`;
 			const res = await fetch(apiUrl);
 
@@ -108,11 +120,19 @@
 				throw new Error(errData.error || `Không thể tải file từ S3 (HTTP ${res.status})`);
 			}
 
-			// Chuyển kết quả nhận được thành ArrayBuffer
 			const buffer = await res.arrayBuffer();
+			const ordersFromUrl = await extract_orders_from_buffer(buffer);
 
-			// Đọc mã đơn từ ArrayBuffer (không truyền URL trực tiếp nữa)
-			await parse_pdf_and_fetch({ data: new Uint8Array(buffer) });
+			extracted_order_ids = ordersFromUrl;
+			total_orders = extracted_order_ids.length;
+
+			if (total_orders === 0) {
+				alert("Không tìm thấy Mã đơn hàng nào từ Link S3 này!");
+				is_loading = false;
+				return;
+			}
+
+			await fetch_sapo_orders(extracted_order_ids);
 
 		} catch (err: any) {
 			console.error(err);
@@ -171,13 +191,17 @@
 
 	function handle_file_upload(e: Event) {
 		const input = e.target as HTMLInputElement;
-		if (input.files && input.files[0]) handle_file_process(input.files[0]);
+		if (input.files && input.files.length > 0) {
+			handle_multiple_files_process(input.files);
+		}
 	}
 
 	function handle_drop(e: DragEvent) {
 		e.preventDefault();
 		is_dragging = false;
-		if (e.dataTransfer?.files?.[0]) handle_file_process(e.dataTransfer.files[0]);
+		if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+			handle_multiple_files_process(e.dataTransfer.files);
+		}
 	}
 </script>
 
@@ -188,7 +212,7 @@
 <div class="container">
 	<div class="no-print input-wrapper">
 		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG GOM</h2>
-		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - Thả file PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
+		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - Thả NHIỀU FILE PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
 		<div class="url-input-box">
 			<input 
@@ -203,7 +227,7 @@
 			</button>
 		</div>
 
-		<div class="divider"><span>HOẶC KÉO THẢ FILE PDF</span></div>
+		<div class="divider"><span>HOẶC KÉO THẢ NHIỀU FILE PDF</span></div>
 
 		<div 
 			class="drop-zone {is_dragging ? 'dragging' : ''}"
@@ -211,16 +235,17 @@
 			on:dragover={(e) => { e.preventDefault(); is_dragging = true; }}
 			on:dragleave={() => is_dragging = false}
 		>
-			<input type="file" accept="application/pdf" on:change={handle_file_upload} id="file-input" hidden />
+			<!-- 🎯 Đã thêm thuộc tính multiple để chọn nhiều file cùng lúc -->
+			<input type="file" accept="application/pdf" multiple on:change={handle_file_upload} id="file-input" hidden />
 			<label for="file-input" class="btn-file">
-				{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : "📂 CHỌN FILE PDF / KÉO THẢ VÀO ĐÂY"}
+				{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : "📂 CHỌN NHIỀU FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY"}
 			</label>
 		</div>
 	</div>
 
 	{#if is_loading && extracted_order_ids.length > 0 && picked_items.length === 0}
 		<div class="info-bar">
-			⚡ Đã trích xuất được <b>{extracted_order_ids.length} Mã đơn hàng</b> — Hệ thống đang gom sản phẩm cần lấy từ Sapo...
+			⚡ Đã trích xuất được tổng cộng <b>{extracted_order_ids.length} Mã đơn hàng</b> từ các file PDF — Hệ thống đang gom sản phẩm cần lấy từ Sapo...
 		</div>
 	{/if}
 
@@ -302,7 +327,7 @@
 
 	.drop-zone { border: 2px dashed #cbd5e1; padding: 20px; border-radius: 8px; background: #ffffff; }
 	.drop-zone.dragging { background: #e0f2fe; border-color: #0284c7; }
-	.btn-file { display: inline-block; padding: 10px 24px; background: #64748b; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
+	.btn-file { display: inline-block; padding: 10px 24px; background: #0284c7; color: white; font-weight: bold; border-radius: 6px; cursor: pointer; }
 
 	.info-bar { margin: 20px 0; padding: 12px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 15px; text-align: center; }
 	.result-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
