@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { adjust_order_prices_auto } from "../dashboard/DataPipelineV2";
+	import { adjust_order_prices_auto, cancel_sapo_order } from "../dashboard/DataPipelineV2";
 
 	let order_input = $state("");
 	let is_loading = $state(false);
+	let current_action = $state<"adjust" | "cancel" | "">(""); 
 	let result_data: any = $state(null);
 	let error_message = $state("");
 
+	// 1. XỬ LÝ TỰ ĐỘNG SỬA GIÁ
 	async function handle_auto_adjust() {
 		if (!order_input.trim()) {
 			alert("Vui lòng nhập Mã đơn hàng cần sửa giá!");
@@ -13,18 +15,51 @@
 		}
 
 		is_loading = true;
+		current_action = "adjust";
 		result_data = null;
 		error_message = "";
 
 		try {
 			const res = await adjust_order_prices_auto(order_input);
 			if (res && res.success) {
-				result_data = res;
+				result_data = { ...res, action_type: "adjust" };
 			} else {
 				error_message = res?.message || "Không thể thực hiện điều chỉnh giá đơn hàng!";
 			}
 		} catch (e) {
 			error_message = "Xảy ra lỗi trong quá trình tự động sửa giá!";
+		} finally {
+			is_loading = false;
+		}
+	}
+
+	// 2. XỬ LÝ HỦY ĐƠN HÀNG (CÓ HỘP THOẠI XÁC NHẬN)
+	async function handle_cancel_order() {
+		const clean_code = order_input.trim();
+		if (!clean_code) {
+			alert("Vui lòng nhập Mã đơn hàng cần hủy!");
+			return;
+		}
+
+		const confirmed = confirm(
+			`⚠️ BẠN CÓ CHẮC CHẮN MUỐN HỦY ĐƠN: ${clean_code}?\n\nĐiều kiện hủy: Đơn phải đang ở bước ĐẶT HÀNG hoặc ĐÃ DUYỆT (chưa đóng gói/xuất kho). Thao tác này sẽ hủy đơn và hoàn tồn kho trên Sapo.`
+		);
+		if (!confirmed) return;
+
+		is_loading = true;
+		current_action = "cancel";
+		result_data = null;
+		error_message = "";
+
+		try {
+			const res = await cancel_sapo_order(clean_code);
+			if (res && res.success) {
+				result_data = { ...res, action_type: "cancel" };
+			} else {
+				error_message = res?.message || "Không thể hủy đơn hàng này!";
+			}
+		} catch (e) {
+			error_message = "Xảy ra lỗi trong quá trình hủy đơn hàng!";
 		} finally {
 			is_loading = false;
 		}
@@ -36,13 +71,13 @@
 </script>
 
 <svelte:head>
-	<title>LYO Dự Báo - Sửa Giá Đơn Hàng Tự Động</title>
+	<title>LYO Quản Trị - Sửa Giá & Hủy Đơn Sapo</title>
 </svelte:head>
 
 <div class="container">
 	<div class="header">
-		<h2>⚡ TỰ ĐỘNG SỬA GIÁ ĐƠN SỈ SAPO</h2>
-		<p>Nhập Mã đơn hàng sỉ (ĐÃ SET GIÁ BÁN BUÔN) để hệ thống tự động kiểm tra và nâng cấp giá sang mức <b>1SP SL20</b> hoặc <b>VVIP</b> cho các sản phẩm đủ điều kiện số lượng[Sản phẩm được cộng dồn SL: Son, phấn, chì kẻ mày, mặt nạ].</p>
+		<h2>⚡ TIỆN ÍCH XỬ LÝ ĐƠN HÀNG SAPO</h2>
+		<p>Nhập Mã đơn hàng sỉ (VD: SON02290), sau đó chọn <b>SỬA GIÁ ĐƠN</b> để tự động kiểm tra cộng dồn nâng giá sỉ hoặc <b>HỦY ĐƠN HÀNG</b> để hủy đơn và hoàn trả tồn kho trên Sapo.</p>
 	</div>
 
 	<div class="search-box">
@@ -52,8 +87,11 @@
 			placeholder="Nhập mã đơn hàng Sapo (VD: SON02290)..." 
 			onkeydown={(e) => { if (e.key === 'Enter') handle_auto_adjust(); }}
 		/>
-		<button class="btn-submit" onclick={handle_auto_adjust} disabled={is_loading}>
-			{is_loading ? "ĐANG XỬ LÝ..." : "⚡ TỰ ĐỘNG CẬP NHẬT GIÁ"}
+		<button class="btn-submit btn-adjust" onclick={handle_auto_adjust} disabled={is_loading}>
+			{is_loading && current_action === 'adjust' ? "ĐANG SỬA GIÁ..." : "⚡ SỬA GIÁ ĐƠN"}
+		</button>
+		<button class="btn-submit btn-cancel" onclick={handle_cancel_order} disabled={is_loading}>
+			{is_loading && current_action === 'cancel' ? "ĐANG HỦY..." : "🛑 HỦY ĐƠN HÀNG"}
 		</button>
 	</div>
 
@@ -64,40 +102,50 @@
 	{/if}
 
 	{#if result_data}
-		<div class="alert alert-success">
-			{result_data.message} (Mã đơn: <b>{result_data.order_code}</b>)
-		</div>
-
-		{#if result_data.details && result_data.details.length > 0}
-			<div class="result-table">
-				<h3>📋 CÁC SẢN PHẨM ĐÃ ĐƯỢC ĐIỀU CHỈNH GIÁ:</h3>
-				<table>
-					<thead>
-						<tr>
-							<th>SKU</th>
-							<th>Tên sản phẩm</th>
-							<th>Số lượng</th>
-							<th>Giá cũ</th>
-							<th>Giá mới áp dụng</th>
-							<th>Bảng giá áp dụng</th>
-							<th>Trạng thái</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each result_data.details as item}
-							<tr class="highlight">
-								<td><b>{item.sku}</b></td>
-								<td><b>{item.name}</b></td>
-								<td><b>{item.quantity}</b></td>
-								<td class="old-price">{formatCurrency(item.old_price)}</td>
-								<td class="new-price">{formatCurrency(item.new_price)}</td>
-								<td><span class="badge">{item.rule}</span></td>
-								<td><span class="status-changed">✅ Đã cập nhật</span></td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+		<!-- KẾT QUẢ KHI HỦY ĐƠN THÀNH CÔNG -->
+		{#if result_data.action_type === "cancel"}
+			<div class="alert alert-cancelled">
+				🛑 <b>{result_data.message}</b>
 			</div>
+		{/if}
+
+		<!-- KẾT QUẢ KHI SỬA GIÁ THÀNH CÔNG -->
+		{#if result_data.action_type === "adjust"}
+			<div class="alert alert-success">
+				{result_data.message} (Mã đơn: <b>{result_data.order_code}</b>)
+			</div>
+
+			{#if result_data.details && result_data.details.length > 0}
+				<div class="result-table">
+					<h3>📋 CÁC SẢN PHẨM ĐÃ ĐƯỢC ĐIỀU CHỈNH GIÁ:</h3>
+					<table>
+						<thead>
+							<tr>
+								<th>SKU</th>
+								<th>Tên sản phẩm</th>
+								<th>Số lượng</th>
+								<th>Giá cũ</th>
+								<th>Giá mới áp dụng</th>
+								<th>Bảng giá áp dụng</th>
+								<th>Trạng thái</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each result_data.details as item}
+								<tr class="highlight">
+									<td><b>{item.sku}</b></td>
+									<td><b>{item.name}</b></td>
+									<td><b>{item.quantity}</b></td>
+									<td class="old-price">{formatCurrency(item.old_price)}</td>
+									<td class="new-price">{formatCurrency(item.new_price)}</td>
+									<td><span class="badge">{item.rule}</span></td>
+									<td><span class="status-changed">✅ Đã cập nhật</span></td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>
@@ -106,15 +154,23 @@
 	.container { max-width: 950px; margin: 40px auto; padding: 25px; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); font-family: Arial, sans-serif; }
 	.header h2 { color: #0284c7; margin-bottom: 8px; font-size: 22px; }
 	.header p { color: #64748b; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
-	.search-box { display: flex; gap: 12px; margin-bottom: 25px; }
-	.search-box input { flex: 1; padding: 12px 16px; border: 2px solid #cbd5e1; border-radius: 6px; font-size: 15px; outline: none; }
+	
+	.search-box { display: flex; gap: 10px; margin-bottom: 25px; }
+	.search-box input { flex: 1; padding: 12px 16px; border: 2px solid #cbd5e1; border-radius: 6px; font-size: 15px; outline: none; transition: border-color 0.2s; }
 	.search-box input:focus { border-color: #0284c7; }
-	.btn-submit { padding: 12px 24px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; transition: background 0.2s; }
-	.btn-submit:hover { background: #0369a1; }
+	
+	.btn-submit { padding: 12px 20px; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+	.btn-adjust { background: #0284c7; }
+	.btn-adjust:hover { background: #0369a1; }
+	.btn-cancel { background: #ef4444; }
+	.btn-cancel:hover { background: #dc2626; }
 	.btn-submit:disabled { background: #94a3b8; cursor: not-allowed; }
+
 	.alert { padding: 14px 18px; border-radius: 6px; font-size: 14px; margin-bottom: 25px; font-weight: bold; }
 	.alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+	.alert-cancelled { background: #fff1f2; color: #9f1239; border: 1px solid #fecdd3; }
 	.alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
 	.result-table h3 { font-size: 15px; color: #334155; margin-bottom: 12px; }
 	table { width: 100%; border-collapse: collapse; font-size: 14px; }
 	th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
