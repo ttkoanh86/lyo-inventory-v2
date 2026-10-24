@@ -915,7 +915,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-// 🛑 HÀM HỦY ĐƠN HÀNG SAPO (CHUẨN THEO THỰC TẾ: CHƯA XUẤT KHO LÀ ĐƯỢC HỦY)
+// 🛑 HÀM HỦY ĐƠN HÀNG SAPO: CHỈ CHECK XUẤT KHO VÀ TRẠNG THÁI ĐƠN
 export async function cancel_sapo_order(order_code_or_id: string, reason: string = "Khách hủy đơn") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -959,42 +959,35 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 		const display_code = target_order.order_number || target_order.name || target_order.code || clean_query;
 		const order_id = target_order.id;
 
-		// 3. KIỂM TRA ĐIỀU KIỆN HỦY
-
-		// 🛑 ĐIỀU KIỆN 1: Đơn đã hủy từ trước
-		if (target_order.status === "cancelled") {
-			return { success: false, message: `Đơn hàng ${display_code} đã ở trạng thái ĐÃ HỦY trước đó rồi!` };
-		}
-
-		// 🛑 ĐIỀU KIỆN 2: Đơn đã hoàn tất
-		if (target_order.status === "completed" || target_order.status === "complete") {
-			return { success: false, message: `Đơn hàng ${display_code} đã HOÀN TẤT, không thể thực hiện hủy!` };
-		}
-
-		// 🛑 ĐIỀU KIỆN 3: Kiểm tra trạng thái xuất kho (chỉ chặn khi ĐÃ XUẤT KHO)
+		// 🛑 ĐIỀU KIỆN 1: ĐÃ XUẤT KHO THÌ TUYỆT ĐỐI KHÔNG HỦY (Bất kể trạng thái nào)
 		const ful_status = String(target_order.fulfillment_status || "").toLowerCase().trim();
 		if (ful_status === "shipped" || ful_status === "partial") {
 			return {
 				success: false,
-				message: `Không thể hủy vì đơn ${display_code} ĐÃ XUẤT KHO (${ful_status})!`
+				message: `Đơn hàng ${display_code} ĐÃ XUẤT KHO (${ful_status}), không thể hủy!`
 			};
 		}
 
-		// 🛑 ĐIỀU KIỆN 4: Kiểm tra sâu các phiếu vận chuyển (chỉ chặn nếu có phiếu ĐÃ XUẤT KHO/ĐANG GIAO)
-		const fulfillments = target_order.fulfillments || [];
-		const is_already_shipped = fulfillments.some((f: any) => {
-			const st = String(f.status || "").toLowerCase().trim();
-			return st === "shipped" || st === "delivered";
-		});
+		// 🛑 ĐIỀU KIỆN 2: NẾU CHƯA XUẤT KHO -> CHỈ CHO HỦY KHI Ở BƯỚC ĐẶT HÀNG HOẶC ĐÃ DUYỆT
+		const current_status = String(target_order.status || "").toLowerCase().trim();
 
-		if (is_already_shipped) {
+		if (current_status === "cancelled") {
+			return { success: false, message: `Đơn hàng ${display_code} đã ở trạng thái ĐÃ HỦY trước đó rồi!` };
+		}
+
+		if (current_status === "completed" || current_status === "complete") {
+			return { success: false, message: `Đơn hàng ${display_code} đã HOÀN THÀNH, không thể hủy!` };
+		}
+
+		const valid_statuses = ["draft", "finalized", "open"];
+		if (!valid_statuses.includes(current_status)) {
 			return {
 				success: false,
-				message: `Không thể hủy vì đơn ${display_code} đã có phiếu chuyển sang trạng thái XUẤT KHO / ĐANG GIAO!`
+				message: `Đơn hàng ${display_code} đang ở trạng thái "${current_status}", không thuộc bước Đặt hàng hoặc Đã duyệt!`
 			};
 		}
 
-		// 4. THỎA MÃN ĐIỀU KIỆN -> GỌI API HỦY ĐƠN VÀ HOÀN KHO
+		// 3. THỎA MÃN ĐIỀU KIỆN -> GỌI API HỦY VÀ HOÀN TỒN KHO TRÊN SAPO
 		const cancel_resp = await axios.post(
 			`${proxyUrl}/admin/orders/${order_id}/cancel.json`,
 			{
