@@ -915,3 +915,109 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
+// 🛑 HÀM HỦY ĐƠN HÀNG SAPO CHUẨN XÁC THEO LOG THỰC TẾ
+export async function cancel_sapo_order(order_code_or_id: string, reason: string = "Khách hủy đơn") {
+	try {
+		const clean_query = order_code_or_id.trim().toUpperCase();
+		if (!clean_query) {
+			return { success: false, message: "Vui lòng nhập Mã đơn hàng cần hủy!" };
+		}
+
+		const token = obtain_access_token();
+		const authHeaders = { headers: { Authorization: token } };
+
+		// 1. Tìm đơn hàng trên Sapo
+		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+			params: { query: clean_query, limit: 10 },
+			timeout: 20000,
+			...authHeaders
+		});
+
+		if (resp.status !== 200 || !resp.data?.orders || resp.data.orders.length === 0) {
+			return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}" trên Sapo!` };
+		}
+
+		const target_order = resp.data.orders.find((o: any) => {
+			const c_code = (o.code || "").toUpperCase().trim();
+			const c_name = (o.name || "").toUpperCase().trim();
+			return c_code === clean_query || c_name === clean_query || String(o.id) === clean_query;
+		}) || resp.data.orders[0];
+
+		const display_code = target_order.code || target_order.name || clean_query;
+
+		// 🛑 KIỂM TRA 1: Đơn đã hủy trước đó
+		if (target_order.status === "cancelled") {
+			return { 
+				success: false, 
+				message: `Đơn hàng ${display_code} đã ở trạng thái ĐÃ HỦY trước đó rồi!` 
+			};
+		}
+
+		// 🛑 KIỂM TRA 2: Đơn đã hoàn tất
+		if (target_order.status === "completed" || target_order.status === "complete") {
+			return {
+				success: false,
+				message: `Đơn hàng ${display_code} đã HOÀN TẤT, không thể thực hiện hủy!`
+			};
+		}
+
+		// 🛑 KIỂM TRA 3: Bắt buộc trạng thái đơn phải là "draft" (Đặt hàng) hoặc "finalized" / "open" (Đã duyệt)
+		const current_status = (target_order.status || "").toLowerCase().trim();
+		const allowed_statuses = ["draft", "finalized", "open"];
+		if (!allowed_statuses.includes(current_status)) {
+			return {
+				success: false,
+				message: `Đơn hàng ${display_code} đang ở trạng thái "${current_status}", không thuộc diện được hủy (chỉ cho phép hủy khi ở bước Đặt hàng hoặc Đã duyệt)!`
+			};
+		}
+
+		// 🛑 KIỂM TRA 4: Kiểm tra trạng thái xuất kho / đóng gói
+		const ful_status = (target_order.fulfillment_status || "").toLowerCase().trim();
+		if (ful_status && ful_status !== "unshipped" && ful_status !== "unfulfilled") {
+			return {
+				success: false,
+				message: `Không thể hủy vì đơn ${display_code} đã xử lý đóng gói/xuất kho (fulfillment_status: ${ful_status})!`
+			};
+		}
+
+		// 🛑 KIỂM TRA 5: Kiểm tra số lượng phiếu đóng gói & giao hàng (phải = 0)
+		const fulfillments_count = (target_order.fulfillments || []).length;
+		const packings_count = (target_order.packings || []).length;
+
+		if (fulfillments_count > 0 || packings_count > 0) {
+			return {
+				success: false,
+				message: `Không thể hủy đơn ${display_code} vì đã phát sinh ${packings_count} phiếu đóng gói và ${fulfillments_count} phiếu giao hàng!`
+			};
+		}
+
+		// 2. Gửi lệnh hủy đơn khi thỏa mãn 100% điều kiện
+		const cancel_resp = await axios.post(
+			`${proxyUrl}/admin/orders/${target_order.id}/cancel.json`,
+			{
+				reason: reason,
+				restock: true // Tự động hoàn lại số lượng tồn kho trên Sapo
+			},
+			{
+				timeout: 20000,
+				...authHeaders
+			}
+		);
+
+		if (cancel_resp.status === 200 || cancel_resp.status === 201) {
+			return {
+				success: true,
+				order_code: display_code,
+				message: `✅ Đã hủy thành công đơn hàng ${display_code} và hoàn lại tồn kho trên Sapo!`
+			};
+		}
+
+		return { success: false, message: `Lỗi từ Sapo khi gửi yêu cầu hủy đơn ${display_code}!` };
+	} catch (e: any) {
+		console.error("Lỗi khi hủy đơn hàng Sapo:", e);
+		return { 
+			success: false, 
+			message: e.response?.data?.message || e.message || "Xảy ra lỗi kết nối khi hủy đơn!" 
+		};
+	}
+}
