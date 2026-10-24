@@ -915,7 +915,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-// 🛑 HÀM HỦY ĐƠN HÀNG SAPO CHÍNH THỐNG (POST /cancel.json)
+// 🛑 HÀM HỦY ĐƠN HÀNG SAPO (CHUẨN THEO THỰC TẾ: CHƯA XUẤT KHO LÀ ĐƯỢC HỦY)
 export async function cancel_sapo_order(order_code_or_id: string, reason: string = "Khách hủy đơn") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -943,7 +943,7 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 			return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}" trên Sapo!` };
 		}
 
-		// 2. KHỚP MÃ CHÍNH XÁC TRONG BỘ NHỚ RAM
+		// 2. KHỚP MÃ ĐƠN TRONG RAM
 		const target_order = orders.find((o: any) => {
 			const c_code = String(o.order_number || o.name || o.code || "").trim().toUpperCase();
 			return c_code === clean_query || String(o.id) === clean_query;
@@ -959,40 +959,47 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 		const display_code = target_order.order_number || target_order.name || target_order.code || clean_query;
 		const order_id = target_order.id;
 
-		// 3. KIỂM TRA ĐIỀU KIỆN (CHỈ HỦY ĐƠN ĐẶT HÀNG HOẶC ĐÃ DUYỆT)
+		// 3. KIỂM TRA ĐIỀU KIỆN HỦY
+
+		// 🛑 ĐIỀU KIỆN 1: Đơn đã hủy từ trước
 		if (target_order.status === "cancelled") {
 			return { success: false, message: `Đơn hàng ${display_code} đã ở trạng thái ĐÃ HỦY trước đó rồi!` };
 		}
 
+		// 🛑 ĐIỀU KIỆN 2: Đơn đã hoàn tất
 		if (target_order.status === "completed" || target_order.status === "complete") {
 			return { success: false, message: `Đơn hàng ${display_code} đã HOÀN TẤT, không thể thực hiện hủy!` };
 		}
 
-		// Kiểm tra fulfillment_status (chỉ chấp nhận "unshipped" hoặc "unfulfilled")
+		// 🛑 ĐIỀU KIỆN 3: Kiểm tra trạng thái xuất kho (chỉ chặn khi ĐÃ XUẤT KHO)
 		const ful_status = String(target_order.fulfillment_status || "").toLowerCase().trim();
-		if (ful_status && ful_status !== "unshipped" && ful_status !== "unfulfilled") {
+		if (ful_status === "shipped" || ful_status === "partial") {
 			return {
 				success: false,
-				message: `Không thể hủy đơn ${display_code} vì đơn đã đóng gói/xuất kho (fulfillment_status: ${ful_status})!`
+				message: `Không thể hủy vì đơn ${display_code} ĐÃ XUẤT KHO (${ful_status})!`
 			};
 		}
 
-		// Kiểm tra số lượng phiếu đóng gói & giao hàng (bắt buộc phải bằng 0)
-		const fulfillments_count = (target_order.fulfillments || []).length;
-		const packings_count = (target_order.packings || []).length;
-		if (fulfillments_count > 0 || packings_count > 0) {
+		// 🛑 ĐIỀU KIỆN 4: Kiểm tra sâu các phiếu vận chuyển (chỉ chặn nếu có phiếu ĐÃ XUẤT KHO/ĐANG GIAO)
+		const fulfillments = target_order.fulfillments || [];
+		const is_already_shipped = fulfillments.some((f: any) => {
+			const st = String(f.status || "").toLowerCase().trim();
+			return st === "shipped" || st === "delivered";
+		});
+
+		if (is_already_shipped) {
 			return {
 				success: false,
-				message: `Không thể hủy đơn ${display_code} vì đã phát sinh ${packings_count} phiếu đóng gói và ${fulfillments_count} phiếu giao hàng!`
+				message: `Không thể hủy vì đơn ${display_code} đã có phiếu chuyển sang trạng thái XUẤT KHO / ĐANG GIAO!`
 			};
 		}
 
-		// 4. GỌI ENDPOINT HỦY ĐƠN CHUYÊN DỤNG CỦA SAPO
+		// 4. THỎA MÃN ĐIỀU KIỆN -> GỌI API HỦY ĐƠN VÀ HOÀN KHO
 		const cancel_resp = await axios.post(
 			`${proxyUrl}/admin/orders/${order_id}/cancel.json`,
 			{
 				reason: reason,
-				restock: true // Hoàn lại tồn kho
+				restock: true
 			},
 			{
 				timeout: 60000,
