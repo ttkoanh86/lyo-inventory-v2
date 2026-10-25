@@ -915,7 +915,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-// 🛑 HÀM HỦY ĐƠN HÀNG QUA APPS SCRIPT WEB APP
+// 🛑 HÀM HỦY ĐƠN HÀNG QUA APPS SCRIPT WEB APP (DÙNG GET CHỐNG LỖI REDIRECT)
 export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -923,41 +923,35 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 			return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
 		}
 
-		// Gọi thẳng qua Web App của Apps Script (đã bypass proxy Render)
 		const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyDWVrG404VmRzArQ-d6fVBRWf-1ne7mVtbQkjs5v7zcs1aiRbZw1I75YEu_flM1hLg/exec";
 
-		const resp = await axios.post(
-			APPS_SCRIPT_WEBAPP_URL,
-			JSON.stringify({
-				orderCode: clean_query,
-				note: reason_note
-			}),
-			{
-				headers: {
-					"Content-Type": "text/plain;charset=utf-8"
-				},
-				timeout: 35000
-			}
-		);
+		const finalUrl = `${APPS_SCRIPT_WEBAPP_URL}?orderCode=${encodeURIComponent(clean_query)}&note=${encodeURIComponent(reason_note)}`;
 
-		if (resp.data && typeof resp.data === "object") {
+		const response = await fetch(finalUrl, {
+			method: "GET",
+			redirect: "follow"
+		});
+
+		const result = await response.json();
+
+		if (result && typeof result === "object") {
 			return {
-				success: resp.data.success,
+				success: result.success,
 				order_code: clean_query,
-				message: resp.data.message
+				message: result.message
 			};
 		}
 
-		return { 
-			success: false, 
-			message: "Phản hồi không hợp lệ từ máy chủ Apps Script" 
+		return {
+			success: false,
+			message: "Phản hồi không hợp lệ từ Apps Script"
 		};
 
 	} catch (e: any) {
 		console.error("Lỗi khi hủy đơn hàng:", e);
-		return { 
-			success: false, 
-			message: `Lỗi kết nối: ${e.message || "Không thể gửi yêu cầu hủy đơn"}` 
+		return {
+			success: false,
+			message: `Lỗi kết nối: ${e.message || "Không thể gửi yêu cầu hủy đơn"}`
 		};
 	}
 }
