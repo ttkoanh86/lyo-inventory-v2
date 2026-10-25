@@ -915,7 +915,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-// 🛑 HÀM HỦY ĐƠN HÀNG SAPO - GỬI QUERY PARAM URL CHUẨN XÁC
+// 🛑 HÀM HỦY ĐƠN HÀNG SAPO OMNICHANNEL CHUẨN XÁC THEO APPS SCRIPT
 export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
@@ -923,10 +923,11 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 			return { success: false, message: "Vui lòng nhập Mã đơn hàng hoặc ID đơn!" };
 		}
 
+		// Giữ nguyên cơ chế xác thực giống hệt hàm sửa giá
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// 1. KÉO DANH SÁCH ĐƠN TỪ SAPO
+		// 1. TÌM KIẾM ĐƠN HÀNG QUA PROXY
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 			params: { query: clean_query, limit: 10 },
 			timeout: 20000,
@@ -939,7 +940,7 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 
 		const orders_list = resp.data.orders;
 
-		// 2. KHỚP MÃ ĐƠN CHÍNH XÁC
+		// 2. KHỚP MÃ ĐƠN TRONG RAM
 		const target_order = orders_list.find((o: any) => {
 			const c_code = String(o.order_number || o.name || o.code || "").toUpperCase().trim();
 			return c_code === clean_query || String(o.id) === clean_query;
@@ -955,13 +956,12 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 		const order_id = target_order.id;
 		const display_order_code = target_order.order_number || target_order.name || target_order.code || clean_query;
 
-		// 🛑 ĐIỀU KIỆN 1: ĐÃ Ở TRẠNG THÁI HỦY
+		// 3. KIỂM TRA ĐIỀU KIỆN AN TOÀN
 		const current_status = String(target_order.status || "").toLowerCase().trim();
 		if (current_status === "cancelled") {
 			return { success: false, message: `Đơn hàng ${display_order_code} đã ở trạng thái ĐÃ HỦY trước đó!` };
 		}
 
-		// 🛑 ĐIỀU KIỆN 2: ĐÃ XUẤT KHO
 		const ful_status = String(target_order.fulfillment_status || "").toLowerCase().trim();
 		if (ful_status === "shipped" || ful_status === "partial") {
 			return {
@@ -970,7 +970,6 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 			};
 		}
 
-		// 🛑 ĐIỀU KIỆN 3: ĐÃ THANH TOÁN (THEO ĐÚNG CHECK APPS SCRIPT)
 		const payStatus = String(target_order.payment_status || "").toLowerCase().trim();
 		if (payStatus === "paid" || payStatus === "partial") {
 			return {
@@ -979,15 +978,13 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 			};
 		}
 
-		// 3. GỬI LỆNH HỦY VỚI QUERY PARAM CHUẨN XÁC TRÊN URL
+		// 4. GỬI LỆNH HỦY (CHUẨN 100% CẤU TRÚC APPS SCRIPT ĐÃ TEST THÀNH CÔNG)
 		const cancelUrl = `${proxyUrl}/admin/orders/${order_id}/cancel.json?reason_cancel_id=14585447&restock=true`;
 
 		const cancel_resp = await axios.post(
 			cancelUrl,
 			{
-				note: reason_note,
-				reason_cancel_id: 14585447,
-				restock: true
+				note: reason_note
 			},
 			{
 				timeout: 20000,
