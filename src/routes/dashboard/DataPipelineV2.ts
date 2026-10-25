@@ -919,39 +919,22 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
-		if (!clean_query) {
-			return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
-		}
+		if (!clean_query) return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
 
-		const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyDWVrG404VmRzArQ-d6fVBRWf-1ne7mVtbQkjs5v7zcs1aiRbZw1I75YEu_flM1hLg/exec";
+		// Gọi trực tiếp vào backend Go trên Render vừa lấy được
+		const PROXY_URL = "https://lyo-inventory-proxy-sg.onrender.com/api/sapo/cancel-order";
 
-		const finalUrl = `${APPS_SCRIPT_WEBAPP_URL}?orderCode=${encodeURIComponent(clean_query)}&note=${encodeURIComponent(reason_note)}`;
-
-		const response = await fetch(finalUrl, {
-			method: "GET",
-			redirect: "follow"
+		const response = await fetch(PROXY_URL, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				orderCode: clean_query,
+				note: reason_note
+			})
 		});
 
-		const result = await response.json();
-
-		if (result && typeof result === "object") {
-			return {
-				success: result.success,
-				order_code: clean_query,
-				message: result.message
-			};
-		}
-
-		return {
-			success: false,
-			message: "Phản hồi không hợp lệ từ Apps Script"
-		};
-
+		return await response.json();
 	} catch (e: any) {
-		console.error("Lỗi khi hủy đơn hàng:", e);
-		return {
-			success: false,
-			message: `Lỗi kết nối: ${e.message || "Không thể gửi yêu cầu hủy đơn"}`
-		};
+		return { success: false, message: "Lỗi kết nối proxy: " + (e.message || "") };
 	}
 }
