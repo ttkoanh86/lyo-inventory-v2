@@ -915,8 +915,8 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-// 🛑 HÀM HỦY ĐƠN HÀNG SAPO: CHỈ CHECK XUẤT KHO VÀ TRẠNG THÁI ĐƠN
-export async function cancel_sapo_order(order_code_or_id: string, reason: string = "Khách hủy đơn") {
+// 🛑 HÀM HỦY ĐƠN HÀNG SAPO OMNICHANNEL CHUẨN XÁC
+export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
 		if (!clean_query) {
@@ -926,6 +926,7 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 		const token = obtain_access_token();
 		const authHeaders = { 
 			headers: { 
+				"X-Sapo-Access-Token": token.replace(/^Bearer\s+/i, ""),
 				Authorization: token,
 				"Content-Type": "application/json"
 			} 
@@ -959,7 +960,7 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 		const display_code = target_order.order_number || target_order.name || target_order.code || clean_query;
 		const order_id = target_order.id;
 
-		// 🛑 ĐIỀU KIỆN 1: ĐÃ XUẤT KHO THÌ TUYỆT ĐỐI KHÔNG HỦY (Bất kể trạng thái nào)
+		// 🛑 ĐIỀU KIỆN 1: ĐÃ XUẤT KHO THÌ TUYỆT ĐỐI KHÔNG HỦY (bất kể trạng thái nào)
 		const ful_status = String(target_order.fulfillment_status || "").toLowerCase().trim();
 		if (ful_status === "shipped" || ful_status === "partial") {
 			return {
@@ -968,17 +969,18 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 			};
 		}
 
-		// 🛑 ĐIỀU KIỆN 2: NẾU CHƯA XUẤT KHO -> CHỈ CHO HỦY KHI Ở BƯỚC ĐẶT HÀNG HOẶC ĐÃ DUYỆT
+		// 🛑 ĐIỀU KIỆN 2: ĐƠN ĐÃ Ở TRẠNG THÁI HỦY
 		const current_status = String(target_order.status || "").toLowerCase().trim();
-
 		if (current_status === "cancelled") {
 			return { success: false, message: `Đơn hàng ${display_code} đã ở trạng thái ĐÃ HỦY trước đó rồi!` };
 		}
 
+		// 🛑 ĐIỀU KIỆN 3: ĐƠN ĐÃ HOÀN TẤT
 		if (current_status === "completed" || current_status === "complete") {
 			return { success: false, message: `Đơn hàng ${display_code} đã HOÀN THÀNH, không thể hủy!` };
 		}
 
+		// 🛑 ĐIỀU KIỆN 4: CHỈ CHO PHÉP HỦY Ở BƯỚC ĐẶT HÀNG HOẶC ĐÃ DUYỆT
 		const valid_statuses = ["draft", "finalized", "open"];
 		if (!valid_statuses.includes(current_status)) {
 			return {
@@ -987,13 +989,17 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 			};
 		}
 
-		// 3. THỎA MÃN ĐIỀU KIỆN -> GỌI API HỦY VÀ HOÀN TỒN KHO TRÊN SAPO
+		// 3. GỬI LỆNH POST HỦY ĐƠN CHUẨN SAPO OMNI (CÓ REASON_CANCEL_ID VÀ RESTOCK)
+		const cancelUrl = `${proxyUrl}/admin/orders/${order_id}/cancel.json?reason_cancel_id=14585447&restock=true`;
+		const payload = {
+			reason_cancel_id: 14585447,
+			restock: true,
+			note: reason_note
+		};
+
 		const cancel_resp = await axios.post(
-			`${proxyUrl}/admin/orders/${order_id}/cancel.json`,
-			{
-				reason: reason,
-				restock: true
-			},
+			cancelUrl,
+			payload,
 			{
 				timeout: 60000,
 				...authHeaders
@@ -1012,7 +1018,9 @@ export async function cancel_sapo_order(order_code_or_id: string, reason: string
 
 	} catch (e: any) {
 		console.error("Lỗi khi hủy đơn hàng Sapo:", e);
-		const errMsg = e.response?.data?.message || e.response?.data?.error || e.message;
+		const errMsg = e.response?.data?.errors 
+			? JSON.stringify(e.response.data.errors) 
+			: (e.response?.data?.message || e.message);
 		return { 
 			success: false, 
 			message: `Lỗi từ Sapo: ${errMsg}` 
