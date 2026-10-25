@@ -922,7 +922,7 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 		if (!clean_query) return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
 
 		// Gọi trực tiếp vào backend Go trên Render vừa lấy được
-		const PROXY_URL = "https://lyo-inventory-proxy-sg.onrender.com/api/sapo/cancel-order";
+		const PROXY_URL = "https://lyo-inventory-proxy-sg.onrender.com/sapo-action/cancel-order";
 
 		const response = await fetch(PROXY_URL, {
 			method: "POST",
