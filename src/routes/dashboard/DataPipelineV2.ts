@@ -924,7 +924,7 @@ export async function cancel_sapo_order(order_code_or_id: string, reason_note: s
 		}
 
 		// Gọi thẳng qua Web App của Apps Script (đã bypass proxy Render)
-		const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyUZoyu5Oxr78V-_wCBKgz90BqGkI-gq2bNhJhSV45FUe3mbAED3oc51ASc2tfQ__lD/exec";
+		const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyDWVrG404VmRzArQ-d6fVBRWf-1ne7mVtbQkjs5v7zcs1aiRbZw1I75YEu_flM1hLg/exec";
 
 		const resp = await axios.post(
 			APPS_SCRIPT_WEBAPP_URL,
