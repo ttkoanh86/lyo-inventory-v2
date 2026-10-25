@@ -915,105 +915,48 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
 }
-// 🛑 HÀM HỦY ĐƠN HÀNG SAPO - GỬI BODY JSON CHUẨN THEO APPS SCRIPT
+// 🛑 HÀM HỦY ĐƠN HÀNG SAPO - GỌI TRỰC TIẾP QUA APPS SCRIPT WEB APP
 export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
 	try {
 		const clean_query = order_code_or_id.trim().toUpperCase();
 		if (!clean_query) {
-			return { success: false, message: "Vui lòng nhập Mã đơn hàng hoặc ID đơn!" };
+			return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
 		}
 
-		const token = obtain_access_token();
-		const authHeaders = { headers: { Authorization: token } };
+		const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyUZoyu5Oxr78V-_wCBKgz90BqGkI-gq2bNhJhSV45FUe3mbAED3oc51ASc2tfQ__lD/exec";
 
-		// 1. KÉO DANH SÁCH ĐƠN TỪ SAPO
-		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
-			params: { query: clean_query, limit: 10 },
-			timeout: 20000,
-			...authHeaders
-		});
-
-		if (resp.status !== 200 || !resp.data?.orders || resp.data.orders.length === 0) {
-			return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}" trên Sapo!` };
-		}
-
-		const orders_list = resp.data.orders;
-
-		// 2. KHỚP MÃ ĐƠN CHÍNH XÁC
-		const target_order = orders_list.find((o: any) => {
-			const c_code = String(o.order_number || o.name || o.code || "").toUpperCase().trim();
-			return c_code === clean_query || String(o.id) === clean_query;
-		});
-
-		if (!target_order) {
-			return { 
-				success: false, 
-				message: `Không tìm thấy đơn hàng nào có mã chính xác là "${clean_query}"!` 
-			};
-		}
-
-		const order_id = target_order.id;
-		const display_order_code = target_order.order_number || target_order.name || target_order.code || clean_query;
-
-		// 🛑 ĐIỀU KIỆN 1: ĐÃ Ở TRẠNG THÁI HỦY
-		const current_status = String(target_order.status || "").toLowerCase().trim();
-		if (current_status === "cancelled") {
-			return { success: false, message: `Đơn hàng ${display_order_code} đã ở trạng thái ĐÃ HỦY trước đó!` };
-		}
-
-		// 🛑 ĐIỀU KIỆN 2: ĐÃ XUẤT KHO
-		const ful_status = String(target_order.fulfillment_status || "").toLowerCase().trim();
-		if (ful_status === "shipped" || ful_status === "partial") {
-			return {
-				success: false,
-				message: `Đơn hàng ${display_order_code} ĐÃ XUẤT KHO (${ful_status}), không thể hủy!`
-			};
-		}
-
-		// 🛑 ĐIỀU KIỆN 3: ĐÃ THANH TOÁN
-		const payStatus = String(target_order.payment_status || "").toLowerCase().trim();
-		if (payStatus === "paid" || payStatus === "partial") {
-			return {
-				success: false,
-				message: `Đơn ${display_order_code} đã phát sinh thanh toán (${payStatus}), cần xử lý hoàn tiền trước!`
-			};
-		}
-
-		// 3. GỬI LỆNH HỦY VỚI URL SẠCH VÀ BODY CHUẨN (KHÔNG GẮN QUERY PARAM NỮA)
-		const cancelUrl = `${proxyUrl}/admin/orders/${order_id}/cancel.json`;
-
-		const cancel_resp = await axios.post(
-			cancelUrl,
+		const resp = await axios.post(
+			APPS_SCRIPT_WEBAPP_URL,
+			JSON.stringify({
+				orderCode: clean_query,
+				note: reason_note
+			}),
 			{
-				reason_cancel_id: 14585447,
-				note: reason_note,
-				restock: true
-			},
-			{
-				timeout: 20000,
-				...authHeaders
+				headers: {
+					"Content-Type": "text/plain;charset=utf-8"
+				},
+				timeout: 35000
 			}
 		);
 
-		if (cancel_resp.status === 200 || cancel_resp.status === 201) {
+		if (resp.data && typeof resp.data === "object") {
 			return {
-				success: true,
-				order_code: display_order_code,
-				message: `✅ Đã hủy thành công đơn hàng ${display_order_code} và hoàn trả tồn kho trên Sapo!`
+				success: resp.data.success,
+				order_code: clean_query,
+				message: resp.data.message
 			};
-		} else {
-			return { success: false, message: `Lỗi kết nối khi gửi yêu cầu hủy đơn ${display_order_code}!` };
 		}
 
-	} catch (e: any) {
-		console.error("Lỗi khi hủy đơn hàng Sapo:", e);
-		const errMsg = e.response?.data?.error || 
-			(e.response?.data?.errors ? JSON.stringify(e.response.data.errors) : null) || 
-			e.response?.data?.message || 
-			e.message;
 		return { 
 			success: false, 
-			message: `Lỗi từ Sapo: ${errMsg}` 
+			message: "Phản hồi không hợp lệ từ máy chủ Apps Script" 
+		};
+
+	} catch (e: any) {
+		console.error("Lỗi khi hủy đơn hàng:", e);
+		return { 
+			success: false, 
+			message: `Lỗi kết nối: ${e.message || "Không thể gửi yêu cầu hủy đơn"}` 
 		};
 	}
 }
