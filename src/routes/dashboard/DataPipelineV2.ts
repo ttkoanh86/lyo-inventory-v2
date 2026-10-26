@@ -711,7 +711,16 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		// Lấy mã khách hàng từ Sapo
 		const customer_code = String(order.customer?.code || order.customer?.phone_number || "").toUpperCase().trim();
 		const customer_policy = SPECIAL_CUSTOMERS[customer_code] || null;
-
+		// IN TOÀN BỘ DỮ LIỆU ĐỂ SOI CẤU TRÚC JSON KHÁCH HÀNG
+		console.log("🔍 [DEBUG SAPO] Toàn bộ order.customer:", order.customer);
+		console.log("🔍 [DEBUG SAPO] Toàn bộ order.client:", order.client);
+		console.log("🔍 [DEBUG SAPO] Các trường mã liên quan:", {
+   		order_customer_code: order.customer_code,
+    	order_customer_id: order.customer_id,
+    	customer_code: order.customer?.code,
+    	customer_id: order.customer?.id,
+    	client_code: order.client?.code
+		});
 		console.log(`👤 Đơn: ${order.code} | Khách: "${customer_code}" | Chính sách:`, customer_policy);
 
 		// =========================================================================
