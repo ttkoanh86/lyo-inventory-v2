@@ -602,6 +602,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const clean_query = order_code_or_id.trim().toUpperCase();
 		if (!clean_query) return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
 
+		// Danh mục từ khóa cho phép gộp
+		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY", "MẶT NẠ", "MAT NA"];
+
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
@@ -630,49 +633,49 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		if (raw_line_items.length === 0) return { success: false, message: "Đơn hàng không có sản phẩm nào!" };
 
 		// =========================================================================
-		// 🟢 BƯỚC 1: KIỂM TRA ĐIỀU KIỆN BẢNG GIÁ NỀN CỦA ĐƠN HÀNG
+		// 🟢 BƯỚC 1: KIỂM TRA ĐIỀU KIỆN BẢNG GIÁ NỀN CỦA TOÀN ĐƠN HÀNG
 		// =========================================================================
 		const price_list_name = String(order.price_list_name || order.price_list?.name || "").toUpperCase();
 		const total_price = Number(order.total_price || order.total || 0);
 
-		// Điều kiện Bán buôn: Tổng tiền >= 2 triệu
+		// Điều kiện Bán buôn (Tổng tiền >= 2 triệu)
 		if (price_list_name.includes("BAN BUON") || price_list_name.includes("BÁN BUÔN") || price_list_name.includes("BANSI")) {
 			if (total_price < 2000000) {
 				return {
 					success: false,
-					message: `❌ Bảng giá đơn không hợp lệ: Đơn đang chọn "Bán buôn" nhưng tổng tiền (${total_price.toLocaleString("vi-VN")}đ) chưa đạt tối thiểu 2.000.000đ!`
+					message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "Bán buôn" nhưng tổng tiền (${total_price.toLocaleString("vi-VN")}đ) chưa đạt tối thiểu 2.000.000đ!`
 				};
 			}
 		}
 
-		// Điều kiện SL20: Mọi sản phẩm trong đơn phải có SL >= 20
+		// Điều kiện SL20 (Mọi sản phẩm trong đơn phải có SL >= 20)
 		if (price_list_name.includes("SL20") || price_list_name.includes("SL 20")) {
 			for (const item of raw_line_items) {
 				const q = Number(item.quantity) || 0;
 				if (q < 20) {
 					return {
 						success: false,
-						message: `❌ Bảng giá đơn không hợp lệ: Đơn đang chọn "SL20" nhưng sản phẩm "${item.product_name || item.name}" chỉ có số lượng ${q} (< 20)!`
+						message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "SL20" nhưng sản phẩm "${item.product_name || item.name}" chỉ có số lượng ${q} (< 20)!`
 					};
 				}
 			}
 		}
 
-		// Điều kiện VVIP: Mọi sản phẩm trong đơn phải có SL >= 50
+		// Điều kiện VVIP (Mọi sản phẩm trong đơn phải có SL >= 50)
 		if (price_list_name.includes("VVIP") || price_list_name.includes("SL50")) {
 			for (const item of raw_line_items) {
 				const q = Number(item.quantity) || 0;
 				if (q < 50) {
 					return {
 						success: false,
-						message: `❌ Bảng giá đơn không hợp lệ: Đơn đang chọn "VVIP" nhưng sản phẩm "${item.product_name || item.name}" chỉ có số lượng ${q} (< 50)!`
+						message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "VVIP" nhưng sản phẩm "${item.product_name || item.name}" chỉ có số lượng ${q} (< 50)!`
 					};
 				}
 			}
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 2: CHỈ QUÉT DÒNG CÓ NOTE ĐỂ KIỂM TRA VÀ SỬA GIÁ
+		// 🟢 BƯỚC 2: CHỈ QUÉT NHỮNG DÒNG CÓ NOTE ĐỂ KIỂM TRA VÀ SỬA GIÁ
 		// =========================================================================
 		let updated_items_count = 0;
 		let details: any[] = [];
@@ -685,15 +688,16 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const current_price = Number(item.price) || 0;
 			const qty = Number(item.quantity) || 0;
 			const item_name = item.product_name || item.name || "Sản phẩm";
+			const full_name_upper = item_name.toUpperCase();
 
 			let target_price = current_price;
 			let applied_rule = "";
 
-			// Chỉ xử lý khi dòng có ghi chú
+			// Chỉ xử lý khi có ghi chú
 			if (item_note && item.variant_id) {
 				let effective_qty = qty;
 
-				// Bóc tách danh sách số dòng sau tiền tố (ví dụ: "ĐL: 1,2" hoặc "ĐL: 1, 2")
+				// Bóc tách danh sách số dòng sau tiền tố (VD: "ĐL: 1,2" hoặc "ĐL: 1, 2")
 				const after_prefix = item_note.replace(/^(?:ĐL|DL|VVIP|SL20|SL50|SL100)\s*[:\s-]*/i, "").trim();
 				const line_numbers = after_prefix
 					.split(",")
@@ -701,25 +705,47 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					.filter(num => !isNaN(num) && num > 0);
 
 				if (line_numbers.length > 0) {
-					let sum_qty = 0;
-					let is_same_product = true;
+					// 1. Kiểm tra danh mục cho phép gộp
+					const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(k => full_name_upper.includes(k));
 
-					for (const ln of line_numbers) {
-						const target_item = raw_line_items[ln - 1];
-						if (target_item) {
-							if (target_item.product_id !== item.product_id) {
-								is_same_product = false;
-							}
-							sum_qty += Number(target_item.quantity) || 0;
-						} else {
-							is_same_product = false;
-						}
-					}
-
-					if (is_same_product) {
-						effective_qty = sum_qty;
+					if (!is_allowed_category) {
+						applied_rule = `Không thuộc danh mục được gộp (Son, Phấn, Chì kẻ, Mặt nạ)`;
 					} else {
-						console.warn(`Dòng ${current_stt}: Các dòng khai báo gộp không cùng loại sản phẩm hoặc vượt quá STT thực tế!`);
+						let sum_qty = 0;
+						let is_valid_group = true;
+						let invalid_reason = "";
+
+						for (const ln of line_numbers) {
+							const target_item = raw_line_items[ln - 1];
+							if (!target_item) {
+								is_valid_group = false;
+								invalid_reason = `Không có dòng số ${ln}`;
+								break;
+							}
+
+							// 2. Kiểm tra cùng product_id
+							if (target_item.product_id !== item.product_id) {
+								is_valid_group = false;
+								invalid_reason = `Dòng ${ln} khác sản phẩm gốc`;
+								break;
+							}
+
+							// 3. Kiểm tra cùng giá ban đầu
+							const target_price_val = Number(target_item.price) || 0;
+							if (Math.abs(target_price_val - current_price) > 1) {
+								is_valid_group = false;
+								invalid_reason = `Dòng ${ln} lệch giá gốc (${target_price_val}đ vs ${current_price}đ)`;
+								break;
+							}
+
+							sum_qty += Number(target_item.quantity) || 0;
+						}
+
+						if (is_valid_group) {
+							effective_qty = sum_qty;
+						} else {
+							applied_rule = `Lỗi gộp: ${invalid_reason}`;
+						}
 					}
 				}
 
@@ -747,31 +773,31 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 						const price_vvip  = extractPrice(["BANBUON", "VVIP", "SL50"]);
 						const price_sl20  = extractPrice(["1SP SL20", "SL20", "1SP_SL20"]);
 
-						// Kiểm tra mốc ĐL (SL >= 100)
+						// Mốc ĐL (SL >= 100)
 						if (item_note.startsWith("ĐL") || item_note.startsWith("DL")) {
 							if (effective_qty >= 100 && price_daily) {
 								target_price = price_daily;
-								applied_rule = `Giá Đại lý (Gộp dòng: ${effective_qty} SP)`;
-							} else {
-								applied_rule = `Ghi chú ĐL nhưng tổng số lượng (${effective_qty}) chưa đủ 100`;
+								applied_rule = `Giá Đại lý (Tổng SL: ${effective_qty})`;
+							} else if (!applied_rule) {
+								applied_rule = `Yêu cầu ĐL nhưng tổng SL (${effective_qty}) chưa đủ 100`;
 							}
 						}
-						// Kiểm tra mốc VVIP (SL >= 50)
+						// Mốc VVIP (SL >= 50)
 						else if (item_note.startsWith("VVIP") || item_note.startsWith("SL50")) {
 							if (effective_qty >= 50 && price_vvip) {
 								target_price = price_vvip;
-								applied_rule = `Giá VVIP (Gộp dòng: ${effective_qty} SP)`;
-							} else {
-								applied_rule = `Ghi chú VVIP nhưng tổng số lượng (${effective_qty}) chưa đủ 50`;
+								applied_rule = `Giá VVIP (Tổng SL: ${effective_qty})`;
+							} else if (!applied_rule) {
+								applied_rule = `Yêu cầu VVIP nhưng tổng SL (${effective_qty}) chưa đủ 50`;
 							}
 						}
-						// Kiểm tra mốc SL20 (SL >= 20)
+						// Mốc SL20 (SL >= 20)
 						else if (item_note.startsWith("SL20")) {
 							if (effective_qty >= 20 && price_sl20) {
 								target_price = price_sl20;
-								applied_rule = `Giá SL20 (Gộp dòng: ${effective_qty} SP)`;
-							} else {
-								applied_rule = `Ghi chú SL20 nhưng tổng số lượng (${effective_qty}) chưa đủ 20`;
+								applied_rule = `Giá SL20 (Tổng SL: ${effective_qty})`;
+							} else if (!applied_rule) {
+								applied_rule = `Yêu cầu SL20 nhưng tổng SL (${effective_qty}) chưa đủ 20`;
 							}
 						}
 					}
@@ -806,7 +832,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 3: CẬP NHẬT LÊN SAPO NẾU CÓ DÒNG THAY ĐỔI
+		// 🟢 BƯỚC 3: CẬP NHẬT LÊN SAPO
 		// =========================================================================
 		if (updated_items_count > 0) {
 			const update_payload = {
@@ -835,7 +861,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return {
 				success: true,
 				order_code: order.code || clean_query,
-				message: "Bảng giá đơn hợp lệ. Không có sản phẩm ghi chú nào cần sửa hoặc chưa đủ điều kiện số lượng!",
+				message: "Bảng giá đơn hợp lệ. Không có sản phẩm ghi chú nào cần sửa hoặc chưa đủ điều kiện số lượng/danh mục gộp!",
 				details: []
 			};
 		}
