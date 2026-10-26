@@ -596,6 +596,8 @@ export async function create_sapo_stock_transfer(
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 // 🟢 HÀM SỬA GIÁ TỰ ĐỘNG - PHÂN TÁCH 2 BƯỚC ĐỘC LẬP CHUẨN PAYLOAD SAPO
 //import axios from "axios";
 
@@ -709,7 +711,37 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		if (raw_line_items.length === 0) return { success: false, message: "Đơn hàng không có sản phẩm nào!" };
 
 		// Lấy mã khách hàng từ Sapo
-		const customer_code = String(order.customer?.code || order.customer?.phone_number || "").toUpperCase().trim();
+		// Lấy ID khách hàng từ đơn hàng Sapo
+        const rawCustomerId = order.order_customer_id || order.customer_id || order.customer?.id;
+
+        let customer_code = (
+            order.customer?.code || 
+            order.customer_code || 
+            order.client?.code || 
+            ""
+        ).trim().toUpperCase();
+
+        // Nếu mã khách bị rỗng nhưng có ID, gọi API lấy thông tin chi tiết khách hàng
+        if (!customer_code && rawCustomerId) {
+            try {
+                const custRes = await axios.get(
+                    `https://lyovn.mysapogo.com/admin/customers/${rawCustomerId}.json`,
+                    {
+                        headers: {
+                            'X-Sapo-Access-Token': sapoToken,
+                            'Content-Type': 'application/json'
+                        },
+                        timeout: 5000
+                    }
+                );
+
+                if (custRes.data?.customer?.code) {
+                    customer_code = custRes.data.customer.code.trim().toUpperCase();
+                }
+            } catch (err) {
+                console.warn("Không lấy được mã khách qua ID:", err);
+            }
+        }
 		const customer_policy = SPECIAL_CUSTOMERS[customer_code] || null;
 		// IN TOÀN BỘ DỮ LIỆU ĐỂ SOI CẤU TRÚC JSON KHÁCH HÀNG
 		console.log("🔍 [DEBUG SAPO] Toàn bộ order.customer:", order.customer);
