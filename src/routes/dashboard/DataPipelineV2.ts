@@ -700,7 +700,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 		if (!target_summary) return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}"!` };
 
-		// 2. Kéo chi tiết sản phẩm và thông tin khách hàng của đơn
+		// 2. Kéo chi tiết sản phẩm và thông tin đơn hàng
 		const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${target_summary.id}.json`, {
 			timeout: 10000,
 			...authHeaders
@@ -710,49 +710,35 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const raw_line_items = order?.order_line_items || order?.line_items || [];
 		if (raw_line_items.length === 0) return { success: false, message: "Đơn hàng không có sản phẩm nào!" };
 
-		// Lấy mã khách hàng từ Sapo
-		// Lấy ID khách hàng từ đơn hàng Sapo
-        const rawCustomerId = order.order_customer_id || order.customer_id || order.customer?.id;
+		// =========================================================================
+		// 🟢 LẤY MÃ KHÁCH HÀNG (DÙNG CHUNG PROXY NỘI BỘ, KHÔNG BỊ TIMEOUT / CORS)
+		// =========================================================================
+		const rawCustomerId = order.order_customer_id || order.customer_id || order.customer?.id;
 
-        let customer_code = (
-            order.customer?.code || 
-            order.customer_code || 
-            order.client?.code || 
-            ""
-        ).trim().toUpperCase();
+		let customer_code = (
+			order.customer?.code || 
+			order.customer_code || 
+			order.client?.code || 
+			""
+		).trim().toUpperCase();
 
-        // Nếu mã khách bị rỗng nhưng có ID, gọi API lấy thông tin chi tiết khách hàng
-        if (!customer_code && rawCustomerId) {
-            try {
-                const custRes = await axios.get(
-                    `https://lyovn.mysapogo.com/admin/customers/${rawCustomerId}.json`,
-                    {
-                        headers: {
-                            'X-Sapo-Access-Token': sapoToken,
-                            'Content-Type': 'application/json'
-                        },
-                        timeout: 5000
-                    }
-                );
+		// Nếu đơn hàng chỉ trả về ID mà chưa có mã, gọi qua proxyUrl lấy chi tiết khách
+		if (!customer_code && rawCustomerId) {
+			try {
+				const custRes = await axios.get(`${proxyUrl}/admin/customers/${rawCustomerId}.json`, {
+					timeout: 5000,
+					...authHeaders
+				});
+				if (custRes.data?.customer?.code) {
+					customer_code = custRes.data.customer.code.trim().toUpperCase();
+					console.log(`🎯 Đã lấy mã khách từ proxy:`, customer_code);
+				}
+			} catch (err: any) {
+				console.warn("Lỗi khi tra cứu khách hàng qua proxy:", err?.message || err);
+			}
+		}
 
-                if (custRes.data?.customer?.code) {
-                    customer_code = custRes.data.customer.code.trim().toUpperCase();
-                }
-            } catch (err) {
-                console.warn("Không lấy được mã khách qua ID:", err);
-            }
-        }
 		const customer_policy = SPECIAL_CUSTOMERS[customer_code] || null;
-		// IN TOÀN BỘ DỮ LIỆU ĐỂ SOI CẤU TRÚC JSON KHÁCH HÀNG
-		console.log("🔍 [DEBUG SAPO] Toàn bộ order.customer:", order.customer);
-		console.log("🔍 [DEBUG SAPO] Toàn bộ order.client:", order.client);
-		console.log("🔍 [DEBUG SAPO] Các trường mã liên quan:", {
-   		order_customer_code: order.customer_code,
-    	order_customer_id: order.customer_id,
-    	customer_code: order.customer?.code,
-    	customer_id: order.customer?.id,
-    	client_code: order.client?.code
-		});
 		console.log(`👤 Đơn: ${order.code} | Khách: "${customer_code}" | Chính sách:`, customer_policy);
 
 		// =========================================================================
@@ -1079,6 +1065,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể xử lý đơn hàng: " + (e.message || "") };
 	}
 }
+
 // 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - BỎ REQUEST DƯ THỪA
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
