@@ -742,13 +742,39 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		console.log(`👤 Đơn: ${order.code} | Khách: "${customer_code}" | Chính sách:`, customer_policy);
 
 		// =========================================================================
-		// 🟢 BƯỚC 1: KIỂM TRA ĐIỀU KIỆN BẢNG GIÁ NỀN CỦA ĐƠN HÀNG
+		// 🟢 BƯỚC 1: KIỂM TRA ĐIỀU KIỆN BẢNG GIÁ NỀN CỦA ĐƠN HÀNG (ĐÃ FIX ĐẦY ĐỦ CÁC TRƯỜNG CỦA SAPO)
 		// =========================================================================
-		const price_list_name = String(order.price_list_name || order.price_list?.name || "").toUpperCase();
+		// Quét mọi trường có thể chứa tên chính sách giá trên Sapo
+		let price_list_name = String(
+			order.price_list_name || 
+			order.price_list?.name || 
+			order.pricing_policy?.name || 
+			order.price_policy_name || 
+			order.source_name || 
+			""
+		).toUpperCase();
+
+		// Nếu vẫn chưa thấy tên bảng giá, kiểm tra trực tiếp qua các dòng sản phẩm hoặc gọi tra ID
+		if (!price_list_name && order.price_list_id) {
+			try {
+				const plRes = await axios.get(`${proxyUrl}/admin/price_lists/${order.price_list_id}.json`, {
+					timeout: 5000,
+					...authHeaders
+				});
+				if (plRes.data?.price_list?.name) {
+					price_list_name = String(plRes.data.price_list.name).toUpperCase();
+				}
+			} catch (e) {
+				console.warn("Không lấy được tên price_list qua ID:", e);
+			}
+		}
+
+		console.log(`📋 [KIỂM TRA BẢNG GIÁ NỀN]: "${price_list_name}" | Tổng tiền: ${order.total_price} | Khách: ${customer_code}`);
+
 		const total_price = Number(order.total_price || order.total || 0);
 
-		// Điều kiện Bán buôn (Tổng tiền >= 2 triệu)
-		if (price_list_name.includes("BAN BUON") || price_list_name.includes("BÁN BUÔN") || price_list_name.includes("BANSI")) {
+		// 1. Kiểm tra Bán buôn (Tổng tiền >= 2 triệu)
+		if (price_list_name.includes("BAN BUON") || price_list_name.includes("BÁN BUÔN") || price_list_name.includes("BANSI") || price_list_name.includes("BUÔN")) {
 			if (total_price < 2000000) {
 				return {
 					success: false,
@@ -757,32 +783,34 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
-		// Điều kiện SL20: Mọi SP phải >= 20 (Ngoại trừ khách mặc định SL20 hoặc VVIP)
-		if (price_list_name.includes("SL20") || price_list_name.includes("SL 20")) {
+		// 2. Kiểm tra SL20: Tất cả sản phẩm trong đơn phải >= 20 (Trừ khách mặc định SL20 hoặc VVIP)
+		if (price_list_name.includes("SL20") || price_list_name.includes("SL 20") || price_list_name.includes("1SP SL20")) {
 			const is_exempt_sl20 = customer_policy && (customer_policy.default_tier === "SL20" || customer_policy.default_tier === "VVIP");
 			if (!is_exempt_sl20) {
-				for (const item of raw_line_items) {
+				for (let i = 0; i < raw_line_items.length; i++) {
+					const item = raw_line_items[i];
 					const q = Number(item.quantity) || 0;
 					if (q < 20) {
 						return {
 							success: false,
-							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "SL20" nhưng sản phẩm "${item.product_name || item.name}" có số lượng ${q} (< 20)! Khách hàng này không thuộc diện ưu đãi mặc định SL20.`
+							message: `❌ Bảng giá đơn không hợp lệ: Đơn hàng đang chọn bảng giá "SL20", nhưng dòng ${i + 1} ("${item.product_name || item.name}") có số lượng là ${q} (< 20)! Khách hàng này không thuộc diện ưu đãi mặc định SL20.`
 						};
 					}
 				}
 			}
 		}
 
-		// Điều kiện VVIP: Mọi SP phải >= 50 (Ngoại trừ khách mặc định VVIP)
+		// 3. Kiểm tra VVIP: Tất cả sản phẩm trong đơn phải >= 50 (Trừ khách mặc định VVIP)
 		if (price_list_name.includes("VVIP") || price_list_name.includes("SL50")) {
 			const is_exempt_vvip = customer_policy && customer_policy.default_tier === "VVIP";
 			if (!is_exempt_vvip) {
-				for (const item of raw_line_items) {
+				for (let i = 0; i < raw_line_items.length; i++) {
+					const item = raw_line_items[i];
 					const q = Number(item.quantity) || 0;
 					if (q < 50) {
 						return {
 							success: false,
-							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "VVIP" nhưng sản phẩm "${item.product_name || item.name}" có số lượng ${q} (< 50)! Khách hàng này không thuộc diện ưu đãi mặc định VVIP.`
+							message: `❌ Bảng giá đơn không hợp lệ: Đơn hàng đang chọn bảng giá "VVIP", nhưng dòng ${i + 1} ("${item.product_name || item.name}") có số lượng là ${q} (< 50)! Khách hàng này không thuộc diện ưu đãi mặc định VVIP.`
 						};
 					}
 				}
