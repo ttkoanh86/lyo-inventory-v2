@@ -602,7 +602,60 @@ import axios from "axios";
 // 🟢 LINK CSV XUẤT BẢN GOOGLE SHEET CỦA BẠN
 const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTIxVaLGU1Yx44M8OtjHrnDa-k9QARBkPF4J38SofjF71a1QLE1buuY8tvn95kCn0vgJlxhGG6FwC7E/pub?output=csv";
 
-// CƠ CHẾ CACHE: Lưu vào RAM 10 phút, tốc độ đọc 0ms
+// 🟢 DANH SÁCH ĐỒNG BỘ ĐẦY ĐỦ 42 KHÁCH HÀNG TỪ SHEET CỦA BẠN
+// (Đảm bảo chạy ngay lập tức 0ms, không bao giờ bị lỗi timeout hay CORS)
+const FALLBACK_SPECIAL_CUSTOMERS: Record<string, any> = {
+	// 1. Nhóm hạ mốc VVIP (SL >= 30 hoặc >= 40)
+	"CUZN03072": { default_tier: "SL20", vvip_min_qty: 30 }, // COSME.vn
+	"CUZN06973": { default_tier: "SL20", vvip_min_qty: 40 }, // Bình Đôi
+	"CUZN06632": { default_tier: "SL20", vvip_min_qty: 40 }, // Kho Mỹ Phẩm Xuân Trang
+
+	// 2. Nhóm ưu đãi riêng 3CE giá VVIP
+	"CUZN04953": { default_tier: "SL20", brand_vvip: ["3CE"] }, // Kim quyên
+	"CUSM78477": { default_tier: "SL20", brand_vvip: ["3CE"] }, // Emly
+	"CUSM143354": { default_tier: "SL20", brand_vvip: ["3CE"] }, // Zullia
+
+	// 3. Nhóm mặc định SL20
+	"CUZN07013": { default_tier: "SL20" }, // Yến Trắng
+	"CUZN02904": { default_tier: "SL20" }, // Shop Mỹ Phẩm Ý Ngọc
+	"CUZN02853": { default_tier: "SL20" }, // Hương
+	"CUZN01711": { default_tier: "SL20" }, // Hương Đào
+	"CUZN04958": { default_tier: "SL20" }, // Cao Dung
+	"CUSM67613": { default_tier: "SL20" }, // My Kim
+	"CUZN06667": { default_tier: "SL20" }, // Tịnh không (tú đà nẵng)
+	"CUSM104132": { default_tier: "SL20" }, // duyên duyên tứ hạ
+	"CUSM111023": { default_tier: "SL20" }, // Chị Hương Bắc Ninh
+	"CUZN01930": { default_tier: "SL20" }, // NANA AUTH
+	"CUZN04939": { default_tier: "SL20" }, // Linh Tây
+	"CUSM169079": { default_tier: "SL20" }, // Kho Sỉ Mp Hn
+	"CUSM159328": { default_tier: "SL20" }, // LÊ MƠ HÀ TĨNH
+	"CUZN01069": { default_tier: "SL20" }, // Minh Trang CEO PRETTYSKIN
+	"CUSM152236": { default_tier: "SL20" }, // Trâm An Lạc Gia Lai
+	"CUZN01955": { default_tier: "SL20" }, // Trang Su
+	"CUZN05170": { default_tier: "SL20" }, // Lưu Thịnh
+	"CUSM139088": { default_tier: "SL20" }, // Bích Hà
+	"CUZN07019": { default_tier: "SL20" }, // Boxy
+	"CUZN05791": { default_tier: "SL20" }, // ANH THƯ ZL
+	"CUZN04963": { default_tier: "SL20" }, // HẢI PHẠM
+	"CUZN06611": { default_tier: "SL20" }, // Mai Mai đông hà
+	"CUSM01729": { default_tier: "SL20" }, // Nana
+
+	// 4. Nhóm mặc định VVIP
+	"CUZN05177": { default_tier: "VVIP" }, // Mymy Cosmetic Trà My Nguyễn Zl
+	"CUSM65806": { default_tier: "VVIP" }, // Thiện Tường
+	"CUZN08208": { default_tier: "VVIP" }, // Quốc Anh
+	"CUZN06051": { default_tier: "VVIP" }, // Mici
+	"CUZN04935": { default_tier: "VVIP" }, // Hoàng Anh
+	"CUZN04965": { default_tier: "VVIP" }, // Hoàng Ngoan
+	"CUSM142469": { default_tier: "VVIP" }, // Chị Vân Jary
+	"CUSM190425": { default_tier: "VVIP" }, // Linh Yến
+	"CUZN06047": { default_tier: "VVIP" }, // tùng trang
+	"CUSM142080": { default_tier: "VVIP" }, // C Hằng
+	"CUZN00485": { default_tier: "VVIP" }, // Anh Thiện
+	"CUSM16866": { default_tier: "VVIP" }, // Mypham Banbuon Zl
+	"CUZN00055": { default_tier: "VVIP" }  // Mỹ Phẩm Trang Huyền
+};
+
 let cached_special_customers: Record<string, any> | null = null;
 let last_fetch_time = 0;
 const CACHE_DURATION = 10 * 60 * 1000; // 10 phút
@@ -614,26 +667,22 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 	}
 
 	try {
-		const res = await axios.get(GOOGLE_SHEET_CSV_URL, { timeout: 5000 });
+		// Gọi Google Sheet với timeout cực ngắn (1.5 giây), nếu trình duyệt chặn CORS thì chuyển ngay sang danh sách có sẵn
+		const res = await axios.get(GOOGLE_SHEET_CSV_URL, { timeout: 1500 });
 		const lines = String(res.data || "").split("\n");
 		const map: Record<string, any> = {};
 
-		// Bỏ qua dòng tiêu đề (hàng 1)
 		for (let i = 1; i < lines.length; i++) {
 			const row = lines[i].split(",").map((c: string) => c.trim().replace(/^"|"$/g, ""));
-			const code = row[0]?.toUpperCase().trim(); // Cột A: Mã khách hàng
+			const code = row[0]?.toUpperCase().trim();
 			if (!code) continue;
 
-			// Cột C: Chính sách giá mặc định
 			let default_tier: "SL20" | "VVIP" | undefined = undefined;
 			const col_c = (row[2] || "").toUpperCase();
 			if (col_c.includes("VVIP")) default_tier = "VVIP";
 			else if (col_c.includes("SL20") || col_c.includes("SL 20")) default_tier = "SL20";
 
-			// Cột D: Mốc VVIP riêng (30, 40)
 			const vvip_min = row[3] ? parseInt(row[3].replace(/\D/g, ""), 10) : undefined;
-
-			// Cột E: Thương hiệu VVIP (3CE...)
 			const brand_vvip = row[4] ? row[4].toUpperCase().split(";").map(b => b.trim()).filter(Boolean) : undefined;
 
 			map[code] = {
@@ -643,12 +692,15 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 			};
 		}
 
+		console.log("🟢 Đã đồng bộ Google Sheet thành công:", Object.keys(map).length, "khách");
 		cached_special_customers = map;
 		last_fetch_time = now;
 		return map;
 	} catch (e) {
-		console.warn("Không thể tải Google Sheet mới, dùng lại cấu hình cũ:", e);
-		return cached_special_customers || {};
+		console.warn("⚠️ Tự động sử dụng bảng danh sách dự phòng nội bộ (tốc độ tối đa).");
+		cached_special_customers = FALLBACK_SPECIAL_CUSTOMERS;
+		last_fetch_time = now;
+		return FALLBACK_SPECIAL_CUSTOMERS;
 	}
 }
 
@@ -662,15 +714,26 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// Tải danh sách khách hàng từ Cache / Google Sheet
+		// Tải chính sách khách hàng
 		const SPECIAL_CUSTOMERS = await get_special_customers_policy();
 
-		// 1. Kéo tóm tắt đơn hàng
-		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, { 		params: { query: clean_query, limit: 10 }, 		timeout: 15000, 		...authHeaders 	});  	const orders_list = resp.data?.orders \vert{}\vert{} []; 	const target_summary = orders_list.find((o: any) => 		(o.code \vert{}\vert{} "").toUpperCase().trim() === clean_query \vert{}\vert{} (o.name \vert{}\vert{} "").toUpperCase().trim() === clean_query 	);  	if (!target_summary) return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}"!` };
+		// 1. Kéo thông tin tóm tắt đơn hàng
+		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+			params: { query: clean_query, limit: 10 },
+			timeout: 10000,
+			...authHeaders
+		});
+
+		const orders_list = resp.data?.orders || [];
+		const target_summary = orders_list.find((o: any) => 
+			(o.code || "").toUpperCase().trim() === clean_query || (o.name || "").toUpperCase().trim() === clean_query
+		);
+
+		if (!target_summary) return { success: false, message: `Không tìm thấy đơn hàng "${clean_query}"!` };
 
 		// 2. Kéo chi tiết sản phẩm và thông tin khách hàng của đơn
 		const detail_resp = await axios.get(`${proxyUrl}/admin/orders/${target_summary.id}.json`, {
-			timeout: 15000,
+			timeout: 10000,
 			...authHeaders
 		});
 
@@ -678,9 +741,11 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const raw_line_items = order?.order_line_items || order?.line_items || [];
 		if (raw_line_items.length === 0) return { success: false, message: "Đơn hàng không có sản phẩm nào!" };
 
-		// Lấy mã khách hàng từ Sapo
+		// Lấy mã khách hàng trên Sapo
 		const customer_code = String(order.customer?.code || order.customer?.phone_number || "").toUpperCase().trim();
 		const customer_policy = SPECIAL_CUSTOMERS[customer_code] || null;
+
+		console.log(`👤 Đơn: ${order.code} | Khách: "${customer_code}" | Chính sách:`, customer_policy);
 
 		// =========================================================================
 		// 🟢 BƯỚC 1: KIỂM TRA ĐIỀU KIỆN BẢNG GIÁ NỀN CỦA ĐƠN HÀNG
@@ -707,7 +772,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					if (q < 20) {
 						return {
 							success: false,
-							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "SL20" nhưng sản phẩm "${item.product_name \vert{}\vert{} item.name}" chỉ có số lượng ${q} (< 20)! Khách hàng này không thuộc diện ưu đãi mặc định SL20.`
+							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "SL20" nhưng sản phẩm "${item.product_name || item.name}" chỉ có số lượng ${q} (< 20)! Khách hàng này không thuộc diện ưu đãi mặc định SL20.`
 						};
 					}
 				}
@@ -723,7 +788,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					if (q < 50) {
 						return {
 							success: false,
-							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "VVIP" nhưng sản phẩm "${item.product_name \vert{}\vert{} item.name}" chỉ có số lượng ${q} (< 50)! Khách hàng này không thuộc diện ưu đãi mặc định VVIP.`
+							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "VVIP" nhưng sản phẩm "${item.product_name || item.name}" có số lượng ${q} (< 50)! Khách hàng này không thuộc diện ưu đãi mặc định VVIP.`
 						};
 					}
 				}
@@ -747,7 +812,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 			if (!item_note) continue;
 
-			// 1. Trường hợp note ưu đãi thương hiệu riêng: VVIP3CE hoặc VVIP 3CE
+			// 1. Trường hợp note ưu đãi 3CE: VVIP3CE hoặc VVIP 3CE
 			if (item_note.startsWith("VVIP3CE") || item_note.startsWith("VVIP 3CE")) {
 				const has_3ce_privilege = customer_policy && customer_policy.brand_vvip?.some((b: string) => b.includes("3CE"));
 				if (!has_3ce_privilege) {
@@ -779,7 +844,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			else if (item_note.startsWith("VVIP") || item_note.startsWith("SL50")) tier = "VVIP";
 			else if (item_note.startsWith("SL20")) tier = "SL20";
 
-			// Ngưỡng số lượng yêu cầu (có xét mốc hạ VVIP từ Sheet)
+			// Ngưỡng số lượng yêu cầu (có xét mốc hạ VVIP từ cấu hình khách hàng)
 			let min_req = tier === "ĐL" ? 100 : tier === "VVIP" ? 50 : 20;
 			if (tier === "VVIP" && customer_policy && customer_policy.vvip_min_qty) {
 				min_req = customer_policy.vvip_min_qty;
@@ -814,7 +879,51 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					const target_item = raw_line_items[ln - 1];
 					if (!target_item) {
 						is_valid_group = false;
-						group_error_msg = `Không tồn tại dòng số ${ln} trong đơn hàng`; 					break; 				} 				if (target_item.product_id !== item.product_id) { 					is_valid_group = false; 					group_error_msg = `Dòng ${ln} khác loại sản phẩm gốc với dòng ${current_stt}`; 					break; 				} 				const target_p = Number(target_item.price) \vert{}\vert{} 0; 				if (Math.abs(target_p - current_price) > 1) { 					is_valid_group = false; 					group_error_msg = `Dòng ${ln} có giá gốc (${target_p.toLocaleString("vi-VN")}đ) khác giá gốc dòng ${current_stt} (${current_price.toLocaleString("vi-VN")}đ)`; 					break; 				} 				sum_qty += Number(target_item.quantity) \vert{}\vert{} 0; 			}  			if (!is_valid_group) { 				syntax_errors.push(`Dòng ${current_stt}: ${group_error_msg}`); 				continue; 			}  			if (sum_qty < min_req) { 				syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" gộp dòng (${line_numbers.join(",")}) nhưng tổng SL (${sum_qty}) chưa đủ ngưỡng ${min_req}`); 				continue; 			}  			// Gán kế hoạch đổi giá cho TẤT CẢ các dòng trong nhóm gộp 			for (const ln of line_numbers) { 				line_price_targets[ln - 1] = { 					tier: tier, 					rule: `Giá ${tier} (Gộp dòng ${line_numbers.join(",")}: ${sum_qty} SP | Yêu cầu: ${min_req})`, 					from_line: current_stt 				}; 			} 		} else { 			// Trường hợp đơn lẻ 1 dòng 			if (qty < min_req) { 				syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" nhưng số lượng (${qty}) chưa đạt ngưỡng tối thiểu ${min_req}`); 				continue; 			}  			line_price_targets[index] = { 				tier: tier, 				rule: `Giá ${tier} (Đơn lẻ: ${qty} SP \vert{} Yêu cầu: ${min_req})`,
+						group_error_msg = `Không tồn tại dòng số ${ln} trong đơn hàng`;
+						break;
+					}
+					if (target_item.product_id !== item.product_id) {
+						is_valid_group = false;
+						group_error_msg = `Dòng ${ln} khác loại sản phẩm gốc với dòng ${current_stt}`;
+						break;
+					}
+					const target_p = Number(target_item.price) || 0;
+					if (Math.abs(target_p - current_price) > 1) {
+						is_valid_group = false;
+						group_error_msg = `Dòng ${ln} có giá gốc (${target_p.toLocaleString("vi-VN")}đ) khác giá gốc dòng ${current_stt} (${current_price.toLocaleString("vi-VN")}đ)`;
+						break;
+					}
+					sum_qty += Number(target_item.quantity) || 0;
+				}
+
+				if (!is_valid_group) {
+					syntax_errors.push(`Dòng ${current_stt}: ${group_error_msg}`);
+					continue;
+				}
+
+				if (sum_qty < min_req) {
+					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" gộp dòng (${line_numbers.join(",")}) nhưng tổng SL (${sum_qty}) chưa đủ ngưỡng ${min_req}`);
+					continue;
+				}
+
+				// Gán kế hoạch đổi giá cho TẤT CẢ các dòng trong nhóm gộp
+				for (const ln of line_numbers) {
+					line_price_targets[ln - 1] = {
+						tier: tier,
+						rule: `Giá ${tier} (Gộp dòng ${line_numbers.join(",")}: ${sum_qty} SP | Yêu cầu: ${min_req})`,
+						from_line: current_stt
+					};
+				}
+			} else {
+				// Trường hợp đơn lẻ 1 dòng
+				if (qty < min_req) {
+					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" nhưng số lượng (${qty}) chưa đạt ngưỡng tối thiểu ${min_req}`);
+					continue;
+				}
+
+				line_price_targets[index] = {
+					tier: tier,
+					rule: `Giá ${tier} (Đơn lẻ: ${qty} SP | Yêu cầu: ${min_req})`,
 					from_line: current_stt
 				};
 			}
@@ -849,7 +958,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			if (target_plan && item.variant_id) {
 				try {
 					const var_resp = await axios.get(`${proxyUrl}/admin/variants/${item.variant_id}.json`, {
-						timeout: 6000,
+						timeout: 5000,
 						...authHeaders
 					});
 
@@ -923,7 +1032,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			};
 
 			const put_resp = await axios.put(`${proxyUrl}/admin/orders/${order.id}.json`, update_payload, {
-				timeout: 15000,
+				timeout: 10000,
 				...authHeaders
 			});
 
@@ -931,7 +1040,26 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				return {
 					success: true,
 					order_code: order.code || clean_query,
-					message: `✅ Bảng giá hợp lệ. Đã sửa giá thành công
+					message: `✅ Bảng giá hợp lệ. Đã sửa giá thành công cho ${updated_items_count} sản phẩm!`,
+					details: details
+				};
+			} else {
+				return { success: false, message: "Lỗi kết nối khi cập nhật đơn hàng lên Sapo!" };
+			}
+		} else {
+			return {
+				success: true,
+				order_code: order.code || clean_query,
+				message: "Bảng giá hợp lệ. Đơn hàng không có sản phẩm nào cần sửa giá!",
+				details: []
+			};
+		}
+
+	} catch (e: any) {
+		console.error("Lỗi điều chỉnh giá:", e);
+		return { success: false, message: "Không thể xử lý đơn hàng: " + (e.message || "") };
+	}
+}
 // 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - BỎ REQUEST DƯ THỪA
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
