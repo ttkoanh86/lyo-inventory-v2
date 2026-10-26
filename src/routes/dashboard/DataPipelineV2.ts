@@ -656,10 +656,14 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		if (raw_line_items.length === 0) {
 			return { success: false, message: `Đơn hàng ${display_order_code} không có sản phẩm nào!` };
 		}
-		// // Chèn đoạn này ngay sau khi lấy được raw_line_items để xem thứ tự dòng:
+		//🟢 Chèn đoạn này ngay sau khi lấy được raw_line_items để xem thứ tự dòng:
 		console.log("=== DANH SÁCH THỨ TỰ DÒNG SAPO TRẢ VỀ ===");
 		raw_line_items.forEach((item: any, index: number) => {
    		console.log(`STT ${index + 1}: SKU = ${item.sku || 'N/A'} | Tên = ${item.product_name || item.name} | SL = ${item.quantity}`);
+		});
+		// 🟢 IN ĐƠN GIẢN THỨ TỰ DÒNG VÀ GHI CHÚ
+		raw_line_items.forEach((item: any, i: number) => {
+    	console.log(`DÒNG ${i + 1}: Note = "${item.note || ''}" | Tên = ${item.product_name || item.name}`);
 		});
 		// =========================================================================
 		// 🟢 BƯỚC 1: XỬ LÝ CỘNG DỒN SỐ LƯỢNG THEO PRODUCT_ID VÀ ĐỒNG GIÁ GỐC TRƯỚC
