@@ -600,65 +600,60 @@ export async function create_sapo_stock_transfer(
 import axios from "axios";
 
 // 🟢 LINK CSV XUẤT BẢN GOOGLE SHEET CỦA BẠN
-const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTIxVaLGU1Yx44M8OtjHrnDa-k9QARBkPF4J38SofjF71a1QLE1buuY8tvn95kCn0vgJlxhGG6FwC7E/pub?output=csv";
+const RAW_SHEET_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTIxVaLGU1Yx44M8OtjHrnDa-k9QARBkPF4J38SofjF71a1QLE1buuY8tvn95kCn0vgJlxhGG6FwC7E/pub?output=csv";
 
-// 🟢 DANH SÁCH ĐỒNG BỘ ĐẦY ĐỦ 42 KHÁCH HÀNG TỪ SHEET CỦA BẠN
-// (Đảm bảo chạy ngay lập tức 0ms, không bao giờ bị lỗi timeout hay CORS)
+// 🟢 BỌC QUA PROXY ĐỂ TRÌNH DUYỆT KHÔNG BỊ CHẶN CORS VÀ KHÔNG BỊ TIMEOUT
+const PROXY_SHEET_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(RAW_SHEET_CSV)}`;
+
+// BẢNG DỰ PHÒNG NỘI BỘ (Đảm bảo luôn chạy được ngay cả khi mất mạng hoặc Google Sheet phản hồi chậm)
 const FALLBACK_SPECIAL_CUSTOMERS: Record<string, any> = {
-	// 1. Nhóm hạ mốc VVIP (SL >= 30 hoặc >= 40)
-	"CUZN03072": { default_tier: "SL20", vvip_min_qty: 30 }, // COSME.vn
-	"CUZN06973": { default_tier: "SL20", vvip_min_qty: 40 }, // Bình Đôi
-	"CUZN06632": { default_tier: "SL20", vvip_min_qty: 40 }, // Kho Mỹ Phẩm Xuân Trang
-
-	// 2. Nhóm ưu đãi riêng 3CE giá VVIP
-	"CUZN04953": { default_tier: "SL20", brand_vvip: ["3CE"] }, // Kim quyên
-	"CUSM78477": { default_tier: "SL20", brand_vvip: ["3CE"] }, // Emly
-	"CUSM143354": { default_tier: "SL20", brand_vvip: ["3CE"] }, // Zullia
-
-	// 3. Nhóm mặc định SL20
-	"CUZN07013": { default_tier: "SL20" }, // Yến Trắng
-	"CUZN02904": { default_tier: "SL20" }, // Shop Mỹ Phẩm Ý Ngọc
-	"CUZN02853": { default_tier: "SL20" }, // Hương
-	"CUZN01711": { default_tier: "SL20" }, // Hương Đào
-	"CUZN04958": { default_tier: "SL20" }, // Cao Dung
-	"CUSM67613": { default_tier: "SL20" }, // My Kim
-	"CUZN06667": { default_tier: "SL20" }, // Tịnh không (tú đà nẵng)
-	"CUSM104132": { default_tier: "SL20" }, // duyên duyên tứ hạ
-	"CUSM111023": { default_tier: "SL20" }, // Chị Hương Bắc Ninh
-	"CUZN01930": { default_tier: "SL20" }, // NANA AUTH
-	"CUZN04939": { default_tier: "SL20" }, // Linh Tây
-	"CUSM169079": { default_tier: "SL20" }, // Kho Sỉ Mp Hn
-	"CUSM159328": { default_tier: "SL20" }, // LÊ MƠ HÀ TĨNH
-	"CUZN01069": { default_tier: "SL20" }, // Minh Trang CEO PRETTYSKIN
-	"CUSM152236": { default_tier: "SL20" }, // Trâm An Lạc Gia Lai
-	"CUZN01955": { default_tier: "SL20" }, // Trang Su
-	"CUZN05170": { default_tier: "SL20" }, // Lưu Thịnh
-	"CUSM139088": { default_tier: "SL20" }, // Bích Hà
-	"CUZN07019": { default_tier: "SL20" }, // Boxy
-	"CUZN05791": { default_tier: "SL20" }, // ANH THƯ ZL
-	"CUZN04963": { default_tier: "SL20" }, // HẢI PHẠM
-	"CUZN06611": { default_tier: "SL20" }, // Mai Mai đông hà
-	"CUSM01729": { default_tier: "SL20" }, // Nana
-
-	// 4. Nhóm mặc định VVIP
-	"CUZN05177": { default_tier: "VVIP" }, // Mymy Cosmetic Trà My Nguyễn Zl
-	"CUSM65806": { default_tier: "VVIP" }, // Thiện Tường
-	"CUZN08208": { default_tier: "VVIP" }, // Quốc Anh
-	"CUZN06051": { default_tier: "VVIP" }, // Mici
-	"CUZN04935": { default_tier: "VVIP" }, // Hoàng Anh
-	"CUZN04965": { default_tier: "VVIP" }, // Hoàng Ngoan
-	"CUSM142469": { default_tier: "VVIP" }, // Chị Vân Jary
-	"CUSM190425": { default_tier: "VVIP" }, // Linh Yến
-	"CUZN06047": { default_tier: "VVIP" }, // tùng trang
-	"CUSM142080": { default_tier: "VVIP" }, // C Hằng
-	"CUZN00485": { default_tier: "VVIP" }, // Anh Thiện
-	"CUSM16866": { default_tier: "VVIP" }, // Mypham Banbuon Zl
-	"CUZN00055": { default_tier: "VVIP" }  // Mỹ Phẩm Trang Huyền
+	"CUZN03072": { default_tier: "SL20", vvip_min_qty: 30 },
+	"CUZN06973": { default_tier: "SL20", vvip_min_qty: 40 },
+	"CUZN06632": { default_tier: "SL20", vvip_min_qty: 40 },
+	"CUZN04953": { default_tier: "SL20", brand_vvip: ["3CE"] },
+	"CUSM78477": { default_tier: "SL20", brand_vvip: ["3CE"] },
+	"CUSM143354": { default_tier: "SL20", brand_vvip: ["3CE"] },
+	"CUZN07013": { default_tier: "SL20" },
+	"CUZN02904": { default_tier: "SL20" },
+	"CUZN02853": { default_tier: "SL20" },
+	"CUZN01711": { default_tier: "SL20" },
+	"CUZN04958": { default_tier: "SL20" },
+	"CUSM67613": { default_tier: "SL20" },
+	"CUZN06667": { default_tier: "SL20" },
+	"CUSM104132": { default_tier: "SL20" },
+	"CUSM111023": { default_tier: "SL20" },
+	"CUZN01930": { default_tier: "SL20" },
+	"CUZN04939": { default_tier: "SL20" },
+	"CUSM169079": { default_tier: "SL20" },
+	"CUSM159328": { default_tier: "SL20" },
+	"CUZN01069": { default_tier: "SL20" },
+	"CUSM152236": { default_tier: "SL20" },
+	"CUZN01955": { default_tier: "SL20" },
+	"CUZN05170": { default_tier: "SL20" },
+	"CUSM139088": { default_tier: "SL20" },
+	"CUZN07019": { default_tier: "SL20" },
+	"CUZN05791": { default_tier: "SL20" },
+	"CUZN04963": { default_tier: "SL20" },
+	"CUZN06611": { default_tier: "SL20" },
+	"CUSM01729": { default_tier: "SL20" },
+	"CUZN05177": { default_tier: "VVIP" },
+	"CUSM65806": { default_tier: "VVIP" },
+	"CUZN08208": { default_tier: "VVIP" },
+	"CUZN06051": { default_tier: "VVIP" },
+	"CUZN04935": { default_tier: "VVIP" },
+	"CUZN04965": { default_tier: "VVIP" },
+	"CUSM142469": { default_tier: "VVIP" },
+	"CUSM190425": { default_tier: "VVIP" },
+	"CUZN06047": { default_tier: "VVIP" },
+	"CUSM142080": { default_tier: "VVIP" },
+	"CUZN00485": { default_tier: "VVIP" },
+	"CUSM16866": { default_tier: "VVIP" },
+	"CUZN00055": { default_tier: "VVIP" }
 };
 
 let cached_special_customers: Record<string, any> | null = null;
 let last_fetch_time = 0;
-const CACHE_DURATION = 10 * 60 * 1000; // 10 phút
+const CACHE_DURATION = 60 * 1000; // Lưu tạm 1 phút trong bộ nhớ
 
 async function get_special_customers_policy(): Promise<Record<string, any>> {
 	const now = Date.now();
@@ -667,8 +662,7 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 	}
 
 	try {
-		// Gọi Google Sheet với timeout cực ngắn (1.5 giây), nếu trình duyệt chặn CORS thì chuyển ngay sang danh sách có sẵn
-		const res = await axios.get(GOOGLE_SHEET_CSV_URL, { timeout: 1500 });
+		const res = await axios.get(PROXY_SHEET_URL, { timeout: 4000 });
 		const lines = String(res.data || "").split("\n");
 		const map: Record<string, any> = {};
 
@@ -697,7 +691,7 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 		last_fetch_time = now;
 		return map;
 	} catch (e) {
-		console.warn("⚠️ Tự động sử dụng bảng danh sách dự phòng nội bộ (tốc độ tối đa).");
+		console.warn("⚠️ Không thể tải từ Google Sheet, chuyển sang dùng danh sách dự phòng.");
 		cached_special_customers = FALLBACK_SPECIAL_CUSTOMERS;
 		last_fetch_time = now;
 		return FALLBACK_SPECIAL_CUSTOMERS;
@@ -714,10 +708,10 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// Tải chính sách khách hàng
+		// Tải chính sách khách hàng từ Cache / Google Sheet
 		const SPECIAL_CUSTOMERS = await get_special_customers_policy();
 
-		// 1. Kéo thông tin tóm tắt đơn hàng
+		// 1. Kéo tóm tắt đơn hàng
 		const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 			params: { query: clean_query, limit: 10 },
 			timeout: 10000,
@@ -741,7 +735,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const raw_line_items = order?.order_line_items || order?.line_items || [];
 		if (raw_line_items.length === 0) return { success: false, message: "Đơn hàng không có sản phẩm nào!" };
 
-		// Lấy mã khách hàng trên Sapo
+		// Lấy mã khách hàng từ Sapo
 		const customer_code = String(order.customer?.code || order.customer?.phone_number || "").toUpperCase().trim();
 		const customer_policy = SPECIAL_CUSTOMERS[customer_code] || null;
 
@@ -772,7 +766,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					if (q < 20) {
 						return {
 							success: false,
-							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "SL20" nhưng sản phẩm "${item.product_name || item.name}" chỉ có số lượng ${q} (< 20)! Khách hàng này không thuộc diện ưu đãi mặc định SL20.`
+							message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "SL20" nhưng sản phẩm "${item.product_name || item.name}" có số lượng ${q} (< 20)! Khách hàng này không thuộc diện ưu đãi mặc định SL20.`
 						};
 					}
 				}
@@ -812,48 +806,59 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 			if (!item_note) continue;
 
-			// 1. Trường hợp note ưu đãi 3CE: VVIP3CE hoặc VVIP 3CE
-			if (item_note.startsWith("VVIP3CE") || item_note.startsWith("VVIP 3CE")) {
-				const has_3ce_privilege = customer_policy && customer_policy.brand_vvip?.some((b: string) => b.includes("3CE"));
-				if (!has_3ce_privilege) {
-					syntax_errors.push(`Dòng ${current_stt}: Khách hàng "${customer_code || 'N/A'}" không thuộc danh sách ưu đãi giá "VVIP 3CE"!`);
+			// ---------------------------------------------------------------------
+			// NHÁNH 1: ĐẶC QUYỀN THƯƠNG HIỆU (VD: VVIP3CE, VVIP 3CE, VVIPTORRIDEN...)
+			// -> MIỄN TRỪ HOÀN TOÀN ĐIỀU KIỆN SỐ LƯỢNG (CHỈ CẦN SL >= 1)
+			// ---------------------------------------------------------------------
+			const brand_match = item_note.match(/^VVIP\s*([A-Z0-9]+)$/i);
+			if (brand_match && !["30", "40", "50", "100", "20"].includes(brand_match[1])) {
+				const brand_code = brand_match[1].toUpperCase();
+				const customer_allowed_brands: string[] = customer_policy?.brand_vvip || [];
+				
+				const has_brand_privilege = customer_allowed_brands.some((b: string) => b.includes(brand_code) || brand_code.includes(b));
+				const is_matching_product = full_name_upper.includes(brand_code);
+
+				if (!has_brand_privilege) {
+					syntax_errors.push(`Dòng ${current_stt}: Khách "${customer_code || 'N/A'}" không có đặc quyền ưu đãi giá cho thương hiệu "${brand_code}"!`);
 					continue;
 				}
-				if (!full_name_upper.includes("3CE")) {
-					syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú VVIP 3CE nhưng sản phẩm này không thuộc thương hiệu 3CE!`);
+				if (!is_matching_product) {
+					syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú VVIP ${brand_code} nhưng sản phẩm này không thuộc hãng ${brand_code}!`);
 					continue;
 				}
 
 				line_price_targets[index] = {
 					tier: "VVIP",
-					rule: `Giá VVIP (Ưu đãi 3CE riêng cho khách ${customer_code})`,
+					rule: `Giá VVIP (Đặc quyền ${brand_code} cho khách ${customer_code})`,
 					from_line: current_stt
 				};
 				continue;
 			}
 
-			// 2. Kiểm tra cú pháp chuẩn: ĐL, VVIP, SL20
-			const is_valid_prefix = /^(?:ĐL|DL|VVIP|SL20)(?:[:\s-]|$)/i.test(item_note);
+			// ---------------------------------------------------------------------
+			// NHÁNH 2: GHI CHÚ TIÊU CHUẨN (ĐL, SL20, VVIP) -> BẮT BUỘC CHECK SỐ LƯỢNG
+			// ---------------------------------------------------------------------
+			const is_valid_prefix = /^(?:ĐL|DL|SL20|VVIP)(?:[:\s-]|$)/i.test(item_note);
 			if (!is_valid_prefix) {
-				syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú "${item_note}" sai cú pháp (Chỉ chấp nhận: ĐL, VVIP, SL20, VVIP 3CE)`);
+				syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú "${item_note}" sai cú pháp (Chỉ chấp nhận: ĐL, VVIP, SL20 hoặc VVIP + Tên Hãng)`);
 				continue;
 			}
 
 			let tier = "";
 			if (item_note.startsWith("ĐL") || item_note.startsWith("DL")) tier = "ĐL";
-			else if (item_note.startsWith("VVIP") || item_note.startsWith("SL50")) tier = "VVIP";
 			else if (item_note.startsWith("SL20")) tier = "SL20";
+			else if (item_note.startsWith("VVIP")) tier = "VVIP";
 
-			// Ngưỡng số lượng yêu cầu (có xét mốc hạ VVIP từ cấu hình khách hàng)
+			// Xác định mốc SL tối thiểu (lấy theo mốc hạ riêng 30, 40 của khách nếu có)
 			let min_req = tier === "ĐL" ? 100 : tier === "VVIP" ? 50 : 20;
 			if (tier === "VVIP" && customer_policy && customer_policy.vvip_min_qty) {
 				min_req = customer_policy.vvip_min_qty;
 			}
 
-			const after_prefix = item_note.replace(/^(?:ĐL|DL|VVIP|SL20)\s*[:\s-]*/i, "").trim();
+			const after_prefix = item_note.replace(/^(?:ĐL|DL|SL20|VVIP)\s*[:\s-]*/i, "").trim();
 
 			if (after_prefix.length > 0) {
-				// Trường hợp gộp số dòng: VD "SL20: 4,5"
+				// Cú pháp gộp số dòng: VD "SL20: 4,5" hoặc "VVIP: 1,2"[cite: 4, 7]
 				const is_valid_syntax_lines = /^[\d,\s]+$/.test(after_prefix);
 				if (!is_valid_syntax_lines) {
 					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${item_note}" sai định dạng dòng gộp (Chỉ dùng các số cách nhau dấu phẩy, VD: 4,5)`);
@@ -906,7 +911,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					continue;
 				}
 
-				// Gán kế hoạch đổi giá cho TẤT CẢ các dòng trong nhóm gộp
+				// Gán mục tiêu đổi giá cho TẤT CẢ các dòng trong danh sách gộp
 				for (const ln of line_numbers) {
 					line_price_targets[ln - 1] = {
 						tier: tier,
