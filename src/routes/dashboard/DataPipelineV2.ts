@@ -656,44 +656,17 @@ let last_fetch_time = 0;
 const CACHE_DURATION = 60 * 1000; // Lưu tạm 1 phút trong bộ nhớ
 
 async function get_special_customers_policy(): Promise<Record<string, any>> {
-	const now = Date.now();
-	if (cached_special_customers && (now - last_fetch_time < CACHE_DURATION)) {
-		return cached_special_customers;
-	}
-
 	try {
-		const res = await axios.get(PROXY_SHEET_URL, { timeout: 4000 });
-		const lines = String(res.data || "").split("\n");
-		const map: Record<string, any> = {};
-
-		for (let i = 1; i < lines.length; i++) {
-			const row = lines[i].split(",").map((c: string) => c.trim().replace(/^"|"$/g, ""));
-			const code = row[0]?.toUpperCase().trim();
-			if (!code) continue;
-
-			let default_tier: "SL20" | "VVIP" | undefined = undefined;
-			const col_c = (row[2] || "").toUpperCase();
-			if (col_c.includes("VVIP")) default_tier = "VVIP";
-			else if (col_c.includes("SL20") || col_c.includes("SL 20")) default_tier = "SL20";
-
-			const vvip_min = row[3] ? parseInt(row[3].replace(/\D/g, ""), 10) : undefined;
-			const brand_vvip = row[4] ? row[4].toUpperCase().split(";").map(b => b.trim()).filter(Boolean) : undefined;
-
-			map[code] = {
-				default_tier,
-				vvip_min_qty: !isNaN(vvip_min as number) ? vvip_min : undefined,
-				brand_vvip
-			};
+		// Gọi sang API của lyotinhluong vừa tạo
+		const res = await axios.get("https://lyotinhluong.onrender.com/api/special-customers", { timeout: 8000 });
+		if (res.data && res.data.success && res.data.data) {
+			console.log("🟢 Đã đồng bộ chính sách khách hàng thành công từ Google API:", Object.keys(res.data.data).length, "khách");
+			return res.data.data;
 		}
-
-		console.log("🟢 Đã đồng bộ Google Sheet thành công:", Object.keys(map).length, "khách");
-		cached_special_customers = map;
-		last_fetch_time = now;
-		return map;
+		console.warn("⚠️ API không có data, dùng danh sách dự phòng nội bộ.");
+		return FALLBACK_SPECIAL_CUSTOMERS;
 	} catch (e) {
-		console.warn("⚠️ Không thể tải từ Google Sheet, chuyển sang dùng danh sách dự phòng.");
-		cached_special_customers = FALLBACK_SPECIAL_CUSTOMERS;
-		last_fetch_time = now;
+		console.warn("⚠️ Lỗi kết nối API lyotinhluong, chuyển sang dùng danh sách dự phòng:", e);
 		return FALLBACK_SPECIAL_CUSTOMERS;
 	}
 }
