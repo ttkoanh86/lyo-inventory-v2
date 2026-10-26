@@ -79,7 +79,7 @@
 		<h2>⚡ TIỆN ÍCH XỬ LÝ ĐƠN HÀNG SAPO</h2>
 		<p>Nhập Mã đơn hàng sỉ (VD: SON02290), sau đó chọn <b>SỬA GIÁ ĐƠN</b> để tự động kiểm tra cộng dồn nâng giá sỉ hoặc <b>HỦY ĐƠN HÀNG</b> để hủy đơn và hoàn trả tồn kho trên Sapo.</p>
 	</div>
-	<!-- 📌 KHỐI HƯỚNG DẪN QUY TẮC CHO NHÂN VIÊN -->
+	<!-- 📌 KHỐI HƯỚNG DẪN QUY TẮC CHO NHÂN VIÊN (ĐÃ BỔ SUNG ĐẶC QUYỀN THƯƠNG HIỆU) -->
 <div style="background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; font-size: 13.5px; line-height: 1.6; color: #0369a1;">
   <div style="font-weight: bold; font-size: 14px; margin-bottom: 6px; color: #0284c7; display: flex; align-items: center; gap: 6px;">
     <span>📋</span> QUY TẮC TẠO ĐƠN VÀ GHI CHÚ (NOTE) SỬA GIÁ:
@@ -87,16 +87,19 @@
   
   <ul style="margin: 0; padding-left: 20px; color: #334155;">
     <li style="margin-bottom: 4px;">
-      <strong style="color: #b91c1c;">Quy tắc bảng giá đơn hàng:</strong> Chọn chính sách giá theo <strong>mốc giá thấp nhất (số lượng ít nhất)</strong> của các sản phẩm có trong đơn (Ví dụ: Đơn có sản phẩm SL 10 và sản phẩm SL 50 ➔ Phải chọn bảng giá nền là <strong>Bán buôn</strong>, không được chọn VVIP ngay từ đầu).
+      <strong style="color: #b91c1c;">Quy tắc bảng giá đơn hàng:</strong> Chọn chính sách giá theo <strong>mốc giá thấp nhất (số lượng ít nhất)</strong> của các sản phẩm có trong đơn (Ví dụ: Đơn có sản phẩm SL 10 và sản phẩm SL 50 ➔ Phải chọn bảng giá nền là <strong>Bán buôn</strong>, không được chọn VVIP ngay từ đầu). Các khách có chính sách mặc định SL20 hoặc VVIP sẽ được miễn trừ kiểm tra số lượng sàn ở bước này.
     </li>
     <li>
-      <strong>Cú pháp mốc giá nâng lên:</strong> Ghi đúng từ khóa viết tắt: <code style="color: #d97706; font-weight: bold;">ĐL</code> (Đại lý, SL ≥ 100) | <code style="color: #2563eb; font-weight: bold;">VVIP</code> (SL ≥ 50) | <code style="color: #16a34a; font-weight: bold;">SL20</code> (SL ≥ 20).
+      <strong>Cú pháp mốc giá nâng lên theo số lượng:</strong> Ghi đúng từ khóa viết tắt: <code style="color: #d97706; font-weight: bold;">ĐL</code> (Đại lý, SL ≥ 100) | <code style="color: #2563eb; font-weight: bold;">VVIP</code> (SL ≥ 50, hoặc ≥ 30/40 theo khách riêng) | <code style="color: #16a34a; font-weight: bold;">SL20</code> (SL ≥ 20).
+    </li>
+    <li style="margin-top: 4px; margin-bottom: 4px; background-color: #fef3c7; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #f59e0b;">
+      <strong style="color: #b45309;">Đặc quyền thương hiệu riêng (Không cần check SL):</strong> Ghi cú pháp <code style="color: #b45309; font-weight: bold;">VVIP + Tên Hãng</code> (Ví dụ: <code style="background-color: #fff; padding: 1px 4px; border-radius: 3px; font-weight: bold;">VVIP3CE</code> hoặc <code style="background-color: #fff; padding: 1px 4px; border-radius: 3px; font-weight: bold;">VVIP 3CE</code>, sau này có thể thêm <code style="background-color: #fff; padding: 1px 4px; border-radius: 3px; font-weight: bold;">VVIPTORRIDEN</code>...). <em>Chỉ áp dụng cho đúng mã khách hàng được phân quyền trên Google Sheet và đúng dòng sản phẩm của hãng đó; sửa trực tiếp trên từng dòng, không dùng cú pháp gộp dòng.</em>
     </li>
     <li>
-      <strong>Đơn lẻ 1 dòng đủ SL:</strong> Chỉ cần ghi mốc giá vào dòng đó (Ví dụ: <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">ĐL</code> hoặc <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">SL20</code>).
+      <strong>Đơn lẻ 1 dòng đủ SL:</strong> Chỉ cần ghi mốc giá vào dòng đó (Ví dụ: <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">ĐL</code> hoặc <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">SL20</code> hoặc <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">VVIP</code>).
     </li>
     <li>
-      <strong>Gộp số lượng các dòng:</strong> Ghi kèm số thứ tự dòng cách nhau bởi <strong>dấu phẩy</strong> (Ví dụ: <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">ĐL: 1,2</code> hoặc <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">SL20: 3,4,5</code>).
+      <strong>Gộp số lượng các dòng:</strong> Ghi kèm số thứ tự dòng cách nhau bởi <strong>dấu phẩy</strong> (Ví dụ: <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">ĐL: 1,2</code>[cite: 4] hoặc <code style="background-color: #e2e8f0; padding: 2px 4px; border-radius: 4px;">SL20: 3,4,5</code>).
     </li>
     <li>
       <strong>Điều kiện gộp hợp lệ:</strong> Các dòng gộp phải <em>cùng loại sản phẩm</em>, <em>cùng mức giá ban đầu</em> và thuộc nhóm: <strong>Son, Phấn, Chì kẻ mày, Mặt nạ</strong>.
