@@ -962,11 +962,11 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		if (has_invalid_sl20) {
-			syntax_errors.push(`Đơn hàng đang áp dụng sai chính sách giá "SL20" do có sản phẩm số lượng dưới 20 mà không có ghi chú gộp dòng hợp lệ!`);
+			syntax_errors.push(`Đơn hàng đang áp dụng sai chính sách giá "SL20" do có sản phẩm số lượng dưới 20 và cũng không thuộc nhóm cộng dồn sản phẩm!`);
 		}
 		if (has_invalid_vvip) {
 			const req_vvip = customer_policy?.vvip_min_qty || 50;
-			syntax_errors.push(`Đơn hàng đang áp dụng sai chính sách giá "VVIP" do có sản phẩm số lượng dưới ${req_vvip} mà không có ghi chú gộp dòng hợp lệ!`);
+			syntax_errors.push(`Đơn hàng đang áp dụng sai chính sách giá "VVIP" do có sản phẩm số lượng dưới ${req_vvip} và cũng không thuộc nhóm cộng dồn sản phẩm!`);
 		}
 
 		if (syntax_errors.length > 0) {
