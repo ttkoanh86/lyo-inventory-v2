@@ -659,9 +659,7 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 			if (Array.isArray(res.data.tier_pricing)) {
 				BULK_TIER_PRICING = res.data.tier_pricing;
 			}
-			console.log(
-				`🟢 Đã đồng bộ Google Sheet: ${Object.keys(res.data.data || {}).length} khách, ${ALLOWED_DIFF_PRICE_PRODUCT_CODES.length} mã SP gộp, ${BULK_TIER_PRICING.length} mức giá SKU.`
-			);
+			console.log("🟢 Đã đồng bộ Google Sheet:", Object.keys(res.data.data || {}).length, "khách,", ALLOWED_DIFF_PRICE_PRODUCT_CODES.length, "mã SP gộp,", BULK_TIER_PRICING.length, "mức giá SKU.");
 			return res.data.data;
 		}
 		return FALLBACK_SPECIAL_CUSTOMERS;
@@ -670,7 +668,6 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 		return FALLBACK_SPECIAL_CUSTOMERS;
 	}
 }
-
 // =========================================================================
 // 🟢 HÀM XỬ LÝ & SỬA GIÁ ĐƠN HÀNG TỰ ĐỘNG
 // =========================================================================
