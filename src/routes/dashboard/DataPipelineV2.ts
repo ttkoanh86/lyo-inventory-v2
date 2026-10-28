@@ -652,7 +652,7 @@ let BULK_TIER_PRICING: Array<{ sku: string; min_qty: number; price: number }> = 
 async function get_special_customers_policy(): Promise<Record<string, any>> {
 	try {
 		const res = await axios.get("https://lyotinhluong.onrender.com/api/special-customers", { timeout: 8000 });
-		if (res.data && res.data.success) {
+		if (res.data?.success && res.data?.data) {
 			if (Array.isArray(res.data.special_products) && res.data.special_products.length > 0) {
 				ALLOWED_DIFF_PRICE_PRODUCT_CODES = res.data.special_products;
 			}
@@ -661,7 +661,7 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 			}
 			console.log(
 				"🟢 Đã đồng bộ Google Sheet:",
-				Object.keys(res.data.data || {}).length,
+				Object.keys(res.data.data).length,
 				"khách,",
 				ALLOWED_DIFF_PRICE_PRODUCT_CODES.length,
 				"mã SP gộp,",
@@ -670,11 +670,11 @@ async function get_special_customers_policy(): Promise<Record<string, any>> {
 			);
 			return res.data.data;
 		}
-		return FALLBACK_SPECIAL_CUSTOMERS;
 	} catch (e) {
 		console.warn("⚠️ Lỗi kết nối API lyotinhluong, chuyển sang dùng danh sách dự phòng:", e);
-		return FALLBACK_SPECIAL_CUSTOMERS;
 	}
+
+	return FALLBACK_SPECIAL_CUSTOMERS;
 }
 
 // =========================================================================
