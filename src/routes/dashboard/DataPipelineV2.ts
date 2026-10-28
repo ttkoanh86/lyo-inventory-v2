@@ -650,31 +650,22 @@ let ALLOWED_DIFF_PRICE_PRODUCT_CODES: string[] = ["C931", "D69", "A607"];
 let BULK_TIER_PRICING: Array<{ sku: string; min_qty: number; price: number }> = [];
 
 async function get_special_customers_policy(): Promise<Record<string, any>> {
-	try {
-		const res = await axios.get("https://lyotinhluong.onrender.com/api/special-customers", { timeout: 8000 });
-		if (res.data?.success && res.data?.data) {
-			if (Array.isArray(res.data.special_products) && res.data.special_products.length > 0) {
-				ALLOWED_DIFF_PRICE_PRODUCT_CODES = res.data.special_products;
-			}
-			if (Array.isArray(res.data.tier_pricing)) {
-				BULK_TIER_PRICING = res.data.tier_pricing;
-			}
-			console.log(
-				"🟢 Đã đồng bộ Google Sheet:",
-				Object.keys(res.data.data).length,
-				"khách,",
-				ALLOWED_DIFF_PRICE_PRODUCT_CODES.length,
-				"mã SP gộp,",
-				BULK_TIER_PRICING.length,
-				"mức giá SKU."
-			);
-			return res.data.data;
-		}
-	} catch (e) {
-		console.warn("⚠️ Lỗi kết nối API lyotinhluong, chuyển sang dùng danh sách dự phòng:", e);
-	}
+    try {
+        const res = await axios.get("https://lyotinhluong.onrender.com/api/special-customers", { timeout: 8000 });
+        if (res.data && res.data.success && res.data.data) {
+            // Nhận thêm danh sách từ 2 sheet mới
+            if (Array.isArray(res.data.special_products)) ALLOWED_DIFF_PRICE_PRODUCT_CODES = res.data.special_products;
+            if (Array.isArray(res.data.tier_pricing)) BULK_TIER_PRICING = res.data.tier_pricing;
 
-	return FALLBACK_SPECIAL_CUSTOMERS;
+            console.log("🟢 Đã đồng bộ chính sách khách hàng thành công từ Google API:", Object.keys(res.data.data).length, "khách");
+            return res.data.data;
+        }
+        console.warn("⚠️ API không có data, dùng danh sách dự phòng nội bộ.");
+        return FALLBACK_SPECIAL_CUSTOMERS;
+    } catch (e) {
+        console.warn("⚠️ Lỗi kết nối API lyotinhluong, chuyển sang dùng danh sách dự phòng:", e);
+        return FALLBACK_SPECIAL_CUSTOMERS;
+    }
 }
 
 // =========================================================================
