@@ -680,7 +680,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		const clean_query = order_code_or_id.trim().toUpperCase();
 		if (!clean_query) return { success: false, message: "Vui lòng nhập Mã đơn hàng!" };
 
-		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY", "MẶT NẠ", "MAT NA"][cite: 1];
+		const ALLOWED_COMBINE_KEYWORDS = ["SON", "PHẤN", "PHAN", "CHÌ KẺ MÀY", "CHI KE MAY", "KẺ MÀY", "KE MAY", "MẶT NẠ", "MAT NA"];
 
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
@@ -724,7 +724,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				});
 				if (custRes.data?.customer?.code) {
 					customer_code = custRes.data.customer.code.trim().toUpperCase();
-					console.log(`🎯 Đã lấy mã khách từ proxy:`, customer_code)[cite: 1];
+					console.log(`🎯 Đã lấy mã khách từ proxy:`, customer_code);
 				}
 			} catch (err: any) {
 				console.warn("Lỗi tra cứu khách hàng qua proxy:", err?.message || err);
@@ -732,7 +732,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		const customer_policy = SPECIAL_CUSTOMERS[customer_code] || null;
-		console.log(`👤 Đơn: ${order.code} | Khách: "${customer_code}" | Chính sách:`, customer_policy)[cite: 1];
+		console.log(`👤 Đơn: ${order.code} | Khách: "${customer_code}" | Chính sách:`, customer_policy);
 
 		// =========================================================================
 		// 🟢 BƯỚC 1: KIỂM TRA ĐIỀU KIỆN ĐƠN BÁN BUÔN (TỔNG TIỀN >= 2 TRIỆU)
@@ -750,13 +750,13 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			if (total_price < 2000000) {
 				return {
 					success: false,
-					message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "Bán buôn" nhưng tổng tiền (${total_price.toLocaleString("vi-VN")}đ) chưa đạt tối thiểu 2.000.000đ!`[cite: 1]
+					message: `❌ Bảng giá đơn không hợp lệ: Đang chọn "Bán buôn" nhưng tổng tiền (${total_price.toLocaleString("vi-VN")}đ) chưa đạt tối thiểu 2.000.000đ!`
 				};
 			}
 		}
 
-		const is_exempt_sl20 = customer_policy && (customer_policy.default_tier === "SL20" || customer_policy.default_tier === "VVIP")[cite: 1];
-		const is_exempt_vvip = customer_policy && customer_policy.default_tier === "VVIP"[cite: 1];
+		const is_exempt_sl20 = customer_policy && (customer_policy.default_tier === "SL20" || customer_policy.default_tier === "VVIP");
+		const is_exempt_vvip = customer_policy && customer_policy.default_tier === "VVIP";
 
 		// =========================================================================
 		// 🟢 BƯỚC 2: PHÂN TÍCH NOTE & KIỂM TRA ĐIỀU KIỆN TỪNG DÒNG
@@ -805,7 +805,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				continue;
 			}
 
-			// Nhánh 2: Mốc số lượng chuẩn hoặc Mốc lớn (ĐL, VVIP, SL20, SL200, SL500, SL1000...)[cite: 1]
+			// Nhánh 2: Mốc số lượng chuẩn hoặc Mốc lớn (ĐL, VVIP, SL20, SL200, SL500, SL1000...)
 			const bulkMatch = item_note.match(/^(?:ĐL|DL|VVIP|SL\s*(\d+))(?:[:\s-]|$)/i);
 			if (!bulkMatch) {
 				syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú "${item_note}" sai cú pháp (Chấp nhận: ĐL, VVIP, SL20, SL[Số lượng], hoặc VVIP + Tên Hãng)`);
@@ -832,7 +832,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const after_prefix = item_note.replace(/^(?:ĐL|DL|VVIP|SL\s*\d+)\s*[:\s-]*/i, "").trim();
 
 			if (after_prefix.length > 0) {
-				// Cú pháp gộp dòng: VD "SL200: 1,3"[cite: 1]
+				// Cú pháp gộp dòng: VD "SL200: 1,3"
 				const is_valid_syntax_lines = /^[\d,\s]+$/.test(after_prefix);
 				if (!is_valid_syntax_lines) {
 					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${item_note}" sai định dạng dòng gộp (Chỉ dùng các số cách nhau dấu phẩy, VD: 1,3)`);
@@ -846,7 +846,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 
 				const current_prod_code = (item_name.match(/^([A-Z0-9]+)/)?.[1] || "").toUpperCase();
 				const is_diff_price_allowed = ALLOWED_DIFF_PRICE_PRODUCT_CODES.includes(current_prod_code);
-				const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(k => full_name_upper.includes(k))[cite: 1];
+				const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(k => full_name_upper.includes(k));
 
 				if (!is_allowed_category && !is_diff_price_allowed) {
 					syntax_errors.push(`Dòng ${current_stt} ("${item_name}") không thuộc danh mục được phép gộp`);
@@ -913,7 +913,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					lines_grouped.add(ln - 1);
 				}
 			} else {
-				// Đơn lẻ 1 dòng (VD: "SL200", "SL500")[cite: 1]
+				// Đơn lẻ 1 dòng (VD: "SL200", "SL500")
 				if (qty < min_req) {
 					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" nhưng số lượng (${qty}) chưa đạt ngưỡng tối thiểu ${min_req}`);
 					continue;
@@ -955,7 +955,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const prod_code = (item_name.match(/^([A-Z0-9]+)/)?.[1] || "").toUpperCase();
 
 			const is_diff_price_allowed = ALLOWED_DIFF_PRICE_PRODUCT_CODES.includes(prod_code);
-			const is_keyword_combinable = ALLOWED_COMBINE_KEYWORDS.some(k => item_name.includes(k))[cite: 1];
+			const is_keyword_combinable = ALLOWED_COMBINE_KEYWORDS.some(k => item_name.includes(k));
 
 			if (is_diff_price_allowed) {
 				const group_key = `DIFFPRICE_${item.product_id}`;
@@ -1064,7 +1064,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					target_price = target_plan.direct_price;
 					applied_rule = target_plan.rule;
 				} else if (item.variant_id) {
-					// Tra cứu đơn giá từ Sapo (ĐL, VVIP, SL20)[cite: 1]
+					// Tra cứu đơn giá từ Sapo (ĐL, VVIP, SL20)
 					try {
 						const var_resp = await axios.get(`${proxyUrl}/admin/variants/${item.variant_id}.json`, {
 							timeout: 5000,
@@ -1159,7 +1159,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return {
 				success: true,
 				order_code: order.code || clean_query,
-				message: "Bảng giá hợp lệ. Đơn hàng không có sản phẩm nào cần sửa giá!",[cite: 1]
+				message: "Bảng giá hợp lệ. Đơn hàng không có sản phẩm nào cần sửa giá!",
 				details: []
 			};
 		}
