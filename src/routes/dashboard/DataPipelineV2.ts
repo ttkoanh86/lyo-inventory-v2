@@ -844,8 +844,8 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					.map(p => parseInt(p.trim(), 10))
 					.filter(n => !isNaN(n));
 
-				const current_prod_code = (item_name.match(/^([A-Z0-9]+)/)?.[1] || "").toUpperCase();
-				const is_diff_price_allowed = ALLOWED_DIFF_PRICE_PRODUCT_CODES.includes(current_prod_code);
+				const current_prod_code = (item_name.match(/^([a-zA-Z0-9]+)/)?.[1] || "").toUpperCase();
+				const is_diff_price_allowed = ALLOWED_DIFF_PRICE_PRODUCT_CODES.map(c => String(c).trim().toUpperCase()).includes(current_prod_code);
 				const is_allowed_category = ALLOWED_COMBINE_KEYWORDS.some(k => full_name_upper.includes(k));
 
 				if (!is_allowed_category && !is_diff_price_allowed) {
