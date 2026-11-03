@@ -5,7 +5,7 @@
 	let is_loading = false;
 	let is_retrying = false;
 	let input_url = "";
-	let selected_files: File[] = []; // Lưu danh sách các file PDF chọn
+	let selected_files: File[] = [];
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -15,7 +15,6 @@
 	let is_pdf_ready = false;
 	let is_dragging = false;
 
-	// Biến dành riêng cho tính năng SOI DỮ LIỆU S3
 	let debug_result: any = null;
 	let is_debugging = false;
 
@@ -34,42 +33,55 @@
 		document.head.appendChild(script);
 	});
 
-	// 🟢 HÀM BÓC TÁCH NHÃN HIỆU (BRAND) TỪ ITEM HOẶC TỪ TÊN SẢN PHẨM: "Mã - Hãng - Tên"
+	// 🟢 HÀM LẤY NHÃN HIỆU CỦA ITEM
 	function get_item_brand(item: any): string {
-		if (item.brand || item.vendor || item.brand_name) {
-			return String(item.brand || item.vendor || item.brand_name).trim().toUpperCase();
-		}
+		if (item.brand) return String(item.brand).trim().toUpperCase();
+		if (item.vendor || item.brand_name) return String(item.vendor || item.brand_name).trim().toUpperCase();
+		
 		const name = String(item.name || "").trim();
-		const parts = name.split("-");
-		if (parts.length >= 2) {
-			// Thường định dạng là "c744 - 3CE - Son kem..." -> parts[1] là nhãn hiệu
-			const guessedBrand = parts[1].trim();
-			if (guessedBrand.length > 0 && guessedBrand.length <= 25) {
-				return guessedBrand.toUpperCase();
-			}
+		const parts = name.split(/\s*-\s*/);
+		if (parts.length >= 3 && parts[1].length <= 25) {
+			return parts[1].trim().toUpperCase();
 		}
 		return "KHÁC";
 	}
 
-	// 🟢 HÀM SẮP XẾP: THEO NHÃN HIỆU (A -> Z), CÙNG NHÃN HIỆU XẾP THEO SL GIẢM DẦN
+	// 🟢 HÀM SẮP XẾP: ƯU TIÊN TỔNG SL HÃNG LỚN NHẤT
 	function sort_picked_items(items: any[]): any[] {
+		if (!items || items.length === 0) return [];
+
+		const brandTotalMap: Record<string, number> = {};
+		items.forEach(it => {
+			const b = get_item_brand(it);
+			const q = Number(it.qty || it.quantity || 0);
+			brandTotalMap[b] = (brandTotalMap[b] || 0) + q;
+		});
+
 		return [...items].sort((a, b) => {
 			const brandA = get_item_brand(a);
 			const brandB = get_item_brand(b);
 
-			const brandComp = brandA.localeCompare(brandB, 'vi');
-			if (brandComp !== 0) {
-				return brandComp; // Sắp xếp tên nhãn hiệu theo bảng chữ cái A -> Z
+			const totalA = brandTotalMap[brandA] || 0;
+			const totalB = brandTotalMap[brandB] || 0;
+
+			// So sánh tổng số lượng của cả hãng
+			if (totalB !== totalA) {
+				return totalB - totalA;
 			}
 
-			// Cùng nhãn hiệu -> xếp số lượng giảm dần
+			// Cùng tổng số lượng -> xếp tên hãng A -> Z
+			const brandComp = brandA.localeCompare(brandB, 'vi');
+			if (brandComp !== 0) {
+				return brandComp;
+			}
+
+			// Cùng hãng -> sản phẩm có số lượng lớn hơn xếp trước
 			const qtyA = Number(a.qty || a.quantity || 0);
 			const qtyB = Number(b.qty || b.quantity || 0);
 			return qtyB - qtyA;
 		});
 	}
 
-	// HÀM ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF
 	async function extract_orders_from_buffer(buffer: ArrayBuffer): Promise<string[]> {
 		const pdfjs = (window as any).pdfjsLib;
 		const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
@@ -84,12 +96,9 @@
 
 			for (let i = 0; i < items.length; i++) {
 				const str = items[i];
-
-				// TikTok Shop (18 số)
 				const tiktok = str.match(/\b5\d{17}\b/);
 				if (tiktok) order_set.add(tiktok[0]);
 
-				// Shopee
 				const shopee = str.match(/\b\d{6}[A-Z0-9]{8,10}\b/i);
 				if (shopee && !shopee[0].toUpperCase().startsWith('SPX')) order_set.add(shopee[0]);
 			}
@@ -125,7 +134,6 @@
 		selected_files = [];
 	}
 
-	// 🟢 NÚT BẤM BẮT ĐẦU CHẠY GOM HÀNG - ĐỌC SONG SONG TẤT CẢ FILE PDF (SIÊU NHANH)
 	async function start_process_selected_files() {
 		if (selected_files.length === 0) return alert("Chưa chọn file PDF nào cả!");
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
@@ -168,7 +176,6 @@
 		}
 	}
 
-	// ⚡ LUỒNG DÁN LINK S3
 	async function handle_process_from_url() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán đường link phiếu in S3 Amazon!");
@@ -209,7 +216,6 @@
 		}
 	}
 
-	// 🔍 HÀM SOI CHI TIẾT NỘI DUNG S3 (IN TRỰC TIẾP LÊN MÀN HÌNH)
 	async function debug_s3_link() {
 		const clean_url = input_url.trim();
 		if (!clean_url) return alert("Vui lòng dán link S3 Amazon vào ô nhập!");
@@ -231,7 +237,6 @@
 		is_loading = true;
 		const res = await aggregate_sapo_orders_from_pdf(orderIds);
 		if (res.success) {
-			// Sắp xếp theo Nhãn hiệu (A-Z) rồi theo Số lượng giảm dần
 			picked_items = sort_picked_items(res.items || []);
 			total_products_qty = res.total_qty || 0;
 			successful_orders_count = res.found_orders_count || 0;
@@ -265,7 +270,6 @@
 				}
 			});
 
-			// Sắp xếp lại danh sách gộp bù theo Nhãn hiệu và SL
 			picked_items = sort_picked_items(Object.values(item_map));
 			total_products_qty += res.total_qty || 0;
 			successful_orders_count += res.found_orders_count || 0;
