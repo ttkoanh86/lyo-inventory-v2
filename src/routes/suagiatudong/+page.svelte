@@ -79,42 +79,48 @@
 		<h2>⚡ TIỆN ÍCH XỬ LÝ ĐƠN HÀNG SAPO</h2>
 		<p>Nhập Mã đơn hàng sỉ (VD: SON02290), sau đó chọn <b>SỬA GIÁ ĐƠN</b> để tự động kiểm tra cộng dồn nâng giá sỉ hoặc <b>HỦY ĐƠN HÀNG</b> để hủy đơn và hoàn trả tồn kho trên Sapo.</p>
 	</div>
-	<!-- KHỐI HƯỚNG DẪN QUY TẮC ĐƯỢC CẬP NHẬT -->
-<div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 18px 22px; margin-bottom: 24px; color: #0f172a; font-size: 14px; line-height: 1.6;">
-  <h3 style="color: #0369a1; margin-bottom: 12px; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-    📖 QUY TẮC TẠO ĐƠN VÀ GHI CHÚ (NOTE) SỬA GIÁ:
-  </h3>
 
-  <ul style="padding-left: 20px; margin: 0; display: flex; flex-direction: column; gap: 8px;">
-    <li>
-      <b>Quy tắc bảng giá đơn hàng:</b> Chọn chính sách giá theo mốc giá thấp nhất (số lượng ít nhất) của các sản phẩm có trong đơn (Ví dụ: Đơn có sản phẩm SL 10 và sản phẩm SL 50 &rarr; Phải chọn bảng giá nền là <b>Bán buôn</b>, không được chọn VVIP ngay từ đầu). Các khách có chính sách mặc định SL20 hoặc VVIP sẽ được miễn trừ kiểm tra số lượng sàn ở bước này.
-    </li>
+	<!-- KHỐI HƯỚNG DẪN QUY TẮC ĐÃ ĐƯỢC CẬP NHẬT -->
+	<div class="rules-card">
+		<h3 class="rules-title">
+			📖 QUY TẮC TẠO ĐƠN VÀ GHI CHÚ (NOTE) SỬA GIÁ:
+		</h3>
 
-    <li>
-      <b>Cú pháp mốc giá nâng lên theo số lượng:</b> Ghi đúng từ khóa viết tắt: 
-      <b><code>ĐL</code></b> (Đại lý, SL &ge; 100) | 
-      <b><code>VVIP</code></b> (SL &ge; 50, hoặc 30/40 theo khách riêng) | 
-      <b><code>SL20</code></b> (SL &ge; 20) | 
-      <b><code>SL[Số lượng]</code></b> (SL &ge; 200, 500, 1000... theo bảng giá SKU trên Sheet).
-    </li>
+		<ul class="rules-list">
+			<li>
+				<b>Quy tắc bảng giá đơn hàng:</b> Chọn chính sách giá theo mốc giá thấp nhất (số lượng ít nhất) của các sản phẩm có trong đơn (Ví dụ: Đơn có sản phẩm SL 10 và sản phẩm SL 50 &rarr; Phải chọn bảng giá nền là <b>Bán buôn</b>, không được chọn VVIP ngay từ đầu). Các khách có chính sách mặc định SL20 hoặc VVIP sẽ được miễn trừ kiểm tra số lượng sàn ở bước này.
+			</li>
 
-    <li style="background: #fef9c3; border-left: 4px solid #eab308; padding: 8px 12px; border-radius: 4px; margin: 4px 0;">
-      <b>Đặc quyền thương hiệu riêng (Không cần check SL):</b> Ghi cú pháp <b><code>VVIP + Tên Hãng</code></b> (Ví dụ: <b><code>VVIP3CE</code></b> hoặc <b><code>VVIP 3CE</code></b>, sau này có thể thêm <b><code>VVIPTORRIDEN</code></b>...)[cite: 1]. Chỉ áp dụng cho đúng mã khách hàng được phân quyền trên Google Sheet và đúng dòng sản phẩm của hãng đó, sửa trực tiếp trên từng dòng, không dùng cú pháp gộp dòng[cite: 1].
-    </li>
+			<li>
+				<b>Cú pháp mốc giá nâng lên theo số lượng:</b> Ghi đúng từ khóa viết tắt: 
+				<b><code>ĐL</code></b> (Đại lý, SL &ge; 100) | 
+				<b><code>VVIP</code></b> (SL &ge; 50, hoặc 30/40 theo khách riêng) | 
+				<b><code>SL20</code></b> (SL &ge; 20) | 
+				<b><code>SL[Số lượng]</code></b> (SL &ge; 200, 500, 1000... theo bảng giá SKU trên Sheet).
+			</li>
 
-    <li>
-      <b>Đơn lẻ 1 dòng dù SL:</b> Chỉ cần ghi mốc giá vào dòng đó (Ví dụ: <b><code>ĐL</code></b> hoặc <b><code>SL20</code></b> hoặc <b><code>VVIP</code></b> hoặc <b><code>SL200</code></b>)[cite: 1].
-    </li>
+			<li class="rule-highlight-yellow">
+				<b>Đặc quyền thương hiệu riêng (Không cần check SL):</b> Ghi cú pháp <b><code>VVIP + Tên Hãng</code></b> (Ví dụ: <b><code>VVIP3CE</code></b> hoặc <b><code>VVIP 3CE</code></b>, sau này có thể thêm <b><code>VVIPTORRIDEN</code></b>...). Chỉ áp dụng cho đúng mã khách hàng được phân quyền trên Google Sheet và đúng dòng sản phẩm của hãng đó, sửa trực tiếp trên từng dòng, không dùng cú pháp gộp dòng.
+			</li>
 
-    <li>
-      <b>Gộp số lượng các dòng:</b> Ghi kèm số thứ tự dòng cách nhau bởi dấu phẩy (Ví dụ: <b><code>ĐL: 1,2</code></b>[cite: 4] hoặc <b><code>SL20: 3,4,5</code></b> hoặc <b><code>SL500: 1,3</code></b>)[cite: 1].
-    </li>
+			<!-- MỤC MỚI BỔ SUNG: CHIẾT KHẤU 3CE -->
+			<li class="rule-highlight-green">
+				<b>Chiết khấu theo tổng doanh số 3CE cả đơn:</b> Ghi từ khóa <b><code>ck3ce</code></b> vào phần Ghi chú chung của đơn hàng. Hệ thống tự cộng dồn doanh số các sản phẩm 3CE: Từ <b>10 triệu đến dưới 20 triệu</b> tự giảm <b>1%</b>, từ <b>20 triệu trở lên</b> tự giảm <b>2%</b> và tự động trừ vào ô chiết khấu đơn hàng.
+			</li>
 
-    <li>
-      <b>Điều kiện gộp hợp lệ:</b> Các dòng gộp phải cùng loại sản phẩm cha, cùng mức giá ban đầu và thuộc nhóm: <b>Son, Phấn, Chì kẻ mày, Mặt nạ</b> (hoặc thuộc danh sách mã sản phẩm được mở rộng trên tab <b><code>SP_CONG_DON</code></b> của Sheet như <i>C931, D69, A607</i> cho phép gộp khác giá ban đầu)[cite: 1].
-    </li>
-  </ul>
-</div>
+			<li>
+				<b>Đơn lẻ 1 dòng đủ SL:</b> Chỉ cần ghi mốc giá vào dòng đó (Ví dụ: <b><code>ĐL</code></b> hoặc <b><code>SL20</code></b> hoặc <b><code>VVIP</code></b> hoặc <b><code>SL200</code></b>).
+			</li>
+
+			<li>
+				<b>Gộp số lượng các dòng:</b> Ghi kèm số thứ tự dòng cách nhau bởi dấu phẩy (Ví dụ: <b><code>ĐL: 1,2</code></b> hoặc <b><code>SL20: 3,4,5</code></b> hoặc <b><code>SL500: 1,3</code></b>).
+			</li>
+
+			<li>
+				<b>Điều kiện gộp hợp lệ:</b> Các dòng gộp phải cùng loại sản phẩm cha, cùng mức giá ban đầu và thuộc nhóm: <b>Son, Phấn, Chì kẻ mày, Mặt nạ</b> (hoặc thuộc danh sách mã sản phẩm được mở rộng trên tab <b><code>SP_CONG_DON</code></b> của Sheet như <i>C931, D69, A607</i> cho phép gộp khác giá ban đầu).
+			</li>
+		</ul>
+	</div>
 
 	<div class="search-box">
 		<input 
@@ -153,29 +159,39 @@
 
 			{#if result_data.details && result_data.details.length > 0}
 				<div class="result-table">
-					<h3>📋 CÁC SẢN PHẨM ĐÃ ĐƯỢC ĐIỀU CHỈNH GIÁ:</h3>
+					<h3>📋 CHI TIẾT ĐIỀU CHỈNH GIÁ & CHIẾT KHẤU ĐƠN HÀNG:</h3>
 					<table>
 						<thead>
 							<tr>
+								<th>STT</th>
 								<th>SKU</th>
-								<th>Tên sản phẩm</th>
+								<th>Tên sản phẩm / Khoản mục</th>
 								<th>Số lượng</th>
 								<th>Giá cũ</th>
-								<th>Giá mới áp dụng</th>
-								<th>Bảng giá áp dụng</th>
+								<th>Giá mới / Số tiền giảm</th>
+								<th>Quy tắc áp dụng</th>
 								<th>Trạng thái</th>
 							</tr>
 						</thead>
 						<tbody>
 							{#each result_data.details as item}
-								<tr class="highlight">
+								<tr class={item.sku === "CK3CE" ? "row-discount-3ce" : "highlight"}>
+									<td><b>{item.stt}</b></td>
 									<td><b>{item.sku}</b></td>
 									<td><b>{item.name}</b></td>
 									<td><b>{item.quantity}</b></td>
-									<td class="old-price">{formatCurrency(item.old_price)}</td>
-									<td class="new-price">{formatCurrency(item.new_price)}</td>
-									<td><span class="badge">{item.rule}</span></td>
-									<td><span class="status-changed">✅ Đã cập nhật</span></td>
+									<td class="old-price">{item.old_price > 0 ? formatCurrency(item.old_price) : "-"}</td>
+									<td class={item.new_price < 0 ? "discount-amount" : "new-price"}>
+										{formatCurrency(item.new_price)}
+									</td>
+									<td>
+										<span class={item.sku === "CK3CE" ? "badge badge-discount" : "badge"}>
+											{item.rule}
+										</span>
+									</td>
+									<td>
+										<span class="status-changed">✅ Đã áp dụng</span>
+									</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -191,6 +207,12 @@
 	.header h2 { color: #0284c7; margin-bottom: 8px; font-size: 22px; }
 	.header p { color: #64748b; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
 	
+	.rules-card { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 18px 22px; margin-bottom: 24px; color: #0f172a; font-size: 14px; line-height: 1.6; }
+	.rules-title { color: #0369a1; margin-bottom: 12px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+	.rules-list { padding-left: 20px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+	.rule-highlight-yellow { background: #fef9c3; border-left: 4px solid #eab308; padding: 8px 12px; border-radius: 4px; margin: 4px 0; }
+	.rule-highlight-green { background: #dcfce7; border-left: 4px solid #16a34a; padding: 8px 12px; border-radius: 4px; margin: 4px 0; }
+
 	.search-box { display: flex; gap: 10px; margin-bottom: 25px; }
 	.search-box input { flex: 1; padding: 12px 16px; border: 2px solid #cbd5e1; border-radius: 6px; font-size: 15px; outline: none; transition: border-color 0.2s; }
 	.search-box input:focus { border-color: #0284c7; }
@@ -211,9 +233,15 @@
 	table { width: 100%; border-collapse: collapse; font-size: 14px; }
 	th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
 	th { background: #f8fafc; color: #475569; font-weight: bold; }
+	
 	tr.highlight { background-color: #f0f9ff; }
+	tr.row-discount-3ce { background-color: #ecfdf5; }
+	
 	.old-price { color: #94a3b8; text-decoration: line-through; }
 	.new-price { color: #0284c7; font-weight: bold; }
+	.discount-amount { color: #16a34a; font-weight: bold; }
+	
 	.badge { background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+	.badge-discount { background: #dcfce7; color: #15803d; }
 	.status-changed { color: #166534; font-weight: bold; }
 </style>
