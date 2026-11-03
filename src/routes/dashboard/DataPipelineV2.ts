@@ -1183,7 +1183,45 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - BỎ REQUEST DƯ THỪA
+// 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ TÊN SẢN PHẨM HOẶC DỮ LIỆU CÓ SẴN
+function extract_brand_name(item: any, full_name: string): string {
+	const rawBrand = item.brand_name || item.vendor || item.brand;
+	if (rawBrand && String(rawBrand).trim().toUpperCase() !== "NULL") {
+		return String(rawBrand).trim().toUpperCase();
+	}
+
+	const cleanName = String(full_name || "").trim();
+	// Định dạng thường gặp: "[Mã] - [Hãng] - [Tên SP]" (VD: "d37 - Batiste - CT...")
+	const parts = cleanName.split(/\s*-\s*/);
+	if (parts.length >= 3) {
+		const candidate = parts[1].trim().toUpperCase();
+		if (candidate.length > 0 && candidate.length <= 25) {
+			return candidate;
+		}
+	}
+
+	// Quét các nhãn hiệu phổ biến nếu tên không có cấu trúc 2 dấu gạch
+	const commonBrands = [
+		"3CE", "BATISTE", "BBIA", "JM", "O'RELIA", "SEXY LADY", 
+		"BERGAMO", "MISE EN SCENE", "DERMA FACTORY", "TORRIDEN", 
+		"JARY", "ROMAND", "CLIO", "L'OREAL", "LOREAL", "ANESSA", 
+		"SKIN1004", "SOME BY MI", "COSRX", "KLAIRS", "LAROCHE POSAY"
+	];
+	const upper = cleanName.toUpperCase();
+	for (const b of commonBrands) {
+		const regex = new RegExp(`\\b${b}\\b`, 'i');
+		if (regex.test(upper)) return b;
+	}
+
+	if (parts.length >= 2) {
+		const firstWord = parts[1].trim().split(/\s+/)[0];
+		if (firstWord) return firstWord.toUpperCase();
+	}
+
+	return "KHÁC";
+}
+
+// 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - SẮP XẾP THEO NHÃN HIỆU (A-Z) & SỐ LƯỢNG GIẢM DẦN
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -1193,7 +1231,8 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
+		// Bổ sung thêm trường brand vào cấu trúc lưu trữ
+		const item_map: Record<string, { sku: string; name: string; brand: string; qty: number }> = {};
 		let total_qty = 0;
 		const successful_orders = new Set<string>();
 		const failed_orders: string[] = [];
@@ -1204,7 +1243,6 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 			if (!clean_query) return;
 
 			try {
-				// 1. Kéo đơn từ Sapo Proxy (Timeout 25s)
 				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
 					params: { query: clean_query, limit: 5 },
 					timeout: 25000,
@@ -1216,7 +1254,6 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return;
 				}
 
-				// Tìm chính xác đơn hàng khớp mã
 				const order = resp.data.orders.find((o: any) => {
 					const c_code = (o.code || "").toUpperCase().trim();
 					const c_name = (o.name || "").toUpperCase().trim();
@@ -1224,7 +1261,6 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					return c_code.includes(clean_query) || c_name.includes(clean_query) || c_ref.includes(clean_query) || String(o.id) === clean_query;
 				}) || resp.data.orders[0];
 
-				// Lấy trực tiếp chi tiết sản phẩm ngay trong object order (Không gọi thêm API thứ 2)
 				const raw_line_items = order.order_line_items || order.line_items || [];
 
 				if (raw_line_items.length > 0) {
@@ -1249,9 +1285,10 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 					}
 
 					const qty = Number(item.quantity) || 1;
+					const brand = extract_brand_name(item, full_name);
 
 					if (!item_map[sku]) {
-						item_map[sku] = { sku: sku, name: full_name, qty: 0 };
+						item_map[sku] = { sku: sku, name: full_name, brand: brand, qty: 0 };
 					}
 
 					item_map[sku].qty += qty;
@@ -1263,14 +1300,21 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 			}
 		}
 
-		// ⚡ TĂNG BATCH_SIZE LÊN 8 ĐƠN/LẦN ĐỂ CHẠY SONG SONG
+		// ⚡ CHẠY SONG SONG BATCH 8 ĐƠN/LẦN
 		const BATCH_SIZE = 8;
 		for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
 			const batch = order_ids.slice(i, i + BATCH_SIZE);
 			await Promise.all(batch.map(id => fetchSingleOrder(id)));
 		}
 
-		const sorted_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
+		// 🟢 SẮP XẾP: ƯU TIÊN NHÃN HIỆU (A -> Z), CÙNG HÃNG THÌ XẾP THEO SL GIẢM DẦN
+		const sorted_items = Object.values(item_map).sort((a, b) => {
+			const brandComp = a.brand.localeCompare(b.brand, 'vi');
+			if (brandComp !== 0) {
+				return brandComp;
+			}
+			return b.qty - a.qty;
+		});
 
 		return {
 			success: true,
@@ -1284,7 +1328,8 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		console.error("Lỗi Gom Hàng Sapo:", e);
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
-}
+}//
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 🛑 HÀM HỦY ĐƠN HÀNG QUA APPS SCRIPT WEB APP (DÙNG GET CHỐNG LỖI REDIRECT)
 export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
 	try {
