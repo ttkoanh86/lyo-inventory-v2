@@ -5,7 +5,7 @@
 	let is_loading = false;
 	let is_retrying = false;
 	let input_url = "";
-	let selected_files: File[] = []; // Lưu danh sách các file PDF dì chọn
+	let selected_files: File[] = []; // Lưu danh sách các file PDF chọn
 	let extracted_order_ids: string[] = [];
 	let picked_items: any[] = [];
 	let total_orders = 0;
@@ -33,6 +33,41 @@
 		};
 		document.head.appendChild(script);
 	});
+
+	// 🟢 HÀM BÓC TÁCH NHÃN HIỆU (BRAND) TỪ ITEM HOẶC TỪ TÊN SẢN PHẨM: "Mã - Hãng - Tên"
+	function get_item_brand(item: any): string {
+		if (item.brand || item.vendor || item.brand_name) {
+			return String(item.brand || item.vendor || item.brand_name).trim().toUpperCase();
+		}
+		const name = String(item.name || "").trim();
+		const parts = name.split("-");
+		if (parts.length >= 2) {
+			// Thường định dạng là "c744 - 3CE - Son kem..." -> parts[1] là nhãn hiệu
+			const guessedBrand = parts[1].trim();
+			if (guessedBrand.length > 0 && guessedBrand.length <= 25) {
+				return guessedBrand.toUpperCase();
+			}
+		}
+		return "KHÁC";
+	}
+
+	// 🟢 HÀM SẮP XẾP: THEO NHÃN HIỆU (A -> Z), CÙNG NHÃN HIỆU XẾP THEO SL GIẢM DẦN
+	function sort_picked_items(items: any[]): any[] {
+		return [...items].sort((a, b) => {
+			const brandA = get_item_brand(a);
+			const brandB = get_item_brand(b);
+
+			const brandComp = brandA.localeCompare(brandB, 'vi');
+			if (brandComp !== 0) {
+				return brandComp; // Sắp xếp tên nhãn hiệu theo bảng chữ cái A -> Z
+			}
+
+			// Cùng nhãn hiệu -> xếp số lượng giảm dần
+			const qtyA = Number(a.qty || a.quantity || 0);
+			const qtyB = Number(b.qty || b.quantity || 0);
+			return qtyB - qtyA;
+		});
+	}
 
 	// HÀM ĐỌC MÃ ĐƠN TỪ 1 BUFFER FILE PDF
 	async function extract_orders_from_buffer(buffer: ArrayBuffer): Promise<string[]> {
@@ -92,7 +127,7 @@
 
 	// 🟢 NÚT BẤM BẮT ĐẦU CHẠY GOM HÀNG - ĐỌC SONG SONG TẤT CẢ FILE PDF (SIÊU NHANH)
 	async function start_process_selected_files() {
-		if (selected_files.length === 0) return alert("Dì chưa chọn file PDF nào cả!");
+		if (selected_files.length === 0) return alert("Chưa chọn file PDF nào cả!");
 		if (!is_pdf_ready) return alert("Thư viện đọc PDF đang tải, vui lòng thử lại sau vài giây!");
 
 		is_loading = true;
@@ -196,7 +231,8 @@
 		is_loading = true;
 		const res = await aggregate_sapo_orders_from_pdf(orderIds);
 		if (res.success) {
-			picked_items = res.items || [];
+			// Sắp xếp theo Nhãn hiệu (A-Z) rồi theo Số lượng giảm dần
+			picked_items = sort_picked_items(res.items || []);
 			total_products_qty = res.total_qty || 0;
 			successful_orders_count = res.found_orders_count || 0;
 			failed_order_ids = res.failed_orders || [];
@@ -215,7 +251,7 @@
 		const res = await aggregate_sapo_orders_from_pdf(retry_targets);
 
 		if (res.success && res.items.length > 0) {
-			const item_map: Record<string, { sku: string; name: string; qty: number }> = {};
+			const item_map: Record<string, any> = {};
 			
 			picked_items.forEach(item => {
 				item_map[item.sku] = { ...item };
@@ -229,7 +265,8 @@
 				}
 			});
 
-			picked_items = Object.values(item_map).sort((a, b) => b.qty - a.qty);
+			// Sắp xếp lại danh sách gộp bù theo Nhãn hiệu và SL
+			picked_items = sort_picked_items(Object.values(item_map));
 			total_products_qty += res.total_qty || 0;
 			successful_orders_count += res.found_orders_count || 0;
 			failed_order_ids = res.failed_orders || [];
@@ -266,7 +303,6 @@
 		<h2>📦 PHIẾU TỔNG HỢP CÁC SẢN PHẨM CẦN GOM NHẶT HÀNG</h2>
 		<p class="sub-title">Dán link S3 phiếu in hoặc Kéo - thả NHIỀU FILE PDF vào đây để hệ thống tự động gom hàng chuẩn 100% từ Sapo</p>
 
-		<!-- 🎯 ĐOẠN KHUNG DÁN LINK S3 & NÚT SOI DỮ LIỆU ĐÃ ĐƯỢC CHÈN Ở ĐÂY -->
 		<div class="url-input-box">
 			<input 
 				type="text" 
@@ -287,7 +323,6 @@
 			</button>
 		</div>
 
-		<!-- 📊 KHUNG IN KẾT QUẢ SOI LINK S3 TRỰC TIẾP TRÊN MÀN HÌNH -->
 		{#if debug_result}
 			<div style="margin: 15px auto 0 auto; max-width: 800px; padding: 15px; background: #0f172a; color: #38bdf8; border-radius: 8px; text-align: left; font-family: monospace; font-size: 13px; max-height: 400px; overflow-y: auto;">
 				<h4 style="margin: 0 0 10px 0; color: #4ade80;">🔍 KẾT QUẢ PHÂN TÍCH LINK S3 TỪ SERVER:</h4>
@@ -326,7 +361,6 @@
 				📂 CHỌN CÁC FILE PDF / KÉO THẢ TẤT CẢ VÀO ĐÂY
 			</label>
 
-			<!-- 📋 HIỂN THỊ DANH SÁCH FILE CHỜ BẤM BẮT ĐẦU -->
 			{#if selected_files.length > 0}
 				<div class="file-list-box">
 					<div class="file-list-header">
@@ -342,7 +376,6 @@
 						{/each}
 					</div>
 
-					<!-- NÚT BẤM KÍCH HOẠT TRA CỨU SAPO -->
 					<button class="btn-start-process" on:click={start_process_selected_files} disabled={is_loading}>
 						{is_loading ? "⏳ HỆ THỐNG ĐANG TRA CỨU SAPO..." : `⚡ BẮT ĐẦU GOM HÀNG (${selected_files.length} FILE PDF)`}
 					</button>
@@ -394,10 +427,11 @@
 				<thead>
 					<tr>
 						<th class="col-stt">STT</th>
+						<th class="col-brand">NHÃN HIỆU</th>
 						<th class="col-sku">MÃ SKU</th>
 						<th class="col-name">TÊN SẢN PHẨM</th>
 						<th class="col-loc">VỊ TRÍ KHO</th>
-						<th class="col-qty">TỔNG SỐ LƯỢNG</th>
+						<th class="col-qty">TỔNG SL</th>
 						<th class="col-check">ĐÃ LẤY ( ✓ )</th>
 					</tr>
 				</thead>
@@ -405,6 +439,9 @@
 					{#each picked_items as item, index}
 						<tr>
 							<td class="col-stt-val">{index + 1}</td>
+							<td class="col-brand-val">
+								<span class="brand-badge">{get_item_brand(item)}</span>
+							</td>
 							<td class="col-sku-val"><div class="sku-code">{item.sku}</div></td>
 							<td class="col-name-val"><b class="product-name">{item.name}</b></td>
 							<td class="col-loc-val"><span class="location-badge">{item.location || '---'}</span></td>
@@ -468,12 +505,14 @@
 	th { background: #f1f5f9; font-size: 13px; font-weight: bold; text-transform: uppercase; }
 	
 	.col-stt, .col-stt-val { width: 45px; text-align: center; font-weight: bold; }
-	.col-sku, .col-sku-val { width: 150px; }
+	.col-brand, .col-brand-val { width: 120px; text-align: center; }
+	.col-sku, .col-sku-val { width: 140px; }
 	.col-name, .col-name-val { width: auto; }
-	.col-loc, .col-loc-val { width: 110px; text-align: center; }
-	.col-qty, .col-qty-val { width: 120px; text-align: center; }
-	.col-check, .col-check-val { width: 90px; text-align: center; }
+	.col-loc, .col-loc-val { width: 100px; text-align: center; }
+	.col-qty, .col-qty-val { width: 90px; text-align: center; }
+	.col-check, .col-check-val { width: 80px; text-align: center; }
 
+	.brand-badge { display: inline-block; padding: 3px 8px; background: #e0f2fe; color: #0369a1; font-weight: bold; font-size: 12px; border-radius: 4px; }
 	.sku-code { font-size: 13px; font-weight: bold; color: #0284c7; word-break: break-all; }
 	.product-name { font-size: 14px; line-height: 1.4; color: #1e293b; }
 	.qty-badge { display: inline-block; padding: 3px 12px; background: #fef3c7; color: #b45309; font-size: 16px; font-weight: bold; border-radius: 10px; }
@@ -490,13 +529,15 @@
 		th, td { padding: 4px 6px !important; font-size: 12px !important; border: 1px solid #000 !important; }
 		th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; }
 
-		.col-stt, .col-stt-val { width: 6% !important; }
-		.col-sku, .col-sku-val { width: 18% !important; }
-		.col-name, .col-name-val { width: 52% !important; }
-		.col-loc, .col-loc-val { width: 8% !important; }
-		.col-qty, .col-qty-val { width: 8% !important; }
-		.col-check, .col-check-val { width: 8% !important; }
+		.col-stt, .col-stt-val { width: 5% !important; }
+		.col-brand, .col-brand-val { width: 14% !important; font-weight: bold !important; }
+		.col-sku, .col-sku-val { width: 16% !important; }
+		.col-name, .col-name-val { width: 45% !important; }
+		.col-loc, .col-loc-val { width: 7% !important; }
+		.col-qty, .col-qty-val { width: 7% !important; }
+		.col-check, .col-check-val { width: 6% !important; }
 
+		.brand-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 11px !important; font-weight: bold !important; }
 		.sku-code { font-size: 11px !important; color: #000 !important; word-break: break-all !important; }
 		.product-name { font-size: 12px !important; line-height: 1.25 !important; color: #000 !important; font-weight: bold !important; }
 		.qty-badge { background: none !important; color: #000 !important; padding: 0 !important; font-size: 13px !important; font-weight: bold !important; }
