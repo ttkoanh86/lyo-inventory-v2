@@ -1183,15 +1183,15 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ TÊN SẢN PHẨM HOẶC DỮ LIỆU CÓ SẴN
+// 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ DỮ LIỆU SAPO HOẶC TÊN SẢN PHẨM
 function extract_brand_name(item: any, full_name: string): string {
 	const rawBrand = item.brand_name || item.vendor || item.brand;
-	if (rawBrand && String(rawBrand).trim().toUpperCase() !== "NULL") {
+	if (rawBrand && String(rawBrand).trim().toUpperCase() !== "NULL" && String(rawBrand).trim().toUpperCase() !== "UNDEFINED") {
 		return String(rawBrand).trim().toUpperCase();
 	}
 
 	const cleanName = String(full_name || "").trim();
-	// Định dạng thường gặp: "[Mã] - [Hãng] - [Tên SP]" (VD: "d37 - Batiste - CT...")
+	// Định dạng chuẩn: "[Mã] - [Hãng] - [Tên SP]" (VD: "d37 - Batiste - CT...")[cite: 5]
 	const parts = cleanName.split(/\s*-\s*/);
 	if (parts.length >= 3) {
 		const candidate = parts[1].trim().toUpperCase();
@@ -1200,12 +1200,13 @@ function extract_brand_name(item: any, full_name: string): string {
 		}
 	}
 
-	// Quét các nhãn hiệu phổ biến nếu tên không có cấu trúc 2 dấu gạch
+	// Quét các thương hiệu phổ biến nếu tên không có cấu trúc chuẩn 2 dấu gạch ngang
 	const commonBrands = [
 		"3CE", "BATISTE", "BBIA", "JM", "O'RELIA", "SEXY LADY", 
 		"BERGAMO", "MISE EN SCENE", "DERMA FACTORY", "TORRIDEN", 
 		"JARY", "ROMAND", "CLIO", "L'OREAL", "LOREAL", "ANESSA", 
-		"SKIN1004", "SOME BY MI", "COSRX", "KLAIRS", "LAROCHE POSAY"
+		"SKIN1004", "SOME BY MI", "COSRX", "KLAIRS", "LAROCHE POSAY",
+		"TESORI D'ORIENTE", "TESORI", "VASELINE", "WHISIS"
 	];
 	const upper = cleanName.toUpperCase();
 	for (const b of commonBrands) {
@@ -1221,7 +1222,7 @@ function extract_brand_name(item: any, full_name: string): string {
 	return "KHÁC";
 }
 
-// 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - SẮP XẾP THEO NHÃN HIỆU (A-Z) & SỐ LƯỢNG GIẢM DẦN
+// 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - ƯU TIÊN HÃNG CÓ TỔNG SỐ LƯỢNG LỚN NHẤT
 export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 	try {
 		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -1231,7 +1232,6 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		const token = obtain_access_token();
 		const authHeaders = { headers: { Authorization: token } };
 
-		// Bổ sung thêm trường brand vào cấu trúc lưu trữ
 		const item_map: Record<string, { sku: string; name: string; brand: string; qty: number }> = {};
 		let total_qty = 0;
 		const successful_orders = new Set<string>();
@@ -1307,12 +1307,37 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 			await Promise.all(batch.map(id => fetchSingleOrder(id)));
 		}
 
-		// 🟢 SẮP XẾP: ƯU TIÊN NHÃN HIỆU (A -> Z), CÙNG HÃNG THÌ XẾP THEO SL GIẢM DẦN
-		const sorted_items = Object.values(item_map).sort((a, b) => {
+		// =========================================================================
+		// 🟢 SẮP XẾP TỔNG HỢP: ƯU TIÊN TỔNG SỐ LƯỢNG HÃNG LỚN XẾP TRƯỚC
+		// =========================================================================
+		const raw_items = Object.values(item_map);
+
+		// 1. Tính tổng số lượng hàng cần nhặt của từng nhãn hiệu
+		const brand_total_qty: Record<string, number> = {};
+		for (const item of raw_items) {
+			brand_total_qty[item.brand] = (brand_total_qty[item.brand] || 0) + item.qty;
+		}
+
+		// 2. Sắp xếp đa tầng:
+		// - Tầng 1: Hãng có TỔNG SỐ LƯỢNG lớn hơn xếp lên trước
+		// - Tầng 2: Nếu tổng SL bằng nhau, xếp theo tên hãng A -> Z
+		// - Tầng 3: Trong cùng 1 hãng, sản phẩm có số lượng lớn hơn xếp lên trước
+		const sorted_items = raw_items.sort((a, b) => {
+			const totalA = brand_total_qty[a.brand] || 0;
+			const totalB = brand_total_qty[b.brand] || 0;
+
+			// Tầng 1: So sánh tổng số lượng của cả nhãn hiệu
+			if (totalB !== totalA) {
+				return totalB - totalA;
+			}
+
+			// Tầng 2: Nếu bằng tổng SL thì xếp tên hãng theo bảng chữ cái A-Z
 			const brandComp = a.brand.localeCompare(b.brand, 'vi');
 			if (brandComp !== 0) {
 				return brandComp;
 			}
+
+			// Tầng 3: Trong cùng một hãng, sản phẩm nào có SL lớn hơn xếp trước
 			return b.qty - a.qty;
 		});
 
@@ -1328,7 +1353,7 @@ export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
 		console.error("Lỗi Gom Hàng Sapo:", e);
 		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
 	}
-}//
+}
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 🛑 HÀM HỦY ĐƠN HÀNG QUA APPS SCRIPT WEB APP (DÙNG GET CHỐNG LỖI REDIRECT)
 export async function cancel_sapo_order(order_code_or_id: string, reason_note: string = "Hủy tự động qua hệ thống") {
