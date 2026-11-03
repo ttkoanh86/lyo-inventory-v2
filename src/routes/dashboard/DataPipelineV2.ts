@@ -650,25 +650,83 @@ let ALLOWED_DIFF_PRICE_PRODUCT_CODES: string[] = ["C931", "D69", "A607"];
 let BULK_TIER_PRICING: any[] = [];
 
 async function get_special_customers_policy(): Promise<any> {
-    try {
-        const res = await axios.get("https://lyotinhluong.onrender.com/api/special-customers", { timeout: 8000 });
-        if (res.data && res.data.success && res.data.data) {
-            if (Array.isArray(res.data.special_products)) {
-                ALLOWED_DIFF_PRICE_PRODUCT_CODES = res.data.special_products;
-            }
-            if (Array.isArray(res.data.tier_pricing)) {
-                BULK_TIER_PRICING = res.data.tier_pricing;
-            }
-            console.log("🟢 Đã đồng bộ chính sách khách hàng thành công từ Google API:", Object.keys(res.data.data).length, "khách");
-            return res.data.data;
-        }
-        console.warn("⚠️ API không có data, dùng danh sách dự phòng nội bộ.");
-        return FALLBACK_SPECIAL_CUSTOMERS;
-    } catch (e) {
-        console.warn("⚠️ Lỗi kết nối API lyotinhluong, chuyển sang dùng danh sách dự phòng:", e);
-        return FALLBACK_SPECIAL_CUSTOMERS;
-    }
+	try {
+		const res = await axios.get("https://lyotinhluong.onrender.com/api/special-customers", { timeout: 8000 });
+		if (res.data && res.data.success && res.data.data) {
+			if (Array.isArray(res.data.special_products)) {
+				ALLOWED_DIFF_PRICE_PRODUCT_CODES = res.data.special_products;
+			}
+			if (Array.isArray(res.data.tier_pricing)) {
+				BULK_TIER_PRICING = res.data.tier_pricing;
+			}
+			console.log("🟢 Đã đồng bộ chính sách khách hàng thành công từ Google API:", Object.keys(res.data.data).length, "khách");
+			return res.data.data;
+		}
+		console.warn("⚠️ API không có data, dùng danh sách dự phòng nội bộ.");
+		return FALLBACK_SPECIAL_CUSTOMERS;
+	} catch (e) {
+		console.warn("⚠️ Lỗi kết nối API lyotinhluong, chuyển sang dùng danh sách dự phòng:", e);
+		return FALLBACK_SPECIAL_CUSTOMERS;
+	}
 }
+
+// =========================================================================
+// 🟢 HÀM XỬ LÝ CHIẾT KHẤU 3CE DỰA THEO TỔNG DOANH SỐ 3CE TRONG ĐƠN HÀNG
+// =========================================================================
+function calculate_3ce_discount(orderNote: string, itemsWithTargetPrice: any[]): { applied: boolean; discountRate: number; total3CEAmount: number; totalDiscount: number; message: string } {
+	const cleanNote = String(orderNote || "").toLowerCase();
+	
+	// Kiểm tra từ khóa kích hoạt "ck3ce" trong ghi chú đơn hàng
+	if (!cleanNote.includes("ck3ce")) {
+		return { applied: false, discountRate: 0, total3CEAmount: 0, totalDiscount: 0, message: "Không có ghi chú ck3ce" };
+	}
+
+	let total3CEAmount = 0;
+
+	for (const item of itemsWithTargetPrice) {
+		const brandName = String(item.brand_name || item.vendor || item.brand || "").trim().toLowerCase();
+		const brandId = item.brand_id;
+		const productName = String(item.product_name || item.name || "").toUpperCase();
+
+		// Nhận diện theo brand_id 2524683, brand_name "3ce", hoặc tên sản phẩm chứa tiền tố chuẩn 3CE
+		const is3CE = brandId === 2524683 || 
+		              brandName === "3ce" || 
+		              productName.includes(" - 3CE") || 
+		              productName.includes(" 3CE ");
+
+		if (is3CE) {
+			const effectivePrice = Number(item.target_price !== undefined ? item.target_price : item.price) || 0;
+			const qty = Number(item.quantity) || 0;
+			total3CEAmount += effectivePrice * qty;
+		}
+	}
+
+	let discountRate = 0;
+	if (total3CEAmount >= 20000000) {
+		discountRate = 0.02; // 2% khi >= 20 triệu
+	} else if (total3CEAmount >= 10000000) {
+		discountRate = 0.01; // 1% khi >= 10 triệu
+	} else {
+		return {
+			applied: false,
+			discountRate: 0,
+			total3CEAmount,
+			totalDiscount: 0,
+			message: `Doanh số 3CE đạt ${total3CEAmount.toLocaleString("vi-VN")}đ, chưa đủ mốc tối thiểu 10.000.000đ`
+		};
+	}
+
+	const totalDiscount = Math.round(total3CEAmount * discountRate);
+
+	return {
+		applied: true,
+		discountRate: discountRate * 100,
+		total3CEAmount,
+		totalDiscount,
+		message: `Đạt mốc chiết khấu 3CE ${discountRate * 100}% (Doanh số 3CE: ${total3CEAmount.toLocaleString("vi-VN")}đ)`
+	};
+}
+
 // =========================================================================
 // 🟢 HÀM XỬ LÝ & SỬA GIÁ ĐƠN HÀNG TỰ ĐỘNG
 // =========================================================================
@@ -990,6 +1048,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
+		let items_with_effective_prices: any[] = [];
 
 		for (let index = 0; index < raw_line_items.length; index++) {
 			const item = raw_line_items[index];
@@ -1070,18 +1129,49 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				price: target_price,
 				quantity: item.quantity
 			});
+
+			items_with_effective_prices.push({
+				...item,
+				target_price: target_price
+			});
+		}
+
+		// =========================================================================
+		// 🟢 BƯỚC 3.5: TÍNH CHIẾT KHẤU 3CE NẾU CÓ TỪ KHÓA "ck3ce"
+		// =========================================================================
+		const discount_3ce = calculate_3ce_discount(order.note || "", items_with_effective_prices);
+		let order_discount_applied = false;
+
+		if (discount_3ce.applied) {
+			details.push({
+				stt: "CK",
+				sku: "CK3CE",
+				name: `Chiết khấu thương hiệu 3CE (${discount_3ce.discountRate}%)`,
+				quantity: 1,
+				old_price: 0,
+				new_price: -discount_3ce.totalDiscount,
+				rule: discount_3ce.message,
+				note: "Áp dụng theo ghi chú ck3ce",
+				changed: true
+			});
+			order_discount_applied = true;
 		}
 
 		// =========================================================================
 		// 🟢 BƯỚC 4: CẬP NHẬT LÊN SAPO
 		// =========================================================================
-		if (updated_items_count > 0) {
-			const update_payload = {
+		if (updated_items_count > 0 || order_discount_applied) {
+			const update_payload: any = {
 				order: {
 					id: order.id,
 					order_line_items: cleaned_payload_line_items
 				}
 			};
+
+			// Nếu có chiết khấu 3CE, cập nhật số tiền chiết khấu của đơn hàng
+			if (order_discount_applied) {
+				update_payload.order.order_discount_amount = discount_3ce.totalDiscount;
+			}
 
 			const put_resp = await axios.put(`${proxyUrl}/admin/orders/${order.id}.json`, update_payload, {
 				timeout: 10000,
@@ -1089,10 +1179,18 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			});
 
 			if (put_resp.status === 200 || put_resp.status === 201) {
+				let resultMessage = "✅ Bảng giá hợp lệ.";
+				if (updated_items_count > 0) {
+					resultMessage += ` Đã sửa giá thành công cho ${updated_items_count} sản phẩm!`;
+				}
+				if (order_discount_applied) {
+					resultMessage += ` Đã áp dụng chiết khấu 3CE: -${discount_3ce.totalDiscount.toLocaleString("vi-VN")}đ (${discount_3ce.discountRate}%).`;
+				}
+
 				return {
 					success: true,
 					order_code: order.code || clean_query,
-					message: `✅ Bảng giá hợp lệ. Đã sửa giá thành công cho ${updated_items_count} sản phẩm!`,
+					message: resultMessage,
 					details: details
 				};
 			} else {
@@ -1102,7 +1200,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return {
 				success: true,
 				order_code: order.code || clean_query,
-				message: "Bảng giá hợp lệ. Đơn hàng không có sản phẩm nào cần sửa giá!",
+				message: "Bảng giá hợp lệ. Đơn hàng không có sản phẩm nào cần sửa giá và không có chiết khấu 3CE!",
 				details: []
 			};
 		}
