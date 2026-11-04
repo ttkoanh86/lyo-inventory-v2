@@ -1084,13 +1084,27 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 3.5: TÍNH CHIẾT KHẤU 3CE TRỰC TIẾP VÀO ĐƠN GIÁ TỪNG SẢN PHẨM 3CE
 		// =========================================================================
-		let discount_3ce_rate = 0; // 0.01 (1%) hoặc 0.02 (2%)
-		let total_3ce_amount = 0;
+		// 🟢 BƯỚC 3.5: TÍNH CHIẾT KHẤU 3CE (ƯU ĐÃI RIÊNG THEO KHÁCH HOẶC THEO DOANH SỐ)
+		// =========================================================================
+		let default_brand_discount_rate = 0; // Tỷ lệ chiết khấu riêng theo khách (VD: 0.03 = 3%)
+		
+		// 1. Kiểm tra xem khách hàng này có chính sách CK cố định cho 3CE trên Sheet không (không cần giới hạn số tiền)
+		if (customer_policy) {
+			// Hỗ trợ cả dạng object { "3CE": 0.03 } hoặc dạng chuỗi đọc từ cột H trên Sheet (VD: "3CE: 3%")
+			if (customer_policy.brand_discount && customer_policy.brand_discount["3CE"]) {
+				default_brand_discount_rate = Number(customer_policy.brand_discount["3CE"]);
+			} else if (customer_policy.brand_discount_text) {
+				const match = String(customer_policy.brand_discount_text).match(/3CE\s*:\s*(\d+)%/i);
+				if (match) default_brand_discount_rate = parseInt(match[1], 10) / 100;
+			}
+		}
 
-		// Nhận diện có ghi chú CK3CE ở bất kỳ dòng nào hoặc ghi chú đơn
+		// 2. Tính chiết khấu theo doanh số đơn nếu có ghi chú CK3CE
+		let volume_discount_3ce_rate = 0;
+		let total_3ce_amount = 0;
 		const orderNote = String(order.note || "").toLowerCase();
+
 		if (has_ck3ce_command || orderNote.includes("ck3ce")) {
 			for (const stg of staging_items) {
 				if (stg.is3CE) {
@@ -1099,13 +1113,13 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 
 			if (total_3ce_amount >= 20000000) {
-				discount_3ce_rate = 0.02; // Giảm 2%
+				volume_discount_3ce_rate = 0.02; // Giảm 2%
 			} else if (total_3ce_amount >= 10000000) {
-				discount_3ce_rate = 0.01; // Giảm 1%
+				volume_discount_3ce_rate = 0.01; // Giảm 1%
 			}
 		}
 
-		// Áp dụng giảm trực tiếp vào từng đơn giá sản phẩm 3CE
+		// 3. Quyết định mức giảm cho từng dòng 3CE: Lấy mức ưu đãi lớn nhất
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
@@ -1114,12 +1128,22 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			let final_price = stg.target_price;
 			let rule_desc = stg.applied_rule;
 
-			if (stg.is3CE && discount_3ce_rate > 0) {
-				final_price = Math.round(stg.target_price * (1 - discount_3ce_rate));
-				const ck_percent = discount_3ce_rate * 100;
-				rule_desc = rule_desc 
-					? `${rule_desc} + CK 3CE ${ck_percent}%` 
-					: `Chiết khấu 3CE ${ck_percent}% (Tổng 3CE: ${total_3ce_amount.toLocaleString("vi-VN")}đ)`;
+			if (stg.is3CE) {
+				// Nếu khách có mức chiết khấu riêng (ví dụ 3%), ưu tiên áp dụng luôn mà không cần xét doanh số
+				const effective_rate = default_brand_discount_rate > 0 
+					? default_brand_discount_rate 
+					: volume_discount_3ce_rate;
+
+				if (effective_rate > 0) {
+					final_price = Math.round(stg.target_price * (1 - effective_rate));
+					const ck_percent = effective_rate * 100;
+					
+					const reason = default_brand_discount_rate > 0 
+						? `CK riêng khách ${ck_percent}%` 
+						: `CK 3CE ${ck_percent}% (Tổng 3CE: ${total_3ce_amount.toLocaleString("vi-VN")}đ)`;
+
+					rule_desc = rule_desc ? `${rule_desc} + ${reason}` : reason;
+				}
 			}
 
 			const is_changed = Math.abs(final_price - stg.current_price) > 0;
