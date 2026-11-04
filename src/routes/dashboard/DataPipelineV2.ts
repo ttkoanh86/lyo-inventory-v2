@@ -671,7 +671,6 @@ async function get_special_customers_policy(): Promise<any> {
 		return FALLBACK_SPECIAL_CUSTOMERS;
 	}
 }
-
 // =========================================================================
 // 🟢 HÀM XỬ LÝ & SỬA GIÁ ĐƠN HÀNG TỰ ĐỘNG
 // =========================================================================
@@ -982,7 +981,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 3: TRA CỨU GIÁ GỐC VARIANT SONG SONG (PROMISE.ALL - SIÊU NHANH)
+		// 🟢 BƯỚC 3: TRA CỨU GIÁ GỐC VARIANT SONG SONG (PROMISE.ALL)
 		// =========================================================================
 		const unique_variant_ids = Array.from(new Set(
 			raw_line_items.map((it: any) => it.variant_id).filter(Boolean)
@@ -1020,7 +1019,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}));
 
-		// Ghép dữ liệu ban đầu
 		const staging_items: any[] = [];
 
 		for (let index = 0; index < raw_line_items.length; index++) {
@@ -1100,7 +1098,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
-		// 2. TÍNH TỔNG TIỀN 3CE DỰA TRÊN ĐƠN GIÁ VVIP VỪA CHUYỂN
+		// 2. Tính tổng tiền 3CE theo đơn giá VVIP
 		let total_3ce_vvip_amount = 0;
 		for (const stg of staging_items) {
 			if (stg.is3CE) {
@@ -1108,7 +1106,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
-		// 3. XÉT ĐIỀU KIỆN CHIẾT KHẤU THEO TỔNG TIỀN VVIP
+		// 3. Xét điều kiện chiết khấu theo tổng tiền VVIP
 		let volume_discount_3ce_rate = 0;
 		const orderNote = String(order.note || "").toLowerCase();
 		const has_ck_request = has_ck3ce_command || orderNote.includes("ck3ce");
@@ -1125,14 +1123,14 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			? custom_3ce_discount_rate 
 			: volume_discount_3ce_rate;
 
-		// 4. CẬP NHẬT TRƯỜNG DISCOUNT_AMOUNT CHUẨN CỦA SAPO
+		// 4. Cập nhật trường discount_amount chuẩn của Sapo
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
 
 		for (const stg of staging_items) {
-			const final_unit_price = stg.target_price; // Đơn giá VVIP (VD: 233.000)
-			let discount_per_unit = 0;                  // Tiền giảm trên 1 món (VD: 2.330)
+			const final_unit_price = stg.target_price;
+			let discount_per_unit = 0;
 			let rule_desc = stg.applied_rule;
 
 			if (stg.is3CE && effective_3ce_rate > 0) {
@@ -1146,7 +1144,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				rule_desc = rule_desc ? `${rule_desc} + ${reason}` : reason;
 			}
 
-			// Tổng tiền chiết khấu của cả dòng (Sapo dùng discount_amount)
 			const target_total_discount = discount_per_unit * stg.qty;
 
 			const is_price_changed = Math.abs(final_unit_price - stg.current_price) > 0;
@@ -1161,14 +1158,13 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					quantity: stg.qty,
 					old_price: stg.current_price,
 					new_price: final_unit_price,
-					discount: discount_per_unit, // Hiển thị số tiền giảm/món lên bảng chi tiết
+					discount: discount_per_unit,
 					rule: rule_desc,
 					note: stg.item.note || "",
 					changed: true
 				});
 			}
 
-			// Gửi chuẩn discount_amount lên Sapo
 			cleaned_payload_line_items.push({
 				id: stg.item.id,
 				product_id: stg.item.product_id,
