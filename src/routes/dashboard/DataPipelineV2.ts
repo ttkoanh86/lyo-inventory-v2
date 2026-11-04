@@ -597,6 +597,7 @@ export async function create_sapo_stock_transfer(
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+import axios from 'axios';
 
 // =========================================================================
 // 🟢 CẤU HÌNH BIẾN TOÀN CỤC & DANH SÁCH DỰ PHÒNG
@@ -672,7 +673,7 @@ async function get_special_customers_policy(): Promise<any> {
 }
 
 // =========================================================================
-// 🟢 HÀM SỬA GIÁ & CHIẾT KHẤU 3CE CHUẨN XÁC (TÍNH DOANH SỐ SAU KHI VỀ VVIP)
+// 🟢 HÀM XỬ LÝ & SỬA GIÁ ĐƠN HÀNG TỰ ĐỘNG
 // =========================================================================
 export async function adjust_order_prices_auto(order_code_or_id: string) {
 	try {
@@ -1026,7 +1027,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			const item = raw_line_items[index];
 			const current_stt = index + 1;
 			const current_price = Number(item.price) || 0;
-			const current_discount = Number(item.discount || item.discount_rate || 0);
+			const current_discount = Number(item.discount_amount || 0);
 			const qty = Number(item.quantity) || 0;
 			const item_name = item.product_name || item.name || "Sản phẩm";
 
@@ -1078,9 +1079,53 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
+		// 🟢 BƯỚC 3.5: ĐƯA VỀ GIÁ VVIP TRƯỚC -> TÍNH TỔNG TIỀN THEO VVIP -> XÁC ĐỊNH % CK
 		// =========================================================================
-		// 🟢 BƯỚC 3.5: TÍNH VÀ GÁN ĐÚNG TRƯỜNG DISCOUNT_AMOUNT CỦA SAPO
-		// =========================================================================
+		let custom_3ce_discount_rate = 0;
+		if (customer_policy) {
+			if (customer_policy.brand_discount && customer_policy.brand_discount["3CE"]) {
+				custom_3ce_discount_rate = Number(customer_policy.brand_discount["3CE"]);
+			} else {
+				const discountRawText = String(customer_policy.brand_discount_text || customer_policy.brand_discount || "");
+				const match = discountRawText.match(/3CE\s*:\s*(\d+)%/i);
+				if (match) custom_3ce_discount_rate = parseInt(match[1], 10) / 100;
+			}
+		}
+
+		// 1. Chuyển trước giá 3CE về giá VVIP (nếu có giá VVIP từ Sapo)
+		for (const stg of staging_items) {
+			if (stg.is3CE && stg.raw_price_vvip && stg.raw_price_vvip > 0) {
+				stg.target_price = stg.raw_price_vvip;
+				stg.applied_rule = stg.applied_rule ? `${stg.applied_rule} -> Đưa về VVIP` : `Giá VVIP`;
+			}
+		}
+
+		// 2. TÍNH TỔNG TIỀN 3CE DỰA TRÊN ĐƠN GIÁ VVIP VỪA CHUYỂN
+		let total_3ce_vvip_amount = 0;
+		for (const stg of staging_items) {
+			if (stg.is3CE) {
+				total_3ce_vvip_amount += stg.target_price * stg.qty;
+			}
+		}
+
+		// 3. XÉT ĐIỀU KIỆN CHIẾT KHẤU THEO TỔNG TIỀN VVIP
+		let volume_discount_3ce_rate = 0;
+		const orderNote = String(order.note || "").toLowerCase();
+		const has_ck_request = has_ck3ce_command || orderNote.includes("ck3ce");
+
+		if (has_ck_request) {
+			if (total_3ce_vvip_amount >= 20000000) {
+				volume_discount_3ce_rate = 0.02; // Giảm 2%
+			} else if (total_3ce_vvip_amount >= 10000000) {
+				volume_discount_3ce_rate = 0.01; // Giảm 1%
+			}
+		}
+
+		const effective_3ce_rate = custom_3ce_discount_rate > 0 
+			? custom_3ce_discount_rate 
+			: volume_discount_3ce_rate;
+
+		// 4. CẬP NHẬT TRƯỜNG DISCOUNT_AMOUNT CHUẨN CỦA SAPO
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
@@ -1101,13 +1146,11 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				rule_desc = rule_desc ? `${rule_desc} + ${reason}` : reason;
 			}
 
-			// 🟢 Tổng tiền chiết khấu của cả dòng (Sapo dùng discount_amount)
+			// Tổng tiền chiết khấu của cả dòng (Sapo dùng discount_amount)
 			const target_total_discount = discount_per_unit * stg.qty;
 
-			// Lấy discount_amount hiện tại trên Sapo để so sánh
-			const current_discount_amount = Number(stg.item.discount_amount || 0);
 			const is_price_changed = Math.abs(final_unit_price - stg.current_price) > 0;
-			const is_discount_changed = Math.abs(target_total_discount - current_discount_amount) > 0;
+			const is_discount_changed = Math.abs(target_total_discount - stg.current_discount) > 0;
 
 			if (is_price_changed || is_discount_changed) {
 				updated_items_count++;
@@ -1118,21 +1161,21 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					quantity: stg.qty,
 					old_price: stg.current_price,
 					new_price: final_unit_price,
-					discount: discount_per_unit, // Tiền giảm trên 1 món để hiển thị
+					discount: discount_per_unit, // Hiển thị số tiền giảm/món lên bảng chi tiết
 					rule: rule_desc,
 					note: stg.item.note || "",
 					changed: true
 				});
 			}
 
-			// 🟢 GỬI ĐÚNG CẤU TRÚC JSON CỦA SAPO:
+			// Gửi chuẩn discount_amount lên Sapo
 			cleaned_payload_line_items.push({
 				id: stg.item.id,
 				product_id: stg.item.product_id,
 				variant_id: stg.item.variant_id,
 				price: final_unit_price,
 				quantity: stg.item.quantity,
-				discount_amount: target_total_discount // Đúng trường Sapo lưu trữ
+				discount_amount: target_total_discount
 			});
 		}
 
@@ -1180,6 +1223,174 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				details: []
 			};
 		}
+	} catch (e: any) {
+		console.error("Lỗi điều chỉnh giá:", e);
+		return { success: false, message: "Không thể xử lý đơn hàng: " + (e.message || "") };
+	}
+}
+
+// =========================================================================
+// 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ DỮ LIỆU SAPO HOẶC TÊN SẢN PHẨM
+// =========================================================================
+function extract_brand_name(item: any, full_name: string): string {
+	const rawBrand = item.brand_name || item.vendor || item.brand;
+	if (rawBrand && String(rawBrand).trim().toUpperCase() !== "NULL" && String(rawBrand).trim().toUpperCase() !== "UNDEFINED") {
+		return String(rawBrand).trim().toUpperCase();
+	}
+
+	const cleanName = String(full_name || "").trim();
+	const parts = cleanName.split(/\s*-\s*/);
+	if (parts.length >= 3) {
+		const candidate = parts[1].trim().toUpperCase();
+		if (candidate.length > 0 && candidate.length <= 25) {
+			return candidate;
+		}
+	}
+
+	const commonBrands = [
+		"3CE", "BATISTE", "BBIA", "JM", "O'RELIA", "SEXY LADY", 
+		"BERGAMO", "MISE EN SCENE", "DERMA FACTORY", "TORRIDEN", 
+		"JARY", "ROMAND", "CLIO", "L'OREAL", "LOREAL", "ANESSA", 
+		"SKIN1004", "SOME BY MI", "COSRX", "KLAIRS", "LAROCHE POSAY",
+		"TESORI D'ORIENTE", "TESORI", "VASELINE", "WHISIS"
+	];
+	const upper = cleanName.toUpperCase();
+	for (const b of commonBrands) {
+		const regex = new RegExp(`\\b${b}\\b`, 'i');
+		if (regex.test(upper)) return b;
+	}
+
+	if (parts.length >= 2) {
+		const firstWord = parts[1].trim().split(/\s+/)[0];
+		if (firstWord) return firstWord.toUpperCase();
+	}
+
+	return "KHÁC";
+}
+
+// =========================================================================
+// 🟢 HÀM GOM HÀNG SAPO CHẠY SIÊU TỐC - ƯU TIÊN HÃNG CÓ TỔNG SỐ LƯỢNG LỚN NHẤT
+// =========================================================================
+export async function aggregate_sapo_orders_from_pdf(order_ids: string[]) {
+	try {
+		if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
+			return { success: false, message: "Danh sách Mã đơn hàng rỗng!" };
+		}
+
+		const token = obtain_access_token();
+		const authHeaders = { headers: { Authorization: token } };
+
+		const item_map: Record<string, { sku: string; name: string; brand: string; qty: number }> = {};
+		let total_qty = 0;
+		const successful_orders = new Set<string>();
+		const failed_orders: string[] = [];
+
+		async function fetchSingleOrder(orderId: string) {
+			const clean_query = String(orderId).trim().toUpperCase();
+			if (!clean_query) return;
+
+			try {
+				const resp = await axios.get(`${proxyUrl}/admin/orders.json`, {
+					params: { query: clean_query, limit: 5 },
+					timeout: 25000,
+					...authHeaders
+				});
+
+				if (resp.status !== 200 || !resp.data?.orders || resp.data.orders.length === 0) {
+					failed_orders.push(clean_query);
+					return;
+				}
+
+				const order = resp.data.orders.find((o: any) => {
+					const c_code = (o.code || "").toUpperCase().trim();
+					const c_name = (o.name || "").toUpperCase().trim();
+					const c_ref = (o.reference_number || o.source_name || "").toUpperCase().trim();
+					return c_code.includes(clean_query) || c_name.includes(clean_query) || c_ref.includes(clean_query) || String(o.id) === clean_query;
+				}) || resp.data.orders[0];
+
+				const raw_line_items = order.order_line_items || order.line_items || [];
+
+				if (raw_line_items.length > 0) {
+					successful_orders.add(clean_query);
+				} else {
+					failed_orders.push(clean_query);
+					return;
+				}
+
+				for (const item of raw_line_items) {
+					const sku = (
+						item.variant_sku || 
+						item.sku || 
+						item.barcode || 
+						"KHONG_MA_SKU"
+					).trim().toUpperCase();
+
+					let full_name = item.variant_name || item.product_name || item.name || "Sản phẩm";
+					if (item.variant_title && !full_name.includes(item.variant_title)) {
+						full_name = `${full_name} - ${item.variant_title}`;
+					}
+
+					const qty = Number(item.quantity) || 1;
+					const brand = extract_brand_name(item, full_name);
+
+					if (!item_map[sku]) {
+						item_map[sku] = { sku: sku, name: full_name, brand: brand, qty: 0 };
+					}
+
+					item_map[sku].qty += qty;
+					total_qty += qty;
+				}
+			} catch (err: any) {
+				console.warn(`[Gom Hàng Sapo] Timeout/Lỗi đơn ${clean_query}:`, err.message);
+				failed_orders.push(clean_query);
+			}
+		}
+
+		// Chạy song song từng đợt 8 đơn
+		const BATCH_SIZE = 8;
+		for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
+			const batch = order_ids.slice(i, i + BATCH_SIZE);
+			await Promise.all(batch.map(id => fetchSingleOrder(id)));
+		}
+
+		const raw_items = Object.values(item_map);
+
+		// Tính tổng số lượng hàng cần nhặt của từng hãng
+		const brand_total_qty: Record<string, number> = {};
+		for (const item of raw_items) {
+			brand_total_qty[item.brand] = (brand_total_qty[item.brand] || 0) + item.qty;
+		}
+
+		// Sắp xếp đa tầng: Tổng số lượng hãng -> Tên hãng A-Z -> Số lượng từng sản phẩm
+		const sorted_items = raw_items.sort((a, b) => {
+			const totalA = brand_total_qty[a.brand] || 0;
+			const totalB = brand_total_qty[b.brand] || 0;
+
+			if (totalB !== totalA) {
+				return totalB - totalA;
+			}
+
+			const brandComp = a.brand.localeCompare(b.brand, 'vi');
+			if (brandComp !== 0) {
+				return brandComp;
+			}
+
+			return b.qty - a.qty;
+		});
+
+		return {
+			success: true,
+			found_orders_count: successful_orders.size,
+			failed_orders: failed_orders,
+			items: sorted_items,
+			total_qty: total_qty
+		};
+
+	} catch (e: any) {
+		console.error("Lỗi Gom Hàng Sapo:", e);
+		return { success: false, message: "Không thể kết nối API Sapo để gom hàng!" };
+	}
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ DỮ LIỆU SAPO HOẶC TÊN SẢN PHẨM
 function extract_brand_name(item: any, full_name: string): string {
