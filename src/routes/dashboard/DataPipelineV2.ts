@@ -1076,7 +1076,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 3.5: ĐƯA VỀ VVIP -> TÍNH TỔNG VVIP -> GỬI TRỌN BỘ FIELD CHIẾT KHẤU SAPO
+		// 🟢 BƯỚC 3.5: ĐƯA VỀ VVIP -> TÍNH TỔNG VVIP -> TRỪ THẲNG VÀO ĐƠN GIÁ (PRICE)
 		// =========================================================================
 		let custom_3ce_discount_rate = 0;
 		if (customer_policy) {
@@ -1122,35 +1122,40 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			? custom_3ce_discount_rate 
 			: volume_discount_3ce_rate;
 
-		// 4. Chuẩn bị payload gửi đúng bộ nhận diện chiết khấu của Sapo
+		// 4. Trừ chiết khấu trực tiếp vào đơn giá (final_price)
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
 
 		for (const stg of staging_items) {
-			const final_unit_price = stg.target_price; // Đơn giá VVIP gốc (VD: 233.000)
-			let discount_per_unit = 0;                  // Số tiền giảm trên 1 sản phẩm
-			let discount_rate_percent = 0;              // % giảm (VD: 1, 2, 3)
+			// Luôn lấy mốc gốc là giá VVIP chuẩn
+			const base_vvip_price = (stg.is3CE && stg.raw_price_vvip && stg.raw_price_vvip > 0)
+				? stg.raw_price_vvip
+				: stg.target_price;
+
+			let final_price = base_vvip_price;
 			let rule_desc = stg.applied_rule;
 
-			if (stg.is3CE && effective_3ce_rate > 0) {
-				discount_rate_percent = Number((effective_3ce_rate * 100).toFixed(2));
-				discount_per_unit = Math.round(final_unit_price * effective_3ce_rate);
+			if (stg.is3CE) {
+				rule_desc = rule_desc ? `${rule_desc}` : `Giá VVIP`;
 
-				const reason = custom_3ce_discount_rate > 0 
-					? `CK riêng khách ${discount_rate_percent}%` 
-					: `CK 3CE ${discount_rate_percent}% (Tổng VVIP: ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ)`;
+				if (effective_3ce_rate > 0) {
+					// 🟢 TRỪ THẲNG CHIẾT KHẤU VÀO ĐƠN GIÁ
+					final_price = Math.round(base_vvip_price * (1 - effective_3ce_rate));
+					const ck_percent = Number((effective_3ce_rate * 100).toFixed(2));
 
-				rule_desc = rule_desc ? `${rule_desc} + ${reason}` : reason;
+					const reason = custom_3ce_discount_rate > 0 
+						? `CK riêng khách ${ck_percent}%` 
+						: `CK 3CE ${ck_percent}% (Tổng VVIP: ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ)`;
+
+					rule_desc = `${rule_desc} + ${reason}`;
+				}
 			}
 
-			const target_total_discount = discount_per_unit * stg.qty;
+			// So sánh đơn giá mới tính được với đơn giá đang lưu trên đơn hàng Sapo
+			const is_price_changed = Math.abs(final_price - stg.current_price) > 0;
 
-			// So sánh xem giá hoặc chiết khấu có thay đổi không
-			const is_price_changed = Math.abs(final_unit_price - stg.current_price) > 0;
-			const is_discount_changed = Math.abs(target_total_discount - stg.current_discount) > 0;
-
-			if (is_price_changed || is_discount_changed) {
+			if (is_price_changed) {
 				updated_items_count++;
 				details.push({
 					stt: stg.stt,
@@ -1158,27 +1163,20 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					name: stg.item_name,
 					quantity: stg.qty,
 					old_price: stg.current_price,
-					new_price: final_unit_price, // Đơn giá gốc VVIP
-					discount: discount_per_unit,  // Số tiền chiết khấu mỗi cái
-					discount_rate: discount_rate_percent, // % chiết khấu
+					new_price: final_price, // Hiển thị giá mới đã trừ chiết khấu (VD: 230.670đ)
 					rule: rule_desc,
 					note: stg.item.note || "",
 					changed: true
 				});
 			}
 
-			// 🟢 GỬI ĐẦY ĐỦ BỘ TRƯỜNG CHIẾT KHẤU CHUẨN CỦA SAPO
+			// 🟢 GỬI ĐÚNG CẤU TRÚC CODE CŨ ĐẢM BẢO SAPO CẬP NHẬT ĐƠN GIÁ NGAY LẬP TỨC
 			cleaned_payload_line_items.push({
 				id: stg.item.id,
 				product_id: stg.item.product_id,
 				variant_id: stg.item.variant_id,
-				price: final_unit_price,
-				quantity: stg.item.quantity,
-				// Bộ 4 trường kích hoạt ô Chiết khấu:
-				discount_type: effective_3ce_rate > 0 ? "percentage" : "none",
-				discount_rate: discount_rate_percent,
-				discount_value: discount_per_unit,
-				discount_amount: target_total_discount
+				price: final_price,
+				quantity: stg.item.quantity
 			});
 		}
 
@@ -1203,7 +1201,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				let extraNote = "";
 
 				if (effective_3ce_rate > 0) {
-					extraNote = ` (Đã đưa về giá VVIP và áp dụng chiết khấu ${effective_3ce_rate * 100}% vào ô Chiết khấu. Tổng VVIP: ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ)`;
+					extraNote = ` (Đã đưa về giá VVIP và tự động giảm ${effective_3ce_rate * 100}% vào đơn giá từng món 3CE. Tổng tiền VVIP: ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ)`;
 				} else if (has_ck_request) {
 					extraNote = ` (Lưu ý: Có ghi chú CK3CE nhưng tổng doanh số 3CE tính theo VVIP chỉ đạt ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ, chưa đủ ngưỡng 10.000.000đ)`;
 				}
@@ -1222,7 +1220,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			return {
 				success: true,
 				order_code: order.code || clean_query,
-				message: "Bảng giá hợp lệ. Đơn hàng đã ở mức giá và chiết khấu chuẩn xác, không cần thay đổi!",
+				message: "Bảng giá hợp lệ. Đơn hàng đã ở mức giá chuẩn xác, không cần thay đổi!",
 				details: []
 			};
 		}
@@ -1230,6 +1228,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		console.error("Lỗi điều chỉnh giá:", e);
 		return { success: false, message: "Không thể xử lý đơn hàng: " + (e.message || "") };
 	}
+}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ DỮ LIỆU SAPO HOẶC TÊN SẢN PHẨM
