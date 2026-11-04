@@ -1076,7 +1076,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 3.5: ĐƯA VỀ GIÁ VVIP TRƯỚC -> TÍNH TỔNG TIỀN THEO VVIP -> XÁC ĐỊNH % CK
+		// 🟢 BƯỚC 3.5: ĐƯA VỀ VVIP -> TÍNH TỔNG VVIP -> GỬI TRỌN BỘ FIELD CHIẾT KHẤU SAPO
 		// =========================================================================
 		let custom_3ce_discount_rate = 0;
 		if (customer_policy) {
@@ -1089,7 +1089,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
-		// 1. Chuyển trước giá 3CE về giá VVIP (nếu có giá VVIP từ Sapo)
+		// 1. Chuyển giá cơ sở của tất cả sản phẩm 3CE về giá VVIP gốc từ Variant
 		for (const stg of staging_items) {
 			if (stg.is3CE && stg.raw_price_vvip && stg.raw_price_vvip > 0) {
 				stg.target_price = stg.raw_price_vvip;
@@ -1097,7 +1097,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
-		// 2. Tính tổng tiền 3CE theo đơn giá VVIP
+		// 2. Tính tổng tiền 3CE dựa trên đơn giá VVIP vừa chuyển
 		let total_3ce_vvip_amount = 0;
 		for (const stg of staging_items) {
 			if (stg.is3CE) {
@@ -1105,7 +1105,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			}
 		}
 
-		// 3. Xét điều kiện chiết khấu theo tổng tiền VVIP
+		// 3. Xét điều kiện chiết khấu dựa trên tổng doanh số VVIP
 		let volume_discount_3ce_rate = 0;
 		const orderNote = String(order.note || "").toLowerCase();
 		const has_ck_request = has_ck3ce_command || orderNote.includes("ck3ce");
@@ -1122,29 +1122,31 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			? custom_3ce_discount_rate 
 			: volume_discount_3ce_rate;
 
-		// 4. Cập nhật trường discount_amount chuẩn của Sapo
+		// 4. Chuẩn bị payload gửi đúng bộ nhận diện chiết khấu của Sapo
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
 
 		for (const stg of staging_items) {
-			const final_unit_price = stg.target_price;
-			let discount_per_unit = 0;
+			const final_unit_price = stg.target_price; // Đơn giá VVIP gốc (VD: 233.000)
+			let discount_per_unit = 0;                  // Số tiền giảm trên 1 sản phẩm
+			let discount_rate_percent = 0;              // % giảm (VD: 1, 2, 3)
 			let rule_desc = stg.applied_rule;
 
 			if (stg.is3CE && effective_3ce_rate > 0) {
+				discount_rate_percent = Number((effective_3ce_rate * 100).toFixed(2));
 				discount_per_unit = Math.round(final_unit_price * effective_3ce_rate);
-				const ck_percent = Number((effective_3ce_rate * 100).toFixed(2));
 
 				const reason = custom_3ce_discount_rate > 0 
-					? `CK riêng khách ${ck_percent}%` 
-					: `CK 3CE ${ck_percent}% (Tổng VVIP: ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ)`;
+					? `CK riêng khách ${discount_rate_percent}%` 
+					: `CK 3CE ${discount_rate_percent}% (Tổng VVIP: ${total_3ce_vvip_amount.toLocaleString("vi-VN")}đ)`;
 
 				rule_desc = rule_desc ? `${rule_desc} + ${reason}` : reason;
 			}
 
 			const target_total_discount = discount_per_unit * stg.qty;
 
+			// So sánh xem giá hoặc chiết khấu có thay đổi không
 			const is_price_changed = Math.abs(final_unit_price - stg.current_price) > 0;
 			const is_discount_changed = Math.abs(target_total_discount - stg.current_discount) > 0;
 
@@ -1156,25 +1158,27 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					name: stg.item_name,
 					quantity: stg.qty,
 					old_price: stg.current_price,
-					new_price: final_unit_price,
-					discount: discount_per_unit,
+					new_price: final_unit_price, // Đơn giá gốc VVIP
+					discount: discount_per_unit,  // Số tiền chiết khấu mỗi cái
+					discount_rate: discount_rate_percent, // % chiết khấu
 					rule: rule_desc,
 					note: stg.item.note || "",
 					changed: true
 				});
 			}
 
-		// Gửi đủ bộ nhận diện chiết khấu của Sapo:
+			// 🟢 GỬI ĐẦY ĐỦ BỘ TRƯỜNG CHIẾT KHẤU CHUẨN CỦA SAPO
 			cleaned_payload_line_items.push({
-    			id: stg.item.id,
-    			product_id: stg.item.product_id,
-    			variant_id: stg.item.variant_id,
-    			price: final_unit_price, // 233.000đ
-    			quantity: stg.item.quantity,
-    			discount_type: effective_3ce_rate > 0 ? "percentage" : "none",
-			    discount_rate: effective_3ce_rate > 0 ? Number((effective_3ce_rate * 100).toFixed(2)) : 0,
-    			discount_value: discount_per_unit, // 2.330đ trên 1 món
-    			discount_amount: target_total_discount // Tổng tiền giảm của cả dòng
+				id: stg.item.id,
+				product_id: stg.item.product_id,
+				variant_id: stg.item.variant_id,
+				price: final_unit_price,
+				quantity: stg.item.quantity,
+				// Bộ 4 trường kích hoạt ô Chiết khấu:
+				discount_type: effective_3ce_rate > 0 ? "percentage" : "none",
+				discount_rate: discount_rate_percent,
+				discount_value: discount_per_unit,
+				discount_amount: target_total_discount
 			});
 		}
 
@@ -1222,11 +1226,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				details: []
 			};
 		}
-	} catch (e: any) {
-		console.error("Lỗi điều chỉnh giá:", e);
-		return { success: false, message: "Không thể xử lý đơn hàng: " + (e.message || "") };
-	}
-}
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ DỮ LIỆU SAPO HOẶC TÊN SẢN PHẨM
 function extract_brand_name(item: any, full_name: string): string {
