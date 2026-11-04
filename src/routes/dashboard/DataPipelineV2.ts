@@ -1229,7 +1229,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		return { success: false, message: "Không thể xử lý đơn hàng: " + (e.message || "") };
 	}
 }
-}
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 🟢 HÀM BÓC TÁCH TÊN NHÃN HIỆU TỪ DỮ LIỆU SAPO HOẶC TÊN SẢN PHẨM
 function extract_brand_name(item: any, full_name: string): string {
