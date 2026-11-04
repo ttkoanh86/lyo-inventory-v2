@@ -1164,13 +1164,17 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				});
 			}
 
+		// Gửi đủ bộ nhận diện chiết khấu của Sapo:
 			cleaned_payload_line_items.push({
-				id: stg.item.id,
-				product_id: stg.item.product_id,
-				variant_id: stg.item.variant_id,
-				price: final_unit_price,
-				quantity: stg.item.quantity,
-				discount_amount: target_total_discount
+    			id: stg.item.id,
+    			product_id: stg.item.product_id,
+    			variant_id: stg.item.variant_id,
+    			price: final_unit_price, // 233.000đ
+    			quantity: stg.item.quantity,
+    			discount_type: effective_3ce_rate > 0 ? "percentage" : "none",
+			    discount_rate: effective_3ce_rate > 0 ? Number((effective_3ce_rate * 100).toFixed(2)) : 0,
+    			discount_value: discount_per_unit, // 2.330đ trên 1 món
+    			discount_amount: target_total_discount // Tổng tiền giảm của cả dòng
 			});
 		}
 
