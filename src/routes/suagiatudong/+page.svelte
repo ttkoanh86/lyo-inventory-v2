@@ -113,7 +113,7 @@
 			</li>
 
 			<li>
-				<b>Gộp số lượng các dòng:</b> Ghi kèm số thứ tự dòng cách nhau bởi dấu phẩy (Ví dụ: <b><code>ĐL: 1,2</code></b> hoặc <b><code>SL20: 3,4,5</code></b> hoặc <b><code>SL500: 1,3</code></b>).
+				<b>Gộp số lượng các dòng:</b> Ghi kèm số thứ tự dòng cách nhau bởi dấu phẩy (Ví dụ: <b><code>ĐL: 1,2</code></b> hoặc <b><code>SL20: 3,4,5</code></b> hoặc <b><code>SLL: 1,3</code></b>).
 			</li>
 
 			<li>
