@@ -96,7 +96,7 @@
 				<b><code>ĐL</code></b> (Đại lý, SL &ge; 100) | 
 				<b><code>VVIP</code></b> (SL &ge; 50, hoặc 30/40 theo khách riêng) | 
 				<b><code>SL20</code></b> (SL &ge; 20) | 
-				<b><code>SL[Số lượng]</code></b> (SL &ge; 200, 500, 1000... theo bảng giá SKU trên Sheet).
+				<b><code>SLL</code></b> (Số Lượng Lớn: Tự động đối chiếu số lượng thực tế theo bảng giá SKU trên Sheet).
 			</li>
 
 			<li class="rule-highlight-yellow">
