@@ -790,10 +790,29 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 		}
 
 		// =========================================================================
-		// 🟢 BƯỚC 2: PHÂN TÍCH NOTE & KIỂM TRA ĐIỀU KIỆN TỪNG DÒNG
+		// 🟢 BƯỚC 2: PHÂN TÍCH NOTE & KIỂM TRA ĐIỀU KIỆN TỪNG DÒNG (HỖ TRỢ SLL)
 		// =========================================================================
 		const line_price_targets: Record<number, { tier: string; rule: string; from_line: number; direct_price?: number }> = {};
 		let has_ck3ce_command = false;
+
+		// Hàm tra cứu giá mốc tối ưu nhất trong sheet GIA_SO_LUONG_LON
+		const findSheetBulkPrice = (targetSku: string, actualQty: number, explicitMin?: number) => {
+			const skuRules = BULK_TIER_PRICING.filter((r: any) => r.sku === targetSku);
+			if (!skuRules || skuRules.length === 0) return null;
+
+			// Nếu nhân viên chỉ định mốc cụ thể (ví dụ SL54, SL90)
+			if (explicitMin && explicitMin > 0) {
+				const exact = skuRules.find((r: any) => r.min_qty === explicitMin);
+				if (exact && actualQty >= exact.min_qty) return exact;
+			}
+
+			// Tự động lấy mốc số lượng cao nhất mà số lượng thực tế đạt được
+			const validRules = skuRules
+				.filter((r: any) => actualQty >= r.min_qty)
+				.sort((a: any, b: any) => b.min_qty - a.min_qty);
+
+			return validRules.length > 0 ? validRules[0] : null;
+		};
 
 		for (let index = 0; index < raw_line_items.length; index++) {
 			const item = raw_line_items[index];
@@ -818,6 +837,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				continue;
 			}
 
+			// Đặc quyền VVIP theo hãng riêng của khách
 			const brand_match = item_note.match(/^VVIP\s*([A-Z0-9]+)$/i);
 			if (brand_match && !["30", "40", "50", "100", "20", "200", "500", "1000"].includes(brand_match[1])) {
 				const brand_code = brand_match[1].toUpperCase();
@@ -843,31 +863,48 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				continue;
 			}
 
+			// Nhận diện cú pháp: SLL, ĐL, VVIP, hoặc SL[Số lượng]
+			const is_sll_note = /^(?:SLL|SL\s*LON|GIA\s*SLL)(?:[:\s-]|$)/i.test(item_note);
 			const bulkMatch = item_note.match(/^(?:ĐL|DL|VVIP|SL\s*(\d+))(?:[:\s-]|$)/i);
-			if (!bulkMatch) {
-				syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú "${item_note}" sai cú pháp (Chấp nhận: ĐL, VVIP, SL20, SL[Số lượng], VVIP + Tên Hãng, hoặc CK3CE)`);
+
+			if (!is_sll_note && !bulkMatch) {
+				syntax_errors.push(`Dòng ${current_stt} ("${item_name}"): Ghi chú "${item_note}" sai cú pháp (Chấp nhận: SLL, ĐL, VVIP, SL20, SL[Số lượng], VVIP + Tên Hãng, hoặc CK3CE)`);
 				continue;
 			}
 
 			let tier = "";
 			let min_req = 0;
 			let is_custom_bulk_tier = false;
+			let after_prefix = "";
 
-			if (item_note.startsWith("ĐL") || item_note.startsWith("DL")) {
-				tier = "ĐL";
-				min_req = 100;
-			} else if (item_note.startsWith("VVIP")) {
-				tier = "VVIP";
-				min_req = (customer_policy && customer_policy.vvip_min_qty) ? customer_policy.vvip_min_qty : 50;
-			} else if (bulkMatch[1]) {
-				const parsedQty = parseInt(bulkMatch[1], 10);
-				min_req = parsedQty;
-				tier = `SL${parsedQty}`;
-				if (parsedQty > 100) is_custom_bulk_tier = true;
+			if (is_sll_note) {
+				tier = "SLL";
+				is_custom_bulk_tier = true;
+				after_prefix = item_note.replace(/^(?:SLL|SL\s*LON|GIA\s*SLL)\s*[:\s-]*/i, "").trim();
+			} else if (bulkMatch) {
+				after_prefix = item_note.replace(/^(?:ĐL|DL|VVIP|SL\s*\d+)\s*[:\s-]*/i, "").trim();
+
+				if (item_note.startsWith("ĐL") || item_note.startsWith("DL")) {
+					tier = "ĐL";
+					min_req = 100;
+				} else if (item_note.startsWith("VVIP")) {
+					tier = "VVIP";
+					min_req = (customer_policy && customer_policy.vvip_min_qty) ? customer_policy.vvip_min_qty : 50;
+				} else if (bulkMatch[1]) {
+					const parsedQty = parseInt(bulkMatch[1], 10);
+					min_req = parsedQty;
+					tier = `SL${parsedQty}`;
+
+					const hasSheetRule = BULK_TIER_PRICING.some((r: any) => r.sku === item_sku);
+					if (hasSheetRule && parsedQty !== 20) {
+						is_custom_bulk_tier = true;
+					} else if (parsedQty > 100) {
+						is_custom_bulk_tier = true;
+					}
+				}
 			}
 
-			const after_prefix = item_note.replace(/^(?:ĐL|DL|VVIP|SL\s*\d+)\s*[:\s-]*/i, "").trim();
-
+			// Xử lý gộp dòng (VD: SLL 1,3 hoặc SL20 1,3)
 			if (after_prefix.length > 0) {
 				const is_valid_syntax_lines = /^[\d,\s]+$/.test(after_prefix);
 				if (!is_valid_syntax_lines) {
@@ -919,7 +956,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					continue;
 				}
 
-				if (sum_qty < min_req) {
+				if (!is_custom_bulk_tier && sum_qty < min_req) {
 					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" gộp dòng (${line_numbers.join(",")}) nhưng tổng SL (${sum_qty}) chưa đủ ngưỡng ${min_req}`);
 					continue;
 				}
@@ -929,43 +966,50 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					const t_sku = String(target_item.sku || "").trim().toUpperCase();
 
 					let directPrice: number | undefined = undefined;
+					let appliedTierName = tier;
+
 					if (is_custom_bulk_tier) {
-						const rule = BULK_TIER_PRICING.find(r => r.sku === t_sku && min_req >= r.min_qty);
+						const rule = findSheetBulkPrice(t_sku, sum_qty, min_req > 0 ? min_req : undefined);
 						if (rule) {
 							directPrice = rule.price;
+							appliedTierName = `SLL mốc ${rule.min_qty}`;
 						} else {
-							syntax_errors.push(`Dòng ${ln} (SKU: ${t_sku}): Chưa khai báo giá cho mốc ${tier} trên Sheet GIA_SO_LUONG_LON!`);
+							syntax_errors.push(`Dòng ${ln} (SKU: ${t_sku}): Tổng SL gộp (${sum_qty}) chưa đạt mốc nào hoặc chưa khai báo trên Sheet GIA_SO_LUONG_LON!`);
 							continue;
 						}
 					}
 
 					line_price_targets[ln - 1] = {
-						tier: tier,
-						rule: `Giá ${tier} (Gộp dòng ${line_numbers.join(",")}: ${sum_qty} SP | Yêu cầu: ${min_req})`,
+						tier: appliedTierName,
+						rule: `Giá ${appliedTierName} (Gộp dòng ${line_numbers.join(",")}: ${sum_qty} SP)`,
 						from_line: current_stt,
 						direct_price: directPrice
 					};
 				}
 			} else {
-				if (qty < min_req) {
-					syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" nhưng số lượng (${qty}) chưa đạt ngưỡng tối thiểu ${min_req}`);
-					continue;
-				}
-
+				// Xử lý đơn lẻ từng dòng
 				let directPrice: number | undefined = undefined;
+				let appliedTierName = tier;
+
 				if (is_custom_bulk_tier) {
-					const rule = BULK_TIER_PRICING.find(r => r.sku === item_sku && min_req >= r.min_qty);
+					const rule = findSheetBulkPrice(item_sku, qty, min_req > 0 ? min_req : undefined);
 					if (rule) {
 						directPrice = rule.price;
+						appliedTierName = `SLL mốc ${rule.min_qty}`;
 					} else {
-						syntax_errors.push(`Dòng ${current_stt} (SKU: ${item_sku}): Chưa khai báo giá cho mốc ${tier} trên Sheet GIA_SO_LUONG_LON!`);
+						syntax_errors.push(`Dòng ${current_stt} (SKU: ${item_sku}): Số lượng (${qty}) chưa đạt mốc nào hoặc chưa khai báo trên Sheet GIA_SO_LUONG_LON!`);
+						continue;
+					}
+				} else {
+					if (qty < min_req) {
+						syntax_errors.push(`Dòng ${current_stt}: Ghi chú "${tier}" nhưng số lượng (${qty}) chưa đạt ngưỡng tối thiểu ${min_req}`);
 						continue;
 					}
 				}
 
 				line_price_targets[index] = {
-					tier: tier,
-					rule: `Giá ${tier} (Đơn lẻ: ${qty} SP | Yêu cầu: ${min_req})`,
+					tier: appliedTierName,
+					rule: `Giá ${appliedTierName} (Đơn lẻ: ${qty} SP)`,
 					from_line: current_stt,
 					direct_price: directPrice
 				};
@@ -996,10 +1040,18 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				});
 				if (var_resp.status === 200 && var_resp.data?.variant) {
 					const prices = var_resp.data.variant.variant_prices || [];
-					const extractPrice = (keys: string[]) => {
+					
+					const extractPriceByRule = (targetListId: number, nameKeywords: string[]) => {
+						for (const p of prices) {
+							const listId = Number(p.price_list_id || p.pricelist_id || 0);
+							if (listId === targetListId) {
+								const val = Number(p.price || p.value || 0);
+								if (val > 0) return val;
+							}
+						}
 						for (const p of prices) {
 							const strData = JSON.stringify(p).toUpperCase();
-							if (keys.some(k => strData.includes(k))) {
+							if (nameKeywords.some(k => strData.includes(k))) {
 								const val = Number(p.price || p.value || 0);
 								if (val > 0) return val;
 							}
@@ -1008,9 +1060,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 					};
 
 					variant_price_cache[vId] = {
-						daily: extractPrice(["DAI LY", "DAILY", "ĐẠI LÝ", "SL100"]),
-						vvip: extractPrice(["BANBUON", "VVIP", "SL50"]),
-						sl20: extractPrice(["1SP SL20", "SL20", "1SP_SL20"])
+						daily: extractPriceByRule(0, ["DAI LY", "DAILY", "ĐẠI LÝ", "SL100", "SL 100"]),
+						vvip: extractPriceByRule(2387384, ["BANBUON", "VVIP", "SL50", "SL 50"]),
+						sl20: extractPriceByRule(2387396, ["SL20", "SL 20", "1SP SL20", "1SP_SL20", "1SP SL 20"])
 					};
 				}
 			} catch (e) {
@@ -1122,13 +1174,12 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 			? custom_3ce_discount_rate 
 			: volume_discount_3ce_rate;
 
-		// 4. Trừ chiết khấu trực tiếp vào đơn giá (final_price)
+		// 4. Trừ chiết khấu trực tiếp vào đơn giá (final_price) & Chuẩn bị danh sách hiển thị
 		let updated_items_count = 0;
 		let details: any[] = [];
 		let cleaned_payload_line_items: any[] = [];
 
 		for (const stg of staging_items) {
-			// Luôn lấy mốc gốc là giá VVIP chuẩn
 			const base_vvip_price = (stg.is3CE && stg.raw_price_vvip && stg.raw_price_vvip > 0)
 				? stg.raw_price_vvip
 				: stg.target_price;
@@ -1140,7 +1191,6 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				rule_desc = rule_desc ? `${rule_desc}` : `Giá VVIP`;
 
 				if (effective_3ce_rate > 0) {
-					// 🟢 TRỪ THẲNG CHIẾT KHẤU VÀO ĐƠN GIÁ
 					final_price = Math.round(base_vvip_price * (1 - effective_3ce_rate));
 					const ck_percent = Number((effective_3ce_rate * 100).toFixed(2));
 
@@ -1152,25 +1202,28 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				}
 			}
 
-			// So sánh đơn giá mới tính được với đơn giá đang lưu trên đơn hàng Sapo
 			const is_price_changed = Math.abs(final_price - stg.current_price) > 0;
+			const has_rule_applied = Boolean(rule_desc && rule_desc.trim().length > 0);
 
 			if (is_price_changed) {
 				updated_items_count++;
+			}
+
+			// Đẩy lên bảng kết quả nếu có thay đổi giá HOẶC có quy tắc áp dụng (SL20, VVIP, SLL, CK3CE...)
+			if (is_price_changed || has_rule_applied) {
 				details.push({
 					stt: stg.stt,
 					sku: stg.item.sku || "N/A",
 					name: stg.item_name,
 					quantity: stg.qty,
 					old_price: stg.current_price,
-					new_price: final_price, // Hiển thị giá mới đã trừ chiết khấu (VD: 230.670đ)
-					rule: rule_desc,
+					new_price: final_price,
+					rule: rule_desc || "Giữ nguyên giá chuẩn",
 					note: stg.item.note || "",
-					changed: true
+					changed: is_price_changed
 				});
 			}
 
-			// 🟢 GỬI ĐÚNG CẤU TRÚC CODE CŨ ĐẢM BẢO SAPO CẬP NHẬT ĐƠN GIÁ NGAY LẬP TỨC
 			cleaned_payload_line_items.push({
 				id: stg.item.id,
 				product_id: stg.item.product_id,
@@ -1179,6 +1232,9 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				quantity: stg.item.quantity
 			});
 		}
+
+		// Sắp xếp lại danh sách details theo đúng thứ tự dòng (STT 1, 2, 3...)
+		details.sort((a, b) => a.stt - b.stt);
 
 		// =========================================================================
 		// 🟢 BƯỚC 4: CẬP NHẬT LÊN SAPO
@@ -1221,7 +1277,7 @@ export async function adjust_order_prices_auto(order_code_or_id: string) {
 				success: true,
 				order_code: order.code || clean_query,
 				message: "Bảng giá hợp lệ. Đơn hàng đã ở mức giá chuẩn xác, không cần thay đổi!",
-				details: []
+				details: details
 			};
 		}
 	} catch (e: any) {
